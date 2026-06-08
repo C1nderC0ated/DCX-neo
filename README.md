@@ -388,7 +388,7 @@ DCX neo focuses on the commands that have a **real, documented effect**, such as
 
 ## Credits
 
-- **AnOrmaluser12** — original author.
+- **AnOrmaluser12** — original author. (@AnOrmaluser12)
 - **S1nt3r** — updates and fixes.
 
 DCX is provided **as-is, with no warranty**. You are responsible for any
