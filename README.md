@@ -1,5 +1,7 @@
 # DCX neo — Android Optimization Toolkit
 
+<img width="224" height="117" alt="image" src="https://github.com/user-attachments/assets/36b493c2-fd83-4c39-a224-6f3d3a6d60d3" />
+
 DCX neo is a Windows batch (`.bat`) front-end for **ADB** that bundles a large
 collection of Android performance, battery and diagnostic tweaks behind a
 simple text menu. Instead of typing dozens of `adb shell` commands by hand,
