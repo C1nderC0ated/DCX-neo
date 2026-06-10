@@ -395,3 +395,10 @@ DCX neo focuses on the commands that have a **real, documented effect**, such as
 
 DCX is provided **as-is, with no warranty**. You are responsible for any
 changes you apply to your device.
+
+---
+
+## License & Media Notice
+This project's source code is licensed under the GNU GPLv3. 
+
+Exception: The image file [4152900.jpg] is excluded from the GPL-3.0 license. It is owned by its respective creator and is included strictly for personal, non-commercial display. If you fork or reuse this project, you must remove or replace this image.
