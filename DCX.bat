@@ -87,6 +87,9 @@ for /f "delims=" %%i in ('adb shell getprop ro.build.version.sdk 2^>nul') do set
 :: Strip trailing CR if any
 if defined SDK set "SDK=%SDK:~0,3%"
 if defined SDK for /f "tokens=* delims= " %%a in ("%SDK%") do set "SDK=%%a"
+:: Normalise: if detection failed, default to 0 so numeric `if %SDK% GEQ N`
+:: comparisons later never break on an empty value.
+if not defined SDK set "SDK=0"
 :: Capture device model for friendlier messages
 set "MODEL="
 for /f "delims=" %%i in ('adb shell getprop ro.product.model 2^>nul') do set "MODEL=%%i"
@@ -625,7 +628,7 @@ set count=0
 title 2nd Setup
 cls
 call :logo
-adb shell cmd package bg-dexopt-job
+call :run_bgdexopt
 cls
 call :logo
 set /a count+=1
@@ -779,10 +782,10 @@ title Compile All Apps : %ca_mode%
 echo Compiling all installed packages with mode "%ca_mode%"...
 echo This may take a long time. Do not unplug the device.
 echo.
-adb shell pm compile -a -f -m %ca_mode%
+call :dexopt_all_mode %ca_mode% 0
 echo.
 echo Running background dexopt job...
-adb shell pm bg-dexopt-job
+call :run_bgdexopt
 echo.
 echo Done. Press any key to go back.
 pause > nul
@@ -815,16 +818,19 @@ choice /c:YN /n > nul
 if errorlevel 2 goto compileall
 cls
 title Compile All Apps : Heaviest (running)
-echo [1/3] Full compilation of all apps (--check-prof false -m everything)...
+echo [1/3] Full compilation of all apps...
 echo This may take a long time. Do not unplug the device.
-adb shell pm compile -a -f --check-prof false -m everything
+:: On Android 13 and below this passes --check-prof false (compile ALL
+:: methods, not just profiled ones). On Android 14+ that flag was
+:: removed, so the helper drops it and uses the ART-Service-routed form.
+call :dexopt_all_mode everything 1
 echo.
 echo [2/3] Compiling layout resources (if supported)...
 :: --compile-layouts is a STANDALONE mode: it cannot be combined with
 :: -f / -m / --check-prof (doing so throws "Unknown option"). It also
 :: only exists on Android 10-11 - the view compiler was removed in
-:: Android 12+, and pm compile itself is gone on Android 14+ (replaced
-:: by ART Service). So we run it on its own and detect non-support.
+:: Android 12+, and is handled by ART Service from 14+. So we run it on
+:: its own and detect non-support.
 adb shell pm compile -a --compile-layouts > "%TEMP%\dcx_layouts.txt" 2>&1
 findstr /I /C:"Unknown option" /C:"Error:" /C:"Usage:" "%TEMP%\dcx_layouts.txt" > nul
 if errorlevel 1 (
@@ -837,7 +843,7 @@ if errorlevel 1 (
 del "%TEMP%\dcx_layouts.txt" > nul 2>&1
 echo.
 echo [3/3] Running background dexopt job...
-adb shell pm bg-dexopt-job
+call :run_bgdexopt
 echo.
 echo Done. Press any key to go back.
 pause > nul
@@ -1510,7 +1516,7 @@ title bg-dexopt-job is running
 call :logo
 echo.
 echo.
-adb shell cmd package bg-dexopt-job
+call :run_bgdexopt
 echo %c%Done%w%, Press Any Button To Go Back
 pause > nul
 goto Optimize
@@ -1577,7 +1583,6 @@ echo Valid modes: speed, speed-profile, verify, quicken, everything
 echo Recommended: speed (best performance, slower install)
 echo.
 set /p mode="Choose A Mode >> "
-
 :: FIX: validate mode against the list ART actually accepts
 set "modeok=0"
 for %%m in (speed speed-profile verify quicken everything everything-profile) do (
@@ -1751,7 +1756,6 @@ echo.
 set "TS=%date:~-4%%date:~3,2%%date:~0,2%_%time:~0,2%%time:~3,2%%time:~6,2%"
 set "TS=%TS: =0%"
 set "WLREPORT=%TEMP%\dcx_wakelocks_%TS%.txt"
-
 (
     echo ===========================================================
     echo  DCX Wake-Lock Audit - %date% %time%
@@ -1975,7 +1979,6 @@ if "%ah%"=="2" (
 )
 if "%ah%"=="3" goto nextpage
 goto apphibernation
-
 :: ===================================================================
 :: NEW: Account Sync toggle (from Balanced.bat)
 :: Master switch for ALL account auto-sync (Google contacts, calendar,
@@ -2014,7 +2017,6 @@ if "%sm%"=="2" (
 )
 if "%sm%"=="3" goto nextpage
 goto syncmaster
-
 :: ===================================================================
 :: NEW: Voice Hotword toggle (from Balanced.bat)
 :: Disables passive voice listening ("Hey Google" / "Alexa" / "Bixby").
@@ -3189,7 +3191,6 @@ adb shell settings remove system air_motion_wake_up > nul 2>&1
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
-
 ::zram
 :zram
 @echo off
@@ -3754,7 +3755,6 @@ title GMS : On
 echo Press Any Button To Go Back
 pause > nul
 goto Gaming
-
 :: thermal
 :thermal
 @echo off
@@ -4211,4 +4211,66 @@ adb shell cmd dropbox add-low-priority SYSTEM_BOOT
 adb shell cmd dropbox add-low-priority SYSTEM_AUDIT
 adb shell cmd dropbox add-low-priority system_server_wtf
 adb shell cmd dropbox add-low-priority SYSTEM_LAST_KMSG
+exit /b
+:: ===================================================================
+:: SHARED HELPER: dexopt_all_mode  <filter>  <heavy_flag>
+::
+:: Compiles ALL installed apps with the given compiler filter, picking
+:: the right command for the device's Android version:
+::
+::   Android 13 and below : the package-manager dexopt path.
+::     - heavy_flag "1" adds `--check-prof false` (compile every method,
+::       not just profiled hot ones) for the Heaviest mode.
+::
+::   Android 14 and above : dexopt is handled by ART Service. The plain
+::     `pm compile -m <filter> -f -a` still works (it is transparently
+::     routed to ART Service) but the removed flags `--check-prof` and
+::     `--compile-layouts` must NOT be passed - they throw "Unknown
+::     option". So on 14+ we drop them.
+:: ===================================================================
+:dexopt_all_mode
+if %SDK% GEQ 34 goto _dexall_art
+if "%~2"=="1" goto _dexall_heavy_legacy
+echo   [pm dexopt / API %SDK%] pm compile -a -f -m %~1
+adb shell pm compile -a -f -m %~1
+exit /b
+
+:_dexall_heavy_legacy
+echo   [pm dexopt / API %SDK%] pm compile -a -f --check-prof false -m %~1
+adb shell pm compile -a -f --check-prof false -m %~1
+exit /b
+
+:_dexall_art
+echo   [ART Service / API %SDK%] pm compile -m %~1 -f -a
+adb shell pm compile -m %~1 -f -a
+exit /b
+:: ===================================================================
+:: SHARED HELPER: run_bgdexopt
+::
+:: Forces the background dexopt job, version-aware:
+::
+::   Android 13 and below : `pm bg-dexopt-job` (package-manager path).
+::
+::   Android 14 and above : prefer the native ART Service command
+::     `pm art dexopt-packages -r bg-dexopt`. If a particular build
+::     doesn't expose `pm art` (older 14 images, some OEMs), fall back
+::     to `pm bg-dexopt-job`, which is still routed to ART Service.
+:: ===================================================================
+:run_bgdexopt
+if %SDK% LSS 34 goto _bgdex_legacy
+echo   [ART Service / API %SDK%] pm art dexopt-packages -r bg-dexopt
+adb shell pm art dexopt-packages -r bg-dexopt > "%TEMP%\dcx_bgdex.txt" 2>&1
+findstr /I /C:"Unknown" /C:"Error" /C:"Usage" "%TEMP%\dcx_bgdex.txt" > nul && goto _bgdex_fallback
+type "%TEMP%\dcx_bgdex.txt"
+del "%TEMP%\dcx_bgdex.txt" > nul 2>&1
+exit /b
+
+:_bgdex_fallback
+echo   pm art unavailable on this build - using pm bg-dexopt-job...
+adb shell pm bg-dexopt-job
+del "%TEMP%\dcx_bgdex.txt" > nul 2>&1
+exit /b
+
+:_bgdex_legacy
+adb shell pm bg-dexopt-job
 exit /b
