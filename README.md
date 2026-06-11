@@ -230,10 +230,24 @@ One-shot maintenance and compilation tasks.
 | **everything** | Heaviest standard mode. |
 | **speed** | Compile hot methods only (fast). |
 | **speed-profile** | Android default behaviour. |
-| **heaviest optimization** | `--check-prof false -m everything` + layout compilation + dexopt job. Uses the most storage and time; the layout step is skipped automatically on Android 12+ where it is unsupported. |
+| **heaviest optimization** | Full `everything` compilation of all methods + layout compilation + dexopt job. Uses the most storage and time. Version-aware: on Android 13 and below it adds `--check-prof false`; on Android 14+ that flag (and the layout step) is dropped automatically because ART Service no longer accepts it. |
 
 > Compiling all apps can take **5–30+ minutes** and warms the device. Keep
 > it on a charger.
+
+#### Android version awareness (dexopt & compile)
+
+DCX neo picks the correct dexopt/compile commands for your Android version
+automatically — you don't choose anything:
+
+| Android version | What runs |
+|---|---|
+| **13 and below (API ≤ 33)** | The classic package-manager path: `pm compile -a -f -m <mode>` and `pm bg-dexopt-job`, including extra flags like `--check-prof false` in the heaviest mode. |
+| **14 and above (API ≥ 34)** | Dexopt is handled by **ART Service**. Compilation uses `pm compile -m <mode> -f -a` (still routed to ART Service) with the removed flags omitted, and the background job prefers the native `pm art dexopt-packages -r bg-dexopt`, falling back to `pm bg-dexopt-job` if a particular build doesn't expose `pm art`. |
+
+This means the same menu options work whether you're on Android 12 or
+Android 15+ — the script detects the API level on startup and routes
+accordingly.
 
 #### Tweak SurfaceFlinger
 
@@ -351,7 +365,9 @@ DCX neo focuses on the commands that have a **real, documented effect**, such as
 - **`dumpsys deviceidle force-idle`**, **app hibernation**,
   **`master_sync_status`**, **`hotword_detection_enabled`** — real
   battery-related switches.
-- **`pm compile` / `pm bg-dexopt-job` / `fstrim`** — real maintenance.
+- **`pm compile` / `pm bg-dexopt-job` / `pm art dexopt-packages` / `fstrim`**
+  — real maintenance (these are the tweaks with the most noticeable effect;
+  the compile/dexopt commands are chosen per Android version, see above).
 
 > **Note:** CPU/GPU frequency and governor changes are **not** possible via
 > `setprop` — they live in kernel sysfs and require **root**. DCX neo does not
@@ -368,9 +384,14 @@ DCX neo focuses on the commands that have a **real, documented effect**, such as
 - `settings put` and `device_config put` values (animation scales, refresh
   rate, ANGLE, sync, hotword, etc.) **do persist** across reboots without
   root.
-- On **Android 14+**, the package-manager dexopt path was replaced by **ART
-  Service**, so some `pm compile` options behave differently or are removed
-  (DCX neo handles the unsupported `--compile-layouts` case gracefully).
+- On **Android 14+**, on-device dexopt is handled by **ART Service** instead
+  of the package manager. The legacy `pm compile` / `pm bg-dexopt-job`
+  commands still work (they're transparently routed to ART Service), but a
+  few flags were removed (`--check-prof`, `--compile-layouts`). DCX neo
+  detects the API level at startup and branches automatically: it drops the
+  removed flags on 14+ and prefers the native `pm art dexopt-packages`
+  command for the background job, with a fallback for builds that don't
+  expose `pm art`. You don't need to configure anything.
 
 ---
 
@@ -384,6 +405,7 @@ DCX neo focuses on the commands that have a **real, documented effect**, such as
 | **A tweak "didn't do anything"** | Use **CheckSetting** to read the current value back, and for graphics use `dumpsys gfxinfo <pkg> | findstr Pipeline`. Some properties need root to persist, or aren't supported on your Android version. |
 | **A specific game glitches under ANGLE** | Go to **Gaming → Force ANGLE for All Apps → Disable**. |
 | **Want to undo everything** | Use **Restore** with a backup made earlier, or reboot for non-persistent changes. |
+| **"Unknown option: --compile-layouts" / "Unknown command"** | Expected on Android 12+ (the feature was removed; gone entirely on 14+ under ART Service). DCX neo skips the unsupported step automatically and continues — your compile still runs. |
 | **Colours look wrong / menu is misaligned** | Use Windows Terminal or a recent `cmd.exe`; very old consoles may not render ANSI colours or the box characters. |
 
 ---
