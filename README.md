@@ -139,10 +139,23 @@ header with device **uptime** and current **CPU load**.
 | 3 | **Toggle Package Verifier** | Turn Play Protect package verification on/off. |
 | 4 | **Toggle Game-Overlay** | Control the game overlay / game-mode settings. |
 | 5 | **Toggle Performance** | Apply / remove a bundle of performance-oriented properties. |
-| 6 | **Network Boost** | TCP buffer tuning, Cloudflare/Google/AdGuard private DNS, preferred network mode (LTE/5G), and a full revert. |
+| 6 | **Network Boost** | Safe TCP receive-window hint, optional Cloudflare/Google/AdGuard private DNS, preferred network mode (LTE/5G), and a full revert. *(The old Wi-Fi power tweaks were removed — they could break Wi-Fi on Android 15. See the warning below.)* |
 | 7 | **GPU Renderer (Skia GL/Vulkan)** | Switch the HWUI renderer between `skiagl` (default), `skiavk` (Skia Vulkan), or clear the override. |
-| 8 | **Force ANGLE for All Apps** | Force all GLES apps through ANGLE (GLES-on-Vulkan). Persists across reboots. |
+| 8 | **Force ANGLE for All Apps** | Force all GLES apps through ANGLE (GLES-on-Vulkan). **⚠️ Can crash most apps on non-Pixel GPUs (e.g. MediaTek)** — gated behind a Y/N confirmation. Persists across reboots, so a reboot won't fix a crash loop; you must Disable/Delete it here. |
 | 9 | **Back** | Return to the main menu. |
+
+> **⚠️ Two Gaming toggles can break things on some devices — read before using:**
+>
+> - **Network Boost** now only applies a harmless TCP receive-window hint.
+>   Earlier versions also wrote deprecated Wi-Fi keys (`wifi_sleep_policy`,
+>   `wifi_idle_ms`, etc.) which were found to **kill Wi-Fi connectivity on
+>   Android 15** (a reboot did not recover it — only **Revert** did). Those
+>   are gone from the apply step; Revert still clears them for cleanup.
+> - **Force ANGLE for All Apps** is device/GPU dependent and has been observed
+>   to **crash most apps on launch** on non-Pixel hardware. It's opt-in with a
+>   confirmation prompt. If apps start crashing, return to the menu and
+>   **Disable** or **Delete** it — rebooting will not help because the setting
+>   persists.
 
 **GPU Renderer** and **ANGLE** are the genuinely effective graphics switches
 (see [What actually works](#what-actually-works-vs-placebo)). After changing
@@ -212,7 +225,7 @@ One-shot maintenance and compilation tasks.
 | # | Option | What it does |
 |---|---|---|
 | 1 | **Run bg-dexopt-job** | Trigger the background dexopt job. |
-| 2 | **Run Fstrim** | Trim the filesystem (frees and reclaims storage blocks). |
+| 2 | **Run Fstrim** | Trim the filesystem so flash stays fast. Runs **silently** (Android prints nothing on success — that's normal); shows free space before/after. On some devices the trim only fully completes while charging + idle. |
 | 3 | **Run Kill-all** | Force-stop background apps. Skips the current foreground app and protected packages to avoid data loss. |
 | 4 | **Run Compile App** | Compile a single package; mode and package name are validated. |
 | 5 | **Run Clear Cache** | Trim or wipe app caches (wipe requires root). |
@@ -261,8 +274,13 @@ phase-offset and duration properties. A **Remove** option clears them.
 
 **Auto** runs a large, curated batch of optimisations in one pass: logging
 cleanup (including the WindowManager trace channels and dropbox rate limits),
-dexopt, thermal status, and — on Android 12+ — enabling ANGLE and the
-universal log silencer. It is the fastest way to apply a sensible baseline.
+dexopt, thermal status, and the universal log silencer. It is the fastest way
+to apply a sensible baseline.
+
+> **Note:** Auto Setup deliberately does **not** enable ANGLE. Earlier
+> versions auto-enabled it on Android 12+, which crashed apps on some
+> non-Pixel devices. ANGLE is now opt-in only, under **Gaming → Force ANGLE
+> for All Apps**, so Auto Setup stays safe for every device.
 
 ---
 
@@ -357,7 +375,8 @@ DCX neo focuses on the commands that have a **real, documented effect**, such as
 
 - **`debug.hwui.renderer`** (`skiagl` / `skiavk`) — the actual HWUI renderer.
 - **`settings put global angle_gl_driver_all_angle 1`** — the official way to
-  force ANGLE for all apps.
+  force ANGLE for all apps. *(Real, but device-dependent: crashes apps on some
+  non-Pixel GPUs — opt-in with a warning, not in Auto Setup.)*
 - **`persist.log.tag "*:S"`** — genuinely silences logcat.
 - **Animation scales** (`window/transition/animator_*`) — the classic, real
   "make it feel faster" tweak.
@@ -404,6 +423,9 @@ DCX neo focuses on the commands that have a **real, documented effect**, such as
 | **Something feels broken after tweaking** | **Reboot the phone.** Most live tweaks reset on reboot, and that clears any misbehaviour. |
 | **A tweak "didn't do anything"** | Use **CheckSetting** to read the current value back, and for graphics use `dumpsys gfxinfo <pkg> | findstr Pipeline`. Some properties need root to persist, or aren't supported on your Android version. |
 | **A specific game glitches under ANGLE** | Go to **Gaming → Force ANGLE for All Apps → Disable**. |
+| **Most apps crash on launch after enabling ANGLE** | This happens on some non-Pixel GPUs. **A reboot won't fix it** (the setting persists). Open DCX neo → **Gaming → Force ANGLE for All Apps → Disable** (or **Delete**). |
+| **Wi-Fi / network died after Network Boost** | Open **Gaming → Network Boost → Revert**. Current versions no longer apply the Wi-Fi keys that caused this, but Revert clears any left over from an older run. |
+| **ART Service printed a wall of text during dexopt** | Not errors — older versions dumped one line per package. Current versions print a short summary (optimised / failed counts) and only show real failures. A few failures are normal (some system packages can't be recompiled). |
 | **Want to undo everything** | Use **Restore** with a backup made earlier, or reboot for non-persistent changes. |
 | **"Unknown option: --compile-layouts" / "Unknown command"** | Expected on Android 12+ (the feature was removed; gone entirely on 14+ under ART Service). DCX neo skips the unsupported step automatically and continues — your compile still runs. |
 | **Colours look wrong / menu is misaligned** | Use Windows Terminal or a recent `cmd.exe`; very old consoles may not render ANSI colours or the box characters. |
