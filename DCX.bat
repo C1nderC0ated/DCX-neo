@@ -60,7 +60,7 @@ echo [%b%i%w%] Waiting for an authorised device (max 10s)...
 set "DEVICE_OK=0"
 for /l %%i in (1,1,10) do (
     if "!DEVICE_OK!"=="0" (
-        for /f "skip=1 tokens=1,2" %%a in ('adb devices') do (
+        for /f "skip=1 tokens=1,2" %%a in ('adb devices ^<nul') do (
             if "%%b"=="device" set "DEVICE_OK=1"
         )
         if "!DEVICE_OK!"=="0" timeout /t 1 /nobreak > nul
@@ -83,7 +83,7 @@ if "%DEVICE_OK%"=="0" (
 )
 :: Retrieve the current Android API level safely
 set "SDK="
-for /f "delims=" %%i in ('adb shell getprop ro.build.version.sdk 2^>nul') do set "SDK=%%i"
+for /f "delims=" %%i in ('adb shell getprop ro.build.version.sdk 2^>nul ^<nul') do set "SDK=%%i"
 :: Strip trailing CR if any
 if defined SDK set "SDK=%SDK:~0,3%"
 if defined SDK for /f "tokens=* delims= " %%a in ("%SDK%") do set "SDK=%%a"
@@ -92,7 +92,7 @@ if defined SDK for /f "tokens=* delims= " %%a in ("%SDK%") do set "SDK=%%a"
 if not defined SDK set "SDK=0"
 :: Capture device model for friendlier messages
 set "MODEL="
-for /f "delims=" %%i in ('adb shell getprop ro.product.model 2^>nul') do set "MODEL=%%i"
+for /f "delims=" %%i in ('adb shell getprop ro.product.model 2^>nul ^<nul') do set "MODEL=%%i"
 echo [%g%+%w%] Device: %MODEL%   API level: %SDK%
 timeout /t 1 /nobreak > nul
 goto menu
@@ -102,8 +102,8 @@ cls
 title Main Menu
 call :logo
 echo          ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime') do echo           [%g%+%w%]Uptime: %%a %%b %%c
-for /f "tokens=1 delims=:" %%i in ('adb shell dumpsys cpuinfo') do set cpucheck=%%i
+for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul') do echo           [%g%+%w%]Uptime: %%a %%b %%c
+for /f "tokens=1 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul') do set cpucheck=%%i
 echo           [%g%+%w%]%cpucheck% LOAD
 echo          ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 echo.
@@ -171,7 +171,7 @@ echo.
     echo adb start-server ^>nul 2^>^&1
     echo echo Restoring DCX-managed settings...
     echo.
-) > "%BAKFILE%"
+) > "%BAKFILE%" < nul
 :: Helper macro for capturing settings (Settings.X namespace)
 :: We capture each key by reading current value and building the
 :: corresponding put or delete line.
@@ -229,7 +229,7 @@ set "_ns=%~1"
 set "_key=%~2"
 set "_out=%~3"
 set "_val="
-for /f "delims=" %%v in ('adb shell settings get %_ns% %_key% 2^>nul') do set "_val=%%v"
+for /f "delims=" %%v in ('adb shell settings get %_ns% %_key% 2^>nul ^<nul') do set "_val=%%v"
 if "%_val%"=="" set "_val=null"
 if /i "%_val%"=="null" (
     echo adb shell settings delete %_ns% %_key% ^>nul 2^>^&1>> "%_out%"
@@ -245,7 +245,7 @@ set "_ns=%~1"
 set "_key=%~2"
 set "_out=%~3"
 set "_val="
-for /f "delims=" %%v in ('adb shell device_config get %_ns% %_key% 2^>nul') do set "_val=%%v"
+for /f "delims=" %%v in ('adb shell device_config get %_ns% %_key% 2^>nul ^<nul') do set "_val=%%v"
 if "%_val%"=="" set "_val=null"
 if /i "%_val%"=="null" (
     echo :: %_ns%/%_key% was unset at backup time>> "%_out%"
@@ -260,7 +260,7 @@ setlocal
 set "_key=%~1"
 set "_out=%~2"
 set "_val="
-for /f "delims=" %%v in ('adb shell getprop %_key% 2^>nul') do set "_val=%%v"
+for /f "delims=" %%v in ('adb shell getprop %_key% 2^>nul ^<nul') do set "_val=%%v"
 echo adb shell setprop %_key% "%_val%">> "%_out%"
 endlocal
 exit /b
@@ -415,71 +415,71 @@ set "REPORT=%TEMP%\dcx_report_%TS%.txt"
     echo ===========================================================
     echo.
     echo [Hardware]
-    for /f "delims=" %%i in ('adb shell getprop ro.product.manufacturer 2^>nul') do echo   Manufacturer        : %%i
-    for /f "delims=" %%i in ('adb shell getprop ro.product.model 2^>nul')        do echo   Model               : %%i
-    for /f "delims=" %%i in ('adb shell getprop ro.product.device 2^>nul')       do echo   Device codename     : %%i
-    for /f "delims=" %%i in ('adb shell getprop ro.product.cpu.abi 2^>nul')      do echo   CPU ABI             : %%i
-    for /f "delims=" %%i in ('adb shell getprop ro.hardware 2^>nul')             do echo   SoC platform        : %%i
-    for /f "delims=" %%i in ('adb shell getprop ro.board.platform 2^>nul')       do echo   Board platform      : %%i
+    for /f "delims=" %%i in ('adb shell getprop ro.product.manufacturer 2^>nul ^<nul') do echo   Manufacturer        : %%i
+    for /f "delims=" %%i in ('adb shell getprop ro.product.model 2^>nul ^<nul')        do echo   Model               : %%i
+    for /f "delims=" %%i in ('adb shell getprop ro.product.device 2^>nul ^<nul')       do echo   Device codename     : %%i
+    for /f "delims=" %%i in ('adb shell getprop ro.product.cpu.abi 2^>nul ^<nul')      do echo   CPU ABI             : %%i
+    for /f "delims=" %%i in ('adb shell getprop ro.hardware 2^>nul ^<nul')             do echo   SoC platform        : %%i
+    for /f "delims=" %%i in ('adb shell getprop ro.board.platform 2^>nul ^<nul')       do echo   Board platform      : %%i
     echo.
     echo [Software]
-    for /f "delims=" %%i in ('adb shell getprop ro.build.version.release 2^>nul')        do echo   Android version     : %%i
+    for /f "delims=" %%i in ('adb shell getprop ro.build.version.release 2^>nul ^<nul')        do echo   Android version     : %%i
     echo   API level           : %SDK%
-    for /f "delims=" %%i in ('adb shell getprop ro.build.version.security_patch 2^>nul') do echo   Security patch      : %%i
-    for /f "delims=" %%i in ('adb shell getprop ro.build.version.incremental 2^>nul')    do echo   Build incremental   : %%i
-    for /f "delims=" %%i in ('adb shell getprop ro.build.type 2^>nul')                   do echo   Build type          : %%i
+    for /f "delims=" %%i in ('adb shell getprop ro.build.version.security_patch 2^>nul ^<nul') do echo   Security patch      : %%i
+    for /f "delims=" %%i in ('adb shell getprop ro.build.version.incremental 2^>nul ^<nul')    do echo   Build incremental   : %%i
+    for /f "delims=" %%i in ('adb shell getprop ro.build.type 2^>nul ^<nul')                   do echo   Build type          : %%i
     echo.
     echo [Memory]
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "MemTotal"')     do echo   Total RAM           : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "MemAvailable"') do echo   Available RAM       : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "MemFree"')      do echo   Free RAM            : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "Buffers"')      do echo   Buffers             : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "^Cached"')      do echo   Cached              : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "SwapTotal"')    do echo   Swap total          : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "SwapFree"')     do echo   Swap free           : %%i kB
+    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "MemTotal" ^<nul')     do echo   Total RAM           : %%i kB
+    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "MemAvailable" ^<nul') do echo   Available RAM       : %%i kB
+    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "MemFree" ^<nul')      do echo   Free RAM            : %%i kB
+    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "Buffers" ^<nul')      do echo   Buffers             : %%i kB
+    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "^Cached" ^<nul')      do echo   Cached              : %%i kB
+    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "SwapTotal" ^<nul')    do echo   Swap total          : %%i kB
+    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "SwapFree" ^<nul')     do echo   Swap free           : %%i kB
     echo.
     echo [Storage]
     adb shell df -h /data 2^>nul
     echo.
     echo [State]
-    for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime') do echo   Uptime              : %%a %%b %%c
-    for /f "delims=" %%i in ('adb shell dumpsys cpuinfo ^| findstr /C:"Load:"')      do echo   %%i
-    for /f "delims=" %%i in ('adb shell dumpsys battery ^| findstr /C:"level:"')       do echo   Battery            %%i
-    for /f "delims=" %%i in ('adb shell dumpsys battery ^| findstr /C:"temperature:"') do echo   Battery temp       %%i (deci-degrees C)
-    for /f "delims=" %%i in ('adb shell dumpsys battery ^| findstr /C:"voltage:"')     do echo   Battery voltage    %%i
-    for /f "delims=" %%i in ('adb shell dumpsys battery ^| findstr /C:"status:"')      do echo   Battery status     %%i
-    for /f "delims=" %%i in ('adb shell dumpsys battery ^| findstr /C:"health:"')      do echo   Battery health     %%i
+    for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul') do echo   Uptime              : %%a %%b %%c
+    for /f "delims=" %%i in ('adb shell dumpsys cpuinfo ^| findstr /C:"Load:" ^<nul')      do echo   %%i
+    for /f "delims=" %%i in ('adb shell dumpsys battery ^| findstr /C:"level:" ^<nul')       do echo   Battery            %%i
+    for /f "delims=" %%i in ('adb shell dumpsys battery ^| findstr /C:"temperature:" ^<nul') do echo   Battery temp       %%i (deci-degrees C)
+    for /f "delims=" %%i in ('adb shell dumpsys battery ^| findstr /C:"voltage:" ^<nul')     do echo   Battery voltage    %%i
+    for /f "delims=" %%i in ('adb shell dumpsys battery ^| findstr /C:"status:" ^<nul')      do echo   Battery status     %%i
+    for /f "delims=" %%i in ('adb shell dumpsys battery ^| findstr /C:"health:" ^<nul')      do echo   Battery health     %%i
     echo.
     echo [Display]
-    for /f "tokens=2 delims==" %%i in ('adb shell dumpsys SurfaceFlinger ^| findstr "refresh-rate"') do echo   Display refresh    : %%i Hz
-    for /f "delims=" %%i in ('adb shell wm size 2^>nul')                                              do echo   %%i
-    for /f "delims=" %%i in ('adb shell wm density 2^>nul')                                           do echo   %%i
+    for /f "tokens=2 delims==" %%i in ('adb shell dumpsys SurfaceFlinger ^| findstr "refresh-rate" ^<nul') do echo   Display refresh    : %%i Hz
+    for /f "delims=" %%i in ('adb shell wm size 2^>nul ^<nul')                                              do echo   %%i
+    for /f "delims=" %%i in ('adb shell wm density 2^>nul ^<nul')                                           do echo   %%i
     echo.
     echo [Graphics renderer - current values]
-    for /f "delims=" %%i in ('adb shell getprop debug.hwui.renderer 2^>nul')   do echo   debug.hwui.renderer        : "%%i" (skiagl=default, skiavk=Skia Vulkan, empty=auto)
-    for /f "delims=" %%i in ('adb shell getprop ro.hwui.renderer 2^>nul')      do echo   ro.hwui.renderer           : "%%i"
-    for /f "delims=" %%i in ('adb shell settings get global angle_gl_driver_all_angle 2^>nul') do echo   angle_gl_driver_all_angle  : %%i (1=force ANGLE for all GLES apps, 0/null=off)
-    for /f "delims=" %%i in ('adb shell getprop persist.log.tag 2^>nul')       do echo   persist.log.tag            : "%%i" (set to "*:S" to silence all logs)
+    for /f "delims=" %%i in ('adb shell getprop debug.hwui.renderer 2^>nul ^<nul')   do echo   debug.hwui.renderer        : "%%i" (skiagl=default, skiavk=Skia Vulkan, empty=auto)
+    for /f "delims=" %%i in ('adb shell getprop ro.hwui.renderer 2^>nul ^<nul')      do echo   ro.hwui.renderer           : "%%i"
+    for /f "delims=" %%i in ('adb shell settings get global angle_gl_driver_all_angle 2^>nul ^<nul') do echo   angle_gl_driver_all_angle  : %%i (1=force ANGLE for all GLES apps, 0/null=off)
+    for /f "delims=" %%i in ('adb shell getprop persist.log.tag 2^>nul ^<nul')       do echo   persist.log.tag            : "%%i" (set to "*:S" to silence all logs)
     echo.
     echo [Animation / Refresh - current values]
-    for /f "delims=" %%i in ('adb shell settings get global window_animation_scale 2^>nul')     do echo   window_animation_scale     : %%i
-    for /f "delims=" %%i in ('adb shell settings get global transition_animation_scale 2^>nul') do echo   transition_animation_scale : %%i
-    for /f "delims=" %%i in ('adb shell settings get global animator_duration_scale 2^>nul')    do echo   animator_duration_scale    : %%i
-    for /f "delims=" %%i in ('adb shell settings get system min_refresh_rate 2^>nul')           do echo   min_refresh_rate (Hz)      : %%i
-    for /f "delims=" %%i in ('adb shell settings get system peak_refresh_rate 2^>nul')          do echo   peak_refresh_rate (Hz)     : %%i
+    for /f "delims=" %%i in ('adb shell settings get global window_animation_scale 2^>nul ^<nul')     do echo   window_animation_scale     : %%i
+    for /f "delims=" %%i in ('adb shell settings get global transition_animation_scale 2^>nul ^<nul') do echo   transition_animation_scale : %%i
+    for /f "delims=" %%i in ('adb shell settings get global animator_duration_scale 2^>nul ^<nul')    do echo   animator_duration_scale    : %%i
+    for /f "delims=" %%i in ('adb shell settings get system min_refresh_rate 2^>nul ^<nul')           do echo   min_refresh_rate (Hz)      : %%i
+    for /f "delims=" %%i in ('adb shell settings get system peak_refresh_rate 2^>nul ^<nul')          do echo   peak_refresh_rate (Hz)     : %%i
     echo.
     echo [Battery savers / Sync - current values]
-    for /f "delims=" %%i in ('adb shell settings get global master_sync_status 2^>nul')          do echo   master_sync_status         : %%i  (1=on, 0=off)
-    for /f "delims=" %%i in ('adb shell settings get global hotword_detection_enabled 2^>nul')   do echo   hotword_detection_enabled  : %%i  (1=on, 0=off)
-    for /f "delims=" %%i in ('adb shell device_config get app_hibernation app_hibernation_enabled 2^>nul') do echo   app_hibernation_enabled    : %%i
+    for /f "delims=" %%i in ('adb shell settings get global master_sync_status 2^>nul ^<nul')          do echo   master_sync_status         : %%i  (1=on, 0=off)
+    for /f "delims=" %%i in ('adb shell settings get global hotword_detection_enabled 2^>nul ^<nul')   do echo   hotword_detection_enabled  : %%i  (1=on, 0=off)
+    for /f "delims=" %%i in ('adb shell device_config get app_hibernation app_hibernation_enabled 2^>nul ^<nul') do echo   app_hibernation_enabled    : %%i
     echo.
     echo [Network]
-    for /f "delims=" %%i in ('adb shell settings get global preferred_network_mode 2^>nul') do echo   Preferred network mode      : %%i
-    for /f "delims=" %%i in ('adb shell settings get global private_dns_mode 2^>nul')       do echo   Private DNS mode           : %%i
-    for /f "delims=" %%i in ('adb shell settings get global private_dns_specifier 2^>nul')  do echo   Private DNS host           : %%i
+    for /f "delims=" %%i in ('adb shell settings get global preferred_network_mode 2^>nul ^<nul') do echo   Preferred network mode      : %%i
+    for /f "delims=" %%i in ('adb shell settings get global private_dns_mode 2^>nul ^<nul')       do echo   Private DNS mode           : %%i
+    for /f "delims=" %%i in ('adb shell settings get global private_dns_specifier 2^>nul ^<nul')  do echo   Private DNS host           : %%i
     echo.
     echo [Power state]
-    for /f "delims=" %%i in ('adb shell settings get global low_power 2^>nul') do echo   Battery saver         : %%i
+    for /f "delims=" %%i in ('adb shell settings get global low_power 2^>nul ^<nul') do echo   Battery saver         : %%i
     adb shell cmd power get-mode 2^>nul
     echo.
     echo [Doze whitelist - first 20 entries]
@@ -494,7 +494,7 @@ set "REPORT=%TEMP%\dcx_report_%TS%.txt"
     echo ===========================================================
     echo  End of report
     echo ===========================================================
-) > "%REPORT%"
+) > "%REPORT%" < nul
 echo  %g%Report saved to:%w%
 echo    %REPORT%
 echo.
@@ -528,11 +528,11 @@ cls
 call :logo
 echo                            %b%[%w% Quick Summary %b%]%w%
 echo.
-for /f "delims=" %%i in ('adb shell getprop ro.product.model 2^>nul') do echo   Device: %%i  ^(API %SDK%^)
-for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "MemAvailable"') do echo   Free RAM: %%i kB
-for /f "delims=" %%i in ('adb shell dumpsys battery ^| findstr /C:"level:"')       do echo  %%i
-for /f "delims=" %%i in ('adb shell dumpsys battery ^| findstr /C:"temperature:"') do echo  %%i (deci-degrees C)
-for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime') do echo   Uptime: %%a %%b %%c
+for /f "delims=" %%i in ('adb shell getprop ro.product.model 2^>nul ^<nul') do echo   Device: %%i  ^(API %SDK%^)
+for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "MemAvailable" ^<nul') do echo   Free RAM: %%i kB
+for /f "delims=" %%i in ('adb shell dumpsys battery ^| findstr /C:"level:" ^<nul')       do echo  %%i
+for /f "delims=" %%i in ('adb shell dumpsys battery ^| findstr /C:"temperature:" ^<nul') do echo  %%i (deci-degrees C)
+for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul') do echo   Uptime: %%a %%b %%c
 echo.
 echo   Full report still saved at: %REPORT%
 echo.
@@ -562,7 +562,7 @@ echo.
 echo.
 echo [%g%+%w%] Check Refresh Rate
 timeout /t 1 /nobreak > nul
-for /f "tokens=3 delims= " %%i in ('adb shell dumpsys SurfaceFlinger ^| findstr "refresh-rate"') do (
+for /f "tokens=3 delims= " %%i in ('adb shell dumpsys SurfaceFlinger ^| findstr "refresh-rate" ^<nul') do (
     set refresh_rate=%%i
 )
 set refresh_rate=%refresh_rate: =%
@@ -709,8 +709,8 @@ title Optimize Android
 mode 100,37
 call :logo
 echo          ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime') do echo           [%g%+%w%]Uptime: %%a %%b %%c
-for /f "tokens=1 delims=:" %%i in ('adb shell dumpsys cpuinfo') do set cpucheck=%%i
+for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul') do echo           [%g%+%w%]Uptime: %%a %%b %%c
+for /f "tokens=1 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul') do set cpucheck=%%i
 echo           [%g%+%w%]%cpucheck% LOAD
 echo          ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 echo.
@@ -863,9 +863,9 @@ title Animation Speed
 call :logo
 echo.
 echo  Current scales:
-for /f "delims=" %%i in ('adb shell settings get global window_animation_scale 2^>nul')     do echo    window_animation_scale     = %%i
-for /f "delims=" %%i in ('adb shell settings get global transition_animation_scale 2^>nul') do echo    transition_animation_scale = %%i
-for /f "delims=" %%i in ('adb shell settings get global animator_duration_scale 2^>nul')    do echo    animator_duration_scale    = %%i
+for /f "delims=" %%i in ('adb shell settings get global window_animation_scale 2^>nul ^<nul')     do echo    window_animation_scale     = %%i
+for /f "delims=" %%i in ('adb shell settings get global transition_animation_scale 2^>nul ^<nul') do echo    transition_animation_scale = %%i
+for /f "delims=" %%i in ('adb shell settings get global animator_duration_scale 2^>nul ^<nul')    do echo    animator_duration_scale    = %%i
 echo.
 echo                                     %g%[%w%1%g%]%w% 0     (off, instant)
 echo                                     %g%[%w%2%g%]%w% 0.5   (very fast)
@@ -899,7 +899,7 @@ goto animspeed
 cls
 call :logo
 title Clear Last Used Is Running!
-for /f "tokens=2 delims=:" %%a in ('adb shell pm list package') do (
+for /f "tokens=2 delims=:" %%a in ('adb shell pm list package ^<nul') do (
 adb shell cmd usagestats clear-last-used-timestamps %%a
 echo %%a ━ clear last used!
 )
@@ -1529,14 +1529,14 @@ echo  stay fast. It runs %y%silently%w% - Android prints nothing on success,
 echo  which is why it can look like "nothing happened". That's normal.
 echo.
 echo  Free space on /data BEFORE:
-for /f "delims=" %%i in ('adb shell df -h /data 2^>nul ^| findstr /v "Filesystem"') do echo    %%i
+for /f "delims=" %%i in ('adb shell df -h /data 2^>nul ^| findstr /v "Filesystem" ^<nul') do echo    %%i
 echo.
 echo  Running 'sm fstrim'...
 adb shell sm fstrim
 echo  Trigger sent.
 echo.
 echo  Free space on /data AFTER:
-for /f "delims=" %%i in ('adb shell df -h /data 2^>nul ^| findstr /v "Filesystem"') do echo    %%i
+for /f "delims=" %%i in ('adb shell df -h /data 2^>nul ^| findstr /v "Filesystem" ^<nul') do echo    %%i
 echo.
 echo  %b%Note:%w% fstrim reclaims at the flash level, so the df numbers may
 echo  not change. On some devices the trim only fully runs while the
@@ -1555,7 +1555,7 @@ title kill process
 :: (force-stopping the focused app loses unsaved data in messengers,
 :: notes, browsers, etc.)
 set "FG_PKG="
-for /f "tokens=2 delims= " %%a in ('adb shell dumpsys activity activities 2^>nul ^| findstr /C:"mResumedActivity"') do (
+for /f "tokens=2 delims= " %%a in ('adb shell dumpsys activity activities 2^>nul ^| findstr /C:"mResumedActivity" ^<nul') do (
     if not defined FG_PKG (
         for /f "tokens=1 delims=/" %%b in ("%%a") do set "FG_PKG=%%b"
     )
@@ -1565,7 +1565,7 @@ echo.
 :: Critical packages we never force-stop even on third-party list
 :: (some OEMs ship important apps as user-installed APKs)
 set "PROTECT=com.android.systemui com.google.android.inputmethod.latin com.android.inputmethod.latin com.android.vending"
-for /f "tokens=2 delims=:" %%a in ('adb shell pm list package -3') do (
+for /f "tokens=2 delims=:" %%a in ('adb shell pm list package -3 ^<nul') do (
     set "PKG=%%a"
     set "SKIP=0"
     if defined FG_PKG (
@@ -1688,8 +1688,8 @@ cls
 echo                                                                                            Page%g%[%w%1/2%g%]
 call :logo
 echo          ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime') do echo           [%g%+%w%]Uptime: %%a %%b %%c
-for /f "tokens=1 delims=:" %%i in ('adb shell dumpsys cpuinfo') do set cpucheck=%%i
+for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul') do echo           [%g%+%w%]Uptime: %%a %%b %%c
+for /f "tokens=1 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul') do set cpucheck=%%i
 echo           [%g%+%w%]%cpucheck% LOAD
 echo          ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 echo.
@@ -1811,7 +1811,7 @@ set "WLREPORT=%TEMP%\dcx_wakelocks_%TS%.txt"
     echo    - High wakeup count in Section 4 = app pinging too often
     echo    - If mState != IDLE while screen is off, doze is blocked
     echo ===========================================================
-) > "%WLREPORT%"
+) > "%WLREPORT%" < nul
 echo  %g%Report saved to:%w%
 echo    %WLREPORT%
 echo.
@@ -1862,8 +1862,8 @@ title Refresh Rate Lock
 call :logo
 echo.
 echo  Current:
-for /f "delims=" %%i in ('adb shell settings get system min_refresh_rate 2^>nul')   do echo    min_refresh_rate  = %%i Hz
-for /f "delims=" %%i in ('adb shell settings get system peak_refresh_rate 2^>nul')  do echo    peak_refresh_rate = %%i Hz
+for /f "delims=" %%i in ('adb shell settings get system min_refresh_rate 2^>nul ^<nul')   do echo    min_refresh_rate  = %%i Hz
+for /f "delims=" %%i in ('adb shell settings get system peak_refresh_rate 2^>nul ^<nul')  do echo    peak_refresh_rate = %%i Hz
 echo.
 echo                                     %g%[%w%1%g%]%w% Lock to 60 Hz   (battery)
 echo                                     %g%[%w%2%g%]%w% Lock to 90 Hz
@@ -1942,7 +1942,7 @@ if "%fd%"=="2" (
 )
 if "%fd%"=="3" (
     cls
-    for /f "delims=" %%i in ('adb shell dumpsys deviceidle ^| findstr /C:"mState=" /C:"mLightState="') do echo   %%i
+    for /f "delims=" %%i in ('adb shell dumpsys deviceidle ^| findstr /C:"mState=" /C:"mLightState=" ^<nul') do echo   %%i
     echo.
     pause > nul
     goto forcedoze
@@ -1973,7 +1973,7 @@ if %SDK% LSS 31 (
 :_aph_show
 echo.
 echo  Current:
-for /f "delims=" %%i in ('adb shell device_config get app_hibernation app_hibernation_enabled 2^>nul') do echo    app_hibernation_enabled = %%i
+for /f "delims=" %%i in ('adb shell device_config get app_hibernation app_hibernation_enabled 2^>nul ^<nul') do echo    app_hibernation_enabled = %%i
 echo.
 echo                                     %g%[%w%1%g%]%w% Enable
 echo                                     %g%[%w%2%g%]%w% Disable
@@ -2011,7 +2011,7 @@ echo    - Photo backup
 echo  Apps you actively open will still work.
 echo.
 echo  Current:
-for /f "delims=" %%i in ('adb shell settings get global master_sync_status 2^>nul') do echo    master_sync_status = %%i  (1=on, 0=off)
+for /f "delims=" %%i in ('adb shell settings get global master_sync_status 2^>nul ^<nul') do echo    master_sync_status = %%i  (1=on, 0=off)
 echo.
 echo                                     %g%[%w%1%g%]%w% Enable sync (default)
 echo                                     %g%[%w%2%g%]%w% Disable sync (battery saver)
@@ -2047,7 +2047,7 @@ echo  You can still tap the assistant icon to use voice input.
 echo  Real battery save on devices with continuous mic listening.
 echo.
 echo  Current:
-for /f "delims=" %%i in ('adb shell settings get global hotword_detection_enabled 2^>nul') do echo    hotword_detection_enabled = %%i  (1=on, 0=off)
+for /f "delims=" %%i in ('adb shell settings get global hotword_detection_enabled 2^>nul ^<nul') do echo    hotword_detection_enabled = %%i  (1=on, 0=off)
 echo.
 echo                                     %g%[%w%1%g%]%w% Enable hotword
 echo                                     %g%[%w%2%g%]%w% Disable hotword
@@ -2264,7 +2264,7 @@ if "%ksd%"=="3" goto nextpage
 cls
 title Universal Toggle Logs\etc : Off
 call :logo
-for /f "tokens=1 delims=:" %%a in ('adb shell getprop ^| findstr "log.tag"') do (
+for /f "tokens=1 delims=:" %%a in ('adb shell getprop ^| findstr "log.tag" ^<nul') do (
     set "prop=%%a"
     set "prop=!prop: =!"
     set "prop=!prop:[=!"
@@ -2306,7 +2306,7 @@ if "%ksd%"=="3" goto nextpage
 cls
 title Log For User Apps : Off
 call :logo
-for /f "tokens=2 delims=:" %%a in ('adb shell pm list package') do (
+for /f "tokens=2 delims=:" %%a in ('adb shell pm list package ^<nul') do (
 adb shell cmd package log-visibility --disable %%a > nul 2>&1
 echo Log disabled : %%a
 )
@@ -2320,7 +2320,7 @@ goto nextpage
 cls
 title Log For User Apps : On
 call :logo
-for /f "tokens=2 delims=:" %%a in ('adb shell pm list package') do (
+for /f "tokens=2 delims=:" %%a in ('adb shell pm list package ^<nul') do (
 adb shell cmd package log-visibility --enable %%a > nul 2>&1
 echo Log enabled : %%a
 )
@@ -3394,8 +3394,8 @@ title Gaming Mode
 cls
 call :logo
 echo          ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime') do echo           [%g%+%w%]Uptime: %%a %%b %%c
-for /f "tokens=1 delims=:" %%i in ('adb shell dumpsys cpuinfo') do set cpucheck=%%i
+for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul') do echo           [%g%+%w%]Uptime: %%a %%b %%c
+for /f "tokens=1 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul') do set cpucheck=%%i
 echo           [%g%+%w%]%cpucheck% LOAD
 echo          ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 echo.
@@ -3438,7 +3438,7 @@ title GPU Renderer (HWUI)
 call :logo
 echo.
 echo  Current value:
-for /f "delims=" %%i in ('adb shell getprop debug.hwui.renderer 2^>nul') do echo    debug.hwui.renderer = "%%i"
+for /f "delims=" %%i in ('adb shell getprop debug.hwui.renderer 2^>nul ^<nul') do echo    debug.hwui.renderer = "%%i"
 echo.
 echo  This switches the HWUI rendering pipeline used by the system UI
 echo  and most apps that draw with the framework.
@@ -3518,7 +3518,7 @@ title Force ANGLE for All Apps
 call :logo
 echo.
 echo  Current value:
-for /f "delims=" %%i in ('adb shell settings get global angle_gl_driver_all_angle 2^>nul') do echo    angle_gl_driver_all_angle = %%i  (1=ON, 0=OFF, null=default)
+for /f "delims=" %%i in ('adb shell settings get global angle_gl_driver_all_angle 2^>nul ^<nul') do echo    angle_gl_driver_all_angle = %%i  (1=ON, 0=OFF, null=default)
 echo.
 echo  Forces every GLES app to load through ANGLE (GLES-on-Vulkan).
 echo.
@@ -3620,7 +3620,7 @@ cls
 title Network Boost : Preferred mode
 call :logo
 echo  Current preferred_network_mode:
-for /f "delims=" %%i in ('adb shell settings get global preferred_network_mode 2^>nul') do echo    %%i
+for /f "delims=" %%i in ('adb shell settings get global preferred_network_mode 2^>nul ^<nul') do echo    %%i
 echo.
 echo                                     %g%[%w%1%g%]%w% LTE preferred (9)  -^> fall back 3G/2G
 echo                                     %g%[%w%2%g%]%w% LTE only (12)
