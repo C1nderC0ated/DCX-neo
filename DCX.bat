@@ -664,14 +664,11 @@ adb shell cmd thermalservice override-status 1
 :: Universal log silencer (REAL, persists across reboots)
 adb shell setprop persist.log.tag "*:S" > nul 2>&1
 adb shell setprop log.tag "*:S" > nul 2>&1
-:: Force ANGLE for all GLES apps (only effective on Android 12+ with
-:: the ANGLE APK present, which is true on most modern devices).
-if "%SDK%"=="" goto _skip_angle_auto
-if %SDK% GEQ 31 (
-    adb shell settings put global angle_gl_driver_all_angle 1 > nul 2>&1
-)
-
-:_skip_angle_auto
+:: NOTE: ANGLE-for-all-apps is intentionally NOT applied here.
+:: It is device/GPU dependent and is known to crash many apps on
+:: non-Pixel hardware (e.g. MediaTek GPUs). It remains available as a
+:: deliberate, reversible choice under Gaming -> Force ANGLE for All
+:: Apps, with a warning. Auto Setup must stay safe for every device.
 :: ---------------------------------------------------------------
 adb shell setprop log.tag.stats_log S
 adb shell setprop log.tag.APM_AudioPolicyManager S
@@ -1527,8 +1524,25 @@ cls
 title fstrim is running
 call :logo
 echo.
+echo  fstrim tells the kernel which storage blocks are free so flash can
+echo  stay fast. It runs %y%silently%w% - Android prints nothing on success,
+echo  which is why it can look like "nothing happened". That's normal.
 echo.
+echo  Free space on /data BEFORE:
+for /f "delims=" %%i in ('adb shell df -h /data 2^>nul ^| findstr /v "Filesystem"') do echo    %%i
+echo.
+echo  Running 'sm fstrim'...
 adb shell sm fstrim
+echo  Trigger sent.
+echo.
+echo  Free space on /data AFTER:
+for /f "delims=" %%i in ('adb shell df -h /data 2^>nul ^| findstr /v "Filesystem"') do echo    %%i
+echo.
+echo  %b%Note:%w% fstrim reclaims at the flash level, so the df numbers may
+echo  not change. On some devices the trim only fully runs while the
+echo  phone is %b%charging and idle/screen-off%w%; if so, leave it plugged in
+echo  and locked for a few minutes and it will complete on its own.
+echo.
 echo %c%Done%w%, Press Any Button To Go Back
 pause > nul
 goto Optimize
@@ -3506,11 +3520,15 @@ echo.
 echo  Current value:
 for /f "delims=" %%i in ('adb shell settings get global angle_gl_driver_all_angle 2^>nul') do echo    angle_gl_driver_all_angle = %%i  (1=ON, 0=OFF, null=default)
 echo.
-echo  Forces every GLES app to load through ANGLE (which renders on
-echo  top of Vulkan). On Android 13+ with a Vulkan-capable GPU this
-echo  typically gives more stable frame pacing for older games.
+echo  Forces every GLES app to load through ANGLE (GLES-on-Vulkan).
 echo.
-echo    Setting persists across reboots.
+echo  %r%WARNING - device compatibility risk:%w%
+echo  On many non-Pixel devices (especially MediaTek GPUs) this CRASHES
+echo  apps on launch. It has been reported to break most apps on some
+echo  phones. Only enable it if you are ready to revert.
+echo.
+echo  %y%The setting persists across reboots - a reboot will NOT fix a%w%
+echo  %y%crash loop. You must come back here and Disable/Delete it.%w%
 echo.
 echo                                     %g%[%w%1%g%]%w% Enable  (ANGLE for all apps)
 echo                                     %g%[%w%2%g%]%w% Disable (native driver)
@@ -3525,10 +3543,21 @@ goto angleall
 
 :angleall_on
 cls
-title ANGLE for All Apps : ON
+title ANGLE for All Apps : ON (confirm)
+echo  %r%Are you sure?%w% On some devices this crashes most apps and can
+echo  only be undone from this menu (a reboot will not help).
+echo.
+echo  Tip: test a few apps right after enabling. If they crash, come
+echo  straight back and choose Disable or Delete.
+echo.
+echo    [Y] Enable ANGLE now
+echo    [N] Cancel
+choice /c:YN /n > nul
+if errorlevel 2 goto angleall
 adb shell settings put global angle_gl_driver_all_angle 1
+echo.
 echo Done. ANGLE is now enabled for all GLES apps.
-echo If a specific game glitches, return here and disable.
+echo If apps start crashing, return here and Disable/Delete.
 pause > nul
 goto angleall
 
@@ -3558,10 +3587,11 @@ cls
 title Network Boost
 call :logo
 echo.
-echo  Tunes TCP buffer sizes and DNS for lower latency in online games.
-echo  Reverting is safe (option 4 deletes all added settings).
+echo  TCP receive-window hint + optional private DNS for lower latency.
+echo  %y%Note:%w% the old Wi-Fi power tweaks were removed (they could break
+echo  Wi-Fi on Android 15). Reverting is safe and clears any old keys.
 echo.
-echo                                     %g%[%w%1%g%]%w% Apply Network Boost
+echo                                     %g%[%w%1%g%]%w% Apply TCP hint (safe)
 echo                                     %g%[%w%2%g%]%w% Set Cloudflare DNS (1.1.1.1)
 echo                                     %g%[%w%3%g%]%w% Preferred network mode
 echo                                     %g%[%w%4%g%]%w% Revert (remove all)
@@ -3632,20 +3662,24 @@ goto netboost_prefmode
 :netboost_apply
 cls
 title Network Boost : Apply
-echo Applying TCP buffer tuning...
-:: Larger TCP buffers reduce stalls on Wi-Fi / 4G / 5G.
-:: tcp_rmem and tcp_wmem are 'min default max' in bytes.
-adb shell "settings put global tcp_default_init_rwnd 60" > nul 2>&1
-adb shell "settings put global tether_offload_disabled 0" > nul 2>&1
-adb shell "settings put global mobile_data_always_on 1" > nul 2>&1
-adb shell "settings put global wifi_idle_ms 7200000" > nul 2>&1
-adb shell "settings put global wifi_suspend_optimizations_enabled 0" > nul 2>&1
-:: Power-related: keep Wi-Fi alive during screen-off briefly so
-:: matchmaking sockets don't reconnect every time the screen blinks.
-adb shell "settings put global wifi_sleep_policy 2" > nul 2>&1
-echo Done.
+echo Applying TCP receive-window hint...
 echo.
-echo [%r%!%w%] A reboot helps the kernel pick up the new buffer sizes.
+:: IMPORTANT: earlier versions also wrote several Wi-Fi power keys
+:: (wifi_sleep_policy, wifi_suspend_optimizations_enabled, wifi_idle_ms,
+:: mobile_data_always_on, tether_offload_disabled). Those are DEPRECATED
+:: Settings.Global keys and were found to BREAK Wi-Fi connectivity on
+:: Android 15 (Tecno/MediaTek) - a reboot did not recover it, only
+:: reverting did. They have been removed from this step. Revert still
+:: clears them so anyone who applied the old version can clean up.
+::
+:: What remains is the one genuinely safe, real key: the initial TCP
+:: receive window. Effect is modest; it does not touch the Wi-Fi stack.
+adb shell "settings put global tcp_default_init_rwnd 60" > nul 2>&1
+echo Done - set tcp_default_init_rwnd (initial TCP receive window).
+echo.
+echo This change is safe and does not alter Wi-Fi behaviour.
+echo If you want lower latency, the DNS option (Cloudflare) often helps
+echo more than buffer tuning on modern networks.
 pause > nul
 goto netboost
 
@@ -3660,6 +3694,9 @@ echo  To use Google DNS instead, run manually:
 echo    settings put global private_dns_specifier dns.google
 echo  Or for AdGuard DNS (no ads):
 echo    settings put global private_dns_specifier dns.adguard.com
+echo.
+echo  %y%If your network blocks external DNS and connectivity drops,%w%
+echo  come back to Network Boost -^> Revert to restore automatic DNS.
 echo.
 pause > nul
 goto netboost
@@ -4258,11 +4295,35 @@ exit /b
 :: ===================================================================
 :run_bgdexopt
 if %SDK% LSS 34 goto _bgdex_legacy
-echo   [ART Service / API %SDK%] pm art dexopt-packages -r bg-dexopt
+echo   [ART Service / API %SDK%] running background dexopt...
+echo   (this can take a while and processes every app - please wait)
 adb shell pm art dexopt-packages -r bg-dexopt > "%TEMP%\dcx_bgdex.txt" 2>&1
-findstr /I /C:"Unknown" /C:"Error" /C:"Usage" "%TEMP%\dcx_bgdex.txt" > nul && goto _bgdex_fallback
-type "%TEMP%\dcx_bgdex.txt"
-del "%TEMP%\dcx_bgdex.txt" > nul 2>&1
+:: If the command itself is unavailable, fall back to the legacy job.
+findstr /I /C:"Unknown command" /C:"Usage:" "%TEMP%\dcx_bgdex.txt" > nul && goto _bgdex_fallback
+:: ART Service prints one status line per package (often hundreds).
+:: Dumping all of it looks alarming, so instead we summarise: count
+:: how many succeeded vs failed, and show ONLY real failure lines.
+set "_dx_perf=0"
+set "_dx_fail=0"
+for /f %%n in ('findstr /I /C:"PERFORMED" "%TEMP%\dcx_bgdex.txt" 2^>nul ^| find /c /v ""') do set "_dx_perf=%%n"
+for /f %%n in ('findstr /I /C:"FAILED" "%TEMP%\dcx_bgdex.txt" 2^>nul ^| find /c /v ""') do set "_dx_fail=%%n"
+echo.
+echo   Background dexopt finished.
+echo     Packages optimised : %_dx_perf%
+echo     Failures           : %_dx_fail%
+if not "%_dx_fail%"=="0" (
+    echo.
+    echo   Failed entries (first 15):
+    findstr /I /C:"FAILED" "%TEMP%\dcx_bgdex.txt" | more +0 2>nul
+    echo.
+    echo   Note: a few failures are normal - some system packages can't
+    echo   be re-compiled. The full log is at:
+    echo     %TEMP%\dcx_bgdex.txt
+    echo   (leaving it in place so you can inspect it)
+) else (
+    echo   No failures. All good.
+    del "%TEMP%\dcx_bgdex.txt" > nul 2>&1
+)
 exit /b
 
 :_bgdex_fallback
