@@ -2,10 +2,9 @@
 
 <img width="224" height="117" alt="image" src="https://github.com/user-attachments/assets/36b493c2-fd83-4c39-a224-6f3d3a6d60d3" />
 
-DCX neo is a Windows batch (`.bat`) front-end for **ADB** that bundles a large
-collection of Android performance, battery and diagnostic tweaks behind a
-simple text menu. Instead of typing dozens of `adb shell` commands by hand,
-you pick options from a menu and DCX neo runs the right commands for you.
+DCX neo is a Windows batch (`.bat`) front-end for **ADB**. Instead of typing
+dozens of `adb shell` commands by hand, you pick options from a text menu and
+DCX neo runs the right performance, battery and diagnostic tweaks for you.
 
 > **Developed by AnOrmaluser12 · Updated by S1nt3r**
 
@@ -13,40 +12,21 @@ you pick options from a menu and DCX neo runs the right commands for you.
 
 ## ⚠️ Disclaimer — read this first
 
-**Use DCX neo at your own risk.** It changes live system settings, system
-properties and `device_config` flags on your phone. Most changes are
-reversible, but some can cause apps to misbehave, break notifications, or
-make the UI glitch until you reboot.
+**Use DCX neo at your own risk.** It changes live system settings, properties
+and `device_config` flags. Most changes are reversible and **a reboot usually
+fixes anything that misbehaves**, but a few are device-dependent — see the
+warnings on [Gaming](#gaming) and the [Troubleshooting](#troubleshooting)
+table. Before applying a lot of changes, make a [Backup](#backup--restore).
 
-- A **restart of the phone** usually fixes anything that starts misbehaving.
-- Many tweaks **do not survive a reboot** on a non-rooted device (this is
-  normal — see [Persistence & root](#persistence--root)).
-- Before applying lots of changes, use **[Backup](#backup--restore)** so you
-  can roll back.
-- DCX neo is a community tool. It is **not** affiliated with Google or your
-  phone manufacturer.
+DCX neo is a community tool, not affiliated with Google or any manufacturer.
 
 ---
 
 ## Table of contents
 
-- [Requirements](#requirements)
-- [Setup](#setup)
-- [First run](#first-run)
-- [Menu reference](#menu-reference)
-  - [Main menu](#main-menu)
-  - [Gaming](#gaming)
-  - [Battery](#battery)
-  - [Optimize Android](#optimize-android)
-  - [Auto Setup](#auto-setup)
-  - [CheckSetting (diagnostics)](#checksetting-diagnostics)
-  - [Backup & Restore](#backup--restore)
-  - [Benchmark](#benchmark)
-  - [Other options](#other-options)
-- [What actually works vs. placebo](#what-actually-works-vs-placebo)
-- [Persistence & root](#persistence--root)
-- [Troubleshooting](#troubleshooting)
-- [Credits](#credits)
+- [Requirements](#requirements) · [Setup](#setup) · [First run](#first-run)
+- [Menu reference](#menu-reference): [Main](#main-menu) · [Gaming](#gaming) · [Battery](#battery) · [Optimize](#optimize-android) · [Auto](#auto-setup) · [CheckSetting](#checksetting-diagnostics) · [Backup & Restore](#backup--restore) · [Benchmark](#benchmark)
+- [What actually works](#what-actually-works-vs-placebo) · [Persistence & root](#persistence--root) · [Troubleshooting](#troubleshooting) · [Credits](#credits)
 
 ---
 
@@ -54,58 +34,32 @@ make the UI glitch until you reboot.
 
 | Requirement | Notes |
 |---|---|
-| **Windows PC** | The script is a `.bat` file and runs in `cmd.exe`. Windows 10/11 recommended. |
-| **ADB (Android Debug Bridge)** | Must be installed and on your `PATH`, **or** placed in an `adb\` folder next to `DCX.bat`. |
-| **An Android device** | With **USB debugging** enabled and the PC authorised. |
-| **A USB cable** | Or a working wireless-ADB connection. |
-
-A UTF-8 capable console is used (`chcp 65001`) and ANSI colours are enabled
-automatically, so the menu shows colours on modern Windows terminals.
+| **Windows PC** | Runs in `cmd.exe`. Windows 10/11 recommended. |
+| **ADB** | On your `PATH`, **or** as `adb.exe` in an `adb\` folder next to `DCX.bat`. |
+| **Android device** | With **USB debugging** enabled and the PC authorised. |
+| **USB cable** | Or a working wireless-ADB connection. |
 
 ---
 
 ## Setup
 
-### 1. Install ADB
-
-Download **Android SDK Platform Tools** from Google and either:
-
-- Add the folder to your Windows `PATH`, **or**
-- Drop the extracted `adb.exe` (and its DLLs) into a folder named `adb`
-  placed right next to `DCX.bat`. DCX neo automatically `cd`s into `adb\` if it
-  finds it.
-
-### 2. Enable USB debugging on the phone
-
-1. Open **Settings → About phone**.
-2. Tap **Build number** seven times to unlock **Developer options**.
-3. Open **Settings → System → Developer options**.
-4. Turn on **USB debugging**.
-5. Connect the phone via USB and tap **Allow** on the RSA fingerprint prompt.
-
-### 3. Run DCX neo
-
-Double-click `DCX.bat` (or run it from a `cmd` window).
+1. **Install ADB** — download **Android SDK Platform Tools** from Google, then
+   add it to your `PATH` *or* drop `adb.exe` (and its DLLs) into an `adb\`
+   folder next to `DCX.bat` (DCX neo `cd`s into it automatically).
+2. **Enable USB debugging** — Settings → About phone → tap **Build number**
+   ×7 → Developer options → **USB debugging**. Connect and tap **Allow** on the
+   RSA prompt.
+3. **Run** `DCX.bat` (double-click or from `cmd`).
 
 ---
 
 ## First run
 
-When DCX neo starts it performs several safety checks before showing the menu:
-
-1. **Defines colours** (ANSI escape codes) so all messages render correctly.
-2. **Checks that ADB is available.** If not, it tells you to install ADB or
-   place it next to the script, then exits.
-3. **Waits up to 10 seconds for an authorised device.** If none is found it
-   reminds you to enable USB debugging, approve the fingerprint, and check
-   the cable, then exits.
-4. **Detects your Android API level and device model** and prints them, e.g.
-   `Device: Pixel 7   API level: 34`.
-
-After that, you land on the **Main menu**.
-
-The Main menu, Gaming, Battery and Optimize screens also show a small live
-header with device **uptime** and current **CPU load**.
+On startup DCX neo defines ANSI colours, verifies ADB is present, waits up to
+10 s for an authorised device (with guidance if none appears), then detects
+and prints your device model and Android API level, e.g.
+`Device: Pixel 7   API level: 34`. The Main, Gaming, Battery and Optimize
+screens also show a live header with **uptime** and **CPU load**.
 
 ---
 
@@ -115,18 +69,17 @@ header with device **uptime** and current **CPU load**.
 
 | # | Option | What it does |
 |---|---|---|
-| 1 | **Gaming** | Performance-oriented toggles (GPU renderer, ANGLE, network boost, etc). |
-| 2 | **Battery** | Two pages of battery / background-management toggles + diagnostics. |
-| 3 | **Optimize Android** | One-shot maintenance tasks (dexopt, fstrim, cache, compile, etc). |
-| 4 | **Auto** | Applies a large batch of safe optimisations in one go. |
-| 5 | **CheckSetting** | Generates a full device diagnostic report. |
+| 1 | **Gaming** | Performance toggles (GPU renderer, ANGLE, network boost…). |
+| 2 | **Battery** | Two pages of battery / background toggles + diagnostics. |
+| 3 | **Optimize Android** | One-shot maintenance (dexopt, fstrim, cache, compile…). |
+| 4 | **Auto** | Applies a batch of safe optimisations in one go. |
+| 5 | **CheckSetting** | Full device diagnostic report. |
 | 6 | **Github** | Opens the project page. |
-| 7 | **Reboot** | Reboots the connected device. |
-| 8 | **Exit** | Closes DCX neo. |
-| 9 | **Shell** | Drops you into an interactive `adb shell`. |
+| 7 | **Reboot** | Reboots the device. |
+| 8 | **Exit** | Closes DCX neo (stops the ADB server when appropriate). |
+| 9 | **Shell** | Interactive `adb shell`. |
 | 10 | **Benchmark** | Quick CPU + storage micro-benchmark. |
-| 11 | **Backup** | Saves current toggleable settings to a restore script. |
-| 12 | **Restore** | Re-applies a previously saved backup. |
+| 11 / 12 | **Backup / Restore** | Save / re-apply toggleable settings. |
 
 ---
 
@@ -134,283 +87,189 @@ header with device **uptime** and current **CPU load**.
 
 | # | Option | What it does |
 |---|---|---|
-| 1 | **Toggle GMS** | Enable/disable Google Mobile Services. Disabling shows a clear warning (breaks push, Maps, sign-in, Pay, etc) and asks for confirmation. |
-| 2 | **Toggle Thermal-Service** | Override the thermal service status (0–6) to relax throttling. Input is validated. |
-| 3 | **Toggle Package Verifier** | Turn Play Protect package verification on/off. |
-| 4 | **Toggle Game-Overlay** | Control the game overlay / game-mode settings. |
-| 5 | **Toggle Performance** | Apply / remove a bundle of performance-oriented properties. |
-| 6 | **Network Boost** | Safe TCP receive-window hint, optional Cloudflare/Google/AdGuard private DNS, preferred network mode (LTE/5G), and a full revert. *(The old Wi-Fi power tweaks were removed — they could break Wi-Fi on Android 15. See the warning below.)* |
-| 7 | **GPU Renderer (Skia GL/Vulkan)** | Switch the HWUI renderer between `skiagl` (default), `skiavk` (Skia Vulkan), or clear the override. |
-| 8 | **Force ANGLE for All Apps** | Force all GLES apps through ANGLE (GLES-on-Vulkan). **⚠️ Can crash most apps on non-Pixel GPUs (e.g. MediaTek)** — gated behind a Y/N confirmation. Persists across reboots, so a reboot won't fix a crash loop; you must Disable/Delete it here. |
-| 9 | **Back** | Return to the main menu. |
+| 1 | **Toggle GMS** | Enable/disable Google Mobile Services (warns + confirms — disabling breaks push, Maps, sign-in, Pay…). |
+| 2 | **Toggle Thermal-Service** | Override thermal status (0–6) to relax throttling. Validated input. |
+| 3 | **Toggle Package Verifier** | Play Protect package verification on/off. |
+| 4 | **Toggle Game-Overlay** | Game overlay / game-mode settings. |
+| 5 | **Toggle Performance** | Apply / remove a bundle of performance properties. |
+| 6 | **Network Boost** | Safe TCP receive-window hint, optional private DNS (Cloudflare/Google/AdGuard), preferred network mode (LTE/5G), full revert. ⚠️ see below. |
+| 7 | **GPU Renderer** | Switch HWUI renderer: `skiagl` (default) / `skiavk` (Skia Vulkan) / clear. |
+| 8 | **Force ANGLE for All Apps** | Route all GLES apps through ANGLE. ⚠️ see below. |
+| 9 | **Back** | — |
 
-> **⚠️ Two Gaming toggles can break things on some devices — read before using:**
->
-> - **Network Boost** now only applies a harmless TCP receive-window hint.
+> **⚠️ Two of these are device-dependent (from real-world testing):**
+> - **Network Boost** now applies only a harmless TCP receive-window hint.
 >   Earlier versions also wrote deprecated Wi-Fi keys (`wifi_sleep_policy`,
->   `wifi_idle_ms`, etc.) which were found to **kill Wi-Fi connectivity on
->   Android 15** (a reboot did not recover it — only **Revert** did). Those
->   are gone from the apply step; Revert still clears them for cleanup.
-> - **Force ANGLE for All Apps** is device/GPU dependent and has been observed
->   to **crash most apps on launch** on non-Pixel hardware. It's opt-in with a
->   confirmation prompt. If apps start crashing, return to the menu and
->   **Disable** or **Delete** it — rebooting will not help because the setting
->   persists.
+>   `wifi_idle_ms`…) that **killed Wi-Fi on Android 15** — a reboot didn't
+>   recover it, only **Revert** did. Those are gone; Revert still clears any
+>   left over from an old run.
+> - **Force ANGLE** can **crash most apps on launch** on non-Pixel GPUs (e.g.
+>   MediaTek). It's opt-in with a Y/N prompt and **persists across reboots**,
+>   so a reboot won't fix a crash loop — return here and **Disable**/**Delete**.
 
-**GPU Renderer** and **ANGLE** are the genuinely effective graphics switches
-(see [What actually works](#what-actually-works-vs-placebo)). After changing
-them you can verify with:
-
-```
-adb shell dumpsys gfxinfo <package> | findstr Pipeline
-```
+**GPU Renderer** and **ANGLE** are the genuinely effective graphics switches.
+Verify a change with: `adb shell dumpsys gfxinfo <package> | findstr Pipeline`
 
 ---
 
 ### Battery
 
-The Battery section spans **two pages**.
+Two pages.
 
-#### Page 1
+**Page 1** — Toggle: Power Saver · Animation · Auto Wifi · Sync · Motion ·
+ZRAM · Extreme Power Saver · Send Error · Lock Profilling · Logs/etc · Next
+Page · Back.
 
-| # | Option |
-|---|---|
-| 1 | Toggle Power Saver |
-| 2 | Toggle Animation |
-| 3 | Toggle Auto Wifi |
-| 4 | Toggle Sync |
-| 5 | Toggle Motion |
-| 6 | Toggle ZRAM |
-| 7 | Toggle Extreme Power Saver |
-| 8 | Toggle Send Error |
-| 9 | Toggle Lock Profilling |
-| 10 | Toggle Logs/etc |
-| 11 | Next Page |
-| 12 | Back |
-
-#### Page 2
+**Page 2:**
 
 | # | Option | What it does |
 |---|---|---|
-| 1 | **Toggle Log (For User Apps)** | Silence logging for third-party apps. |
+| 1 | **Toggle Log (User Apps)** | Silence logging for third-party apps. |
 | 2 | **Universal Toggle Logs/etc** | Broad logging on/off. |
-| 3 | **Toggle Deviceidle Whitelist** | Add/remove apps from the Doze whitelist (system-app removal is guarded with a warning + protected list). |
+| 3 | **Toggle Deviceidle Whitelist** | Add/remove Doze-whitelist apps (system-app removal is guarded with a protected list). |
 | 4 | **Hibernate App** | Hibernate a specific package. |
-| 5 | **Refresh Rate Lock** | Lock to 60 / 90 / 120 Hz, set adaptive (1–120), or restore defaults. |
-| 6 | **Force Doze Now** | Immediately force the device into deep idle; unforce; or show state. |
-| 7 | **App Hibernation (system-wide)** | Enable/disable Android 12+ app hibernation. |
-| 8 | **Account Sync Toggle** | Master switch for all account auto-sync (battery saver). |
-| 9 | **Voice Hotword Toggle** | Disable the always-on "Hey Google"/hotword pipeline. |
-| A | **Wake-Lock Audit** | Battery-drain diagnostic (see below). |
-| 0 | **Back** | Return to the main menu. |
+| 5 | **Refresh Rate Lock** | Lock 60/90/120 Hz, adaptive (1–120), or restore. |
+| 6 | **Force Doze Now** | Force deep idle now; unforce; or show state. |
+| 7 | **App Hibernation** | Enable/disable Android 12+ system-wide hibernation. |
+| 8 | **Account Sync Toggle** | Master switch for all account auto-sync. |
+| 9 | **Voice Hotword Toggle** | Disable the always-on "Hey Google" pipeline. |
+| A | **Wake-Lock Audit** | Battery-drain diagnostic (below). |
+| 0 | **Back** | — |
 
-**Wake-Lock Audit** collects the most useful battery dumps into one report
-saved in `%TEMP%`:
-
-1. Currently held wake locks (`dumpsys power`)
-2. Top wake-lock holders since last charge (`dumpsys batterystats`)
-3. Doze / deep-sleep state (`dumpsys deviceidle`)
-4. Top alarms / background wakeups (`dumpsys alarm`)
-5. Current CPU consumers (`dumpsys cpuinfo`)
-
-It can open the report in Notepad, paginate it, or show a quick summary, and
-includes an interpretation guide for spotting the app draining your battery.
+**Wake-Lock Audit** collects the most useful battery dumps into one `%TEMP%`
+report — held wake locks (`dumpsys power`), top holders since charge
+(`batterystats`), Doze state (`deviceidle`), top wakeups (`alarm`), and CPU
+consumers (`cpuinfo`) — then opens it in Notepad, paginates, or summarises,
+with an interpretation guide for spotting the app draining your battery.
 
 ---
 
 ### Optimize Android
 
-One-shot maintenance and compilation tasks.
-
 | # | Option | What it does |
 |---|---|---|
 | 1 | **Run bg-dexopt-job** | Trigger the background dexopt job. |
-| 2 | **Run Fstrim** | Trim the filesystem so flash stays fast. Runs **silently** (Android prints nothing on success — that's normal); shows free space before/after. On some devices the trim only fully completes while charging + idle. |
-| 3 | **Run Kill-all** | Force-stop background apps. Skips the current foreground app and protected packages to avoid data loss. |
-| 4 | **Run Compile App** | Compile a single package; mode and package name are validated. |
-| 5 | **Run Clear Cache** | Trim or wipe app caches (wipe requires root). |
-| 6 | **Run Tweak SurfaceFlinger** | Apply refresh-rate-specific SurfaceFlinger timing tweaks. |
+| 2 | **Run Fstrim** | Trim the filesystem. Runs **silently** (no output on success is normal); shows free space before/after. On some devices it only completes while charging + idle. |
+| 3 | **Run Kill-all** | Force-stop background apps (skips the foreground app and protected packages). |
+| 4 | **Run Compile App** | Compile a single package (mode + name validated). |
+| 5 | **Run Clear Cache** | Trim or wipe app caches (wipe needs root). |
+| 6 | **Run Tweak SurfaceFlinger** | Refresh-rate-specific SF timing tweaks (below). |
 | 7 | **Run Clear Last Used** | Reset app usage stats. |
-| 8 | **Compile All Apps** | Recompile **every** installed app. See modes below. |
+| 8 | **Compile All Apps** | Recompile **every** app (modes below). |
 | 9 | **Animation Speed** | Set all three animation scales (0 / 0.5 / 0.75 / 1.0 / custom). |
-| 0 | **Back** | Return to the main menu. |
+| 0 | **Back** | — |
 
-#### Compile All Apps — modes
+**Compile All Apps — modes:** `everything-profile` (**recommended** — heavy
+but profile-aware), `everything` (heaviest standard), `speed` (hot methods
+only), `speed-profile` (Android default), and **heaviest optimization** (full
+all-method compile + layouts + dexopt; uses the most storage/time). Compiling
+all apps can take **5–30+ min** and warms the device — keep it on a charger.
 
-| Mode | Description |
-|---|---|
-| **everything-profile** | Heavy but respects each app's usage profile. **Recommended.** |
-| **everything** | Heaviest standard mode. |
-| **speed** | Compile hot methods only (fast). |
-| **speed-profile** | Android default behaviour. |
-| **heaviest optimization** | Full `everything` compilation of all methods + layout compilation + dexopt job. Uses the most storage and time. Version-aware: on Android 13 and below it adds `--check-prof false`; on Android 14+ that flag (and the layout step) is dropped automatically because ART Service no longer accepts it. |
+**Tweak SurfaceFlinger:** pick a refresh rate (**60/90/120/144 Hz**), then a
+profile (**Balance/Gaming/Battery**) that sets matching phase-offset and
+duration properties. A **Remove** option clears them.
 
-> Compiling all apps can take **5–30+ minutes** and warms the device. Keep
-> it on a charger.
-
-#### Android version awareness (dexopt & compile)
-
-DCX neo picks the correct dexopt/compile commands for your Android version
-automatically — you don't choose anything:
-
-| Android version | What runs |
-|---|---|
-| **13 and below (API ≤ 33)** | The classic package-manager path: `pm compile -a -f -m <mode>` and `pm bg-dexopt-job`, including extra flags like `--check-prof false` in the heaviest mode. |
-| **14 and above (API ≥ 34)** | Dexopt is handled by **ART Service**. Compilation uses `pm compile -m <mode> -f -a` (still routed to ART Service) with the removed flags omitted, and the background job prefers the native `pm art dexopt-packages -r bg-dexopt`, falling back to `pm bg-dexopt-job` if a particular build doesn't expose `pm art`. |
-
-This means the same menu options work whether you're on Android 12 or
-Android 15+ — the script detects the API level on startup and routes
-accordingly.
-
-#### Tweak SurfaceFlinger
-
-Choose a target refresh rate — **60 / 90 / 120 / 144 Hz** — and then a
-profile (**Balance / Gaming / Battery**) that sets matching SurfaceFlinger
-phase-offset and duration properties. A **Remove** option clears them.
+> **Dexopt/compile are version-aware** — you don't choose anything. On
+> **API ≤ 33** DCX neo uses the classic `pm compile` / `pm bg-dexopt-job`
+> path. On **API ≥ 34** dexopt is ART Service, so it uses `pm compile -m <mode>
+> -f -a` (removed flags like `--check-prof` / `--compile-layouts` dropped) and
+> prefers the native `pm art dexopt-packages -r bg-dexopt`, falling back to
+> `pm bg-dexopt-job` if a build doesn't expose `pm art`.
 
 ---
 
 ### Auto Setup
 
-**Auto** runs a large, curated batch of optimisations in one pass: logging
-cleanup (including the WindowManager trace channels and dropbox rate limits),
-dexopt, thermal status, and the universal log silencer. It is the fastest way
-to apply a sensible baseline.
+Runs a curated batch in one pass: logging cleanup (WindowManager trace
+channels, dropbox rate limits), dexopt, thermal status, and the universal log
+silencer. The fastest way to a sensible baseline.
 
-> **Note:** Auto Setup deliberately does **not** enable ANGLE. Earlier
-> versions auto-enabled it on Android 12+, which crashed apps on some
-> non-Pixel devices. ANGLE is now opt-in only, under **Gaming → Force ANGLE
-> for All Apps**, so Auto Setup stays safe for every device.
+> Auto Setup deliberately does **not** enable ANGLE — earlier versions did, on
+> Android 12+, which crashed apps on some non-Pixel devices. ANGLE is opt-in
+> only (Gaming → Force ANGLE), so Auto stays safe for every device.
 
 ---
 
 ### CheckSetting (diagnostics)
 
-Generates a **full device diagnostic report** and saves it with a timestamp
-to `%TEMP%\dcx_report_<timestamp>.txt`, so reports are never overwritten and
-you can compare before/after applying tweaks.
-
-The report includes hardware (SoC, ABI, model), software (Android version,
-patch level, build), memory (RAM/swap/cached), storage, live state (uptime,
-CPU load, battery level/temp/voltage/health), display (refresh rate, size,
-density), **current values of the graphics/animation/sync tweaks DCX neo can
-change**, network mode, Doze whitelist, and the top RAM consumers.
-
-You can:
-- **Open in Notepad** — fully scrollable and searchable (recommended).
-- **Paginate with MORE** — view in the console page by page.
-- **Show summary** — a few key lines printed inline.
+Generates a timestamped report at `%TEMP%\dcx_report_<timestamp>.txt` (never
+overwritten, so you can compare before/after). It covers hardware (SoC, ABI,
+model), software (version, patch, build), memory, storage, live state
+(uptime, CPU, battery level/temp/voltage/health), display, **current values
+of the tweaks DCX neo can change**, network mode, Doze whitelist and top RAM
+consumers. Open it in Notepad (recommended), paginate with `MORE`, or show an
+inline summary.
 
 ---
 
 ### Backup & Restore
 
-A safety net so you can experiment freely.
-
-**Backup** reads the current value of every Settings.Global / Settings.System
-key, `device_config` flag and system property that DCX neo is able to toggle, and
-writes them into a **stand-alone `.bat` restore script** in:
-
-```
-%USERPROFILE%\dcx_backups\dcx_backup_<timestamp>.bat
-```
-
-Because the backup is itself a normal batch file, you can:
-- **Run it directly** without DCX neo to restore,
-- **Open it in a text editor** and delete any lines you don't want to
-  restore, or
-- **Share it** to reproduce the same settings on another device.
-
-Example of what a backup file looks like:
+A safety net so you can experiment freely. **Backup** reads every
+Settings.Global/System key, `device_config` flag and property DCX neo can
+toggle, and writes a **stand-alone restore `.bat`** to
+`%USERPROFILE%\dcx_backups\dcx_backup_<timestamp>.bat`:
 
 ```bat
 @echo off
 :: DCX neo Settings Backup created ...
 adb shell settings put global window_animation_scale 1.0
 adb shell settings put system min_refresh_rate 60
-adb shell settings put global master_sync_status 1
 adb shell settings delete global angle_gl_driver_all_angle >nul 2>&1
 adb shell setprop debug.hwui.renderer "skiagl"
 ...
 pause
 ```
 
-**Restore** lists the backups (newest first), asks for confirmation, and then
-applies the chosen file. Both Backup and Restore can open the backups folder
-in Explorer.
+Because it's a normal batch file you can run it directly without DCX neo, edit
+out lines you don't want, or share it to reproduce settings elsewhere.
+**Restore** lists backups (newest first), confirms, then applies the chosen
+one. Both can open the backups folder in Explorer.
 
 ---
 
 ### Benchmark
 
-A quick, repeatable micro-benchmark (lower numbers are better):
-
-1. **CPU loop** — timed integer loop.
-2. **Storage random write** — ~10 MB write with `dd`.
-3. **Storage sequential read** — ~10 MB read with `dd`.
-
-Run it before and after optimising to compare. It uses a portable shell loop,
-so it works across devices that lack `seq`.
-
----
-
-### Other options
-
-- **Shell** — opens an interactive `adb shell` on the device.
-- **Reboot** — reboots the connected phone.
-- **Github** — opens the project page in your browser.
-- **Exit** — closes DCX neo (also stops the ADB server when appropriate).
+A quick, repeatable micro-benchmark (lower is better): a timed CPU loop, a
+~10 MB storage random write and a ~10 MB sequential read (both via `dd`). Run
+it before and after optimising to compare. Uses a portable shell loop, so it
+works on devices that lack `seq`.
 
 ---
 
 ## What actually works vs. placebo
 
 Android only reads a specific set of settings, properties and `device_config`
-flags. A lot of "optimization scripts" floating around the internet set
-hundreds of made-up keys (e.g. `persist.sys.cpu.governor`,
-`debug.cpufreq.max_freq`, `persist.sys.gpu.boost_level`) that **Android never
-reads** — they get stored but do nothing.
+flags. Many "optimization scripts" set hundreds of made-up keys (e.g.
+`persist.sys.cpu.governor`, `debug.cpufreq.max_freq`) that **Android never
+reads** — they're stored but do nothing. DCX neo focuses on commands with a
+**real, documented effect**:
 
-DCX neo focuses on the commands that have a **real, documented effect**, such as:
-
-- **`debug.hwui.renderer`** (`skiagl` / `skiavk`) — the actual HWUI renderer.
-- **`settings put global angle_gl_driver_all_angle 1`** — the official way to
-  force ANGLE for all apps. *(Real, but device-dependent: crashes apps on some
-  non-Pixel GPUs — opt-in with a warning, not in Auto Setup.)*
-- **`persist.log.tag "*:S"`** — genuinely silences logcat.
-- **Animation scales** (`window/transition/animator_*`) — the classic, real
-  "make it feel faster" tweak.
+- **`pm compile` / `pm bg-dexopt-job` / `pm art dexopt-packages` / `fstrim`** —
+  maintenance; the **most noticeable** wins (chosen per Android version).
+- **Animation scales** — the classic "make it feel faster" tweak.
+- **`debug.hwui.renderer`** (`skiagl`/`skiavk`) — the actual HWUI renderer.
+- **`angle_gl_driver_all_angle`** — the official ANGLE switch (real, but
+  device-dependent — see the Gaming warning).
 - **`min_refresh_rate` / `peak_refresh_rate`** — real refresh-rate control.
-- **`dumpsys deviceidle force-idle`**, **app hibernation**,
-  **`master_sync_status`**, **`hotword_detection_enabled`** — real
-  battery-related switches.
-- **`pm compile` / `pm bg-dexopt-job` / `pm art dexopt-packages` / `fstrim`**
-  — real maintenance (these are the tweaks with the most noticeable effect;
-  the compile/dexopt commands are chosen per Android version, see above).
+- **`deviceidle force-idle`, app hibernation, `master_sync_status`,
+  `hotword_detection_enabled`, `persist.log.tag "*:S"`** — real battery/log
+  switches.
 
-> **Note:** CPU/GPU frequency and governor changes are **not** possible via
-> `setprop` — they live in kernel sysfs and require **root**. DCX neo does not
-> pretend otherwise.
+> CPU/GPU frequency and governor changes are **not** possible via `setprop` —
+> they live in kernel sysfs and need **root**. DCX neo doesn't pretend
+> otherwise.
 
 ---
 
 ## Persistence & root
 
-- On a **non-rooted** device, `setprop`-based changes (like the GPU renderer)
-  apply immediately but **reset on reboot**. To make such properties
-  permanent you need root (e.g. a Magisk module or editing
-  `/system/build.prop`).
 - `settings put` and `device_config put` values (animation scales, refresh
-  rate, ANGLE, sync, hotword, etc.) **do persist** across reboots without
-  root.
-- On **Android 14+**, on-device dexopt is handled by **ART Service** instead
-  of the package manager. The legacy `pm compile` / `pm bg-dexopt-job`
-  commands still work (they're transparently routed to ART Service), but a
-  few flags were removed (`--check-prof`, `--compile-layouts`). DCX neo
-  detects the API level at startup and branches automatically: it drops the
-  removed flags on 14+ and prefers the native `pm art dexopt-packages`
-  command for the background job, with a fallback for builds that don't
-  expose `pm art`. You don't need to configure anything.
+  rate, ANGLE, sync, hotword…) **persist** across reboots without root.
+- `setprop`-based changes (e.g. GPU renderer) apply immediately but **reset on
+  reboot**; making them permanent needs root (Magisk module or `build.prop`).
+- **Android 14+** routes dexopt through **ART Service**; DCX neo detects this
+  at startup and adjusts the compile/dexopt commands automatically (details in
+  [Optimize Android](#optimize-android)).
 
 ---
 
@@ -418,24 +277,23 @@ DCX neo focuses on the commands that have a **real, documented effect**, such as
 
 | Problem | Fix |
 |---|---|
-| **"ADB not found"** on launch | Install Platform Tools and add to `PATH`, or place `adb.exe` in an `adb\` folder next to `DCX.bat`. |
-| **"No authorised device found"** | Enable USB debugging, replug the cable, and tap **Allow** on the phone's RSA prompt. Run `adb devices` to confirm it shows `device` (not `unauthorized`). |
-| **Something feels broken after tweaking** | **Reboot the phone.** Most live tweaks reset on reboot, and that clears any misbehaviour. |
-| **A tweak "didn't do anything"** | Use **CheckSetting** to read the current value back, and for graphics use `dumpsys gfxinfo <pkg> | findstr Pipeline`. Some properties need root to persist, or aren't supported on your Android version. |
-| **A specific game glitches under ANGLE** | Go to **Gaming → Force ANGLE for All Apps → Disable**. |
-| **Most apps crash on launch after enabling ANGLE** | This happens on some non-Pixel GPUs. **A reboot won't fix it** (the setting persists). Open DCX neo → **Gaming → Force ANGLE for All Apps → Disable** (or **Delete**). |
-| **Wi-Fi / network died after Network Boost** | Open **Gaming → Network Boost → Revert**. Current versions no longer apply the Wi-Fi keys that caused this, but Revert clears any left over from an older run. |
-| **ART Service printed a wall of text during dexopt** | Not errors — older versions dumped one line per package. Current versions print a short summary (optimised / failed counts) and only show real failures. A few failures are normal (some system packages can't be recompiled). |
-| **Want to undo everything** | Use **Restore** with a backup made earlier, or reboot for non-persistent changes. |
-| **"Unknown option: --compile-layouts" / "Unknown command"** | Expected on Android 12+ (the feature was removed; gone entirely on 14+ under ART Service). DCX neo skips the unsupported step automatically and continues — your compile still runs. |
-| **Colours look wrong / menu is misaligned** | Use Windows Terminal or a recent `cmd.exe`; very old consoles may not render ANSI colours or the box characters. |
+| **"ADB not found"** on launch | Install Platform Tools and add to `PATH`, or put `adb.exe` in an `adb\` folder next to `DCX.bat`. |
+| **"No authorised device found"** | Enable USB debugging, replug, tap **Allow** on the phone. Check `adb devices` shows `device` (not `unauthorized`). |
+| **Something feels broken after tweaking** | **Reboot** — most live tweaks reset on reboot and that clears it. |
+| **A tweak "didn't do anything"** | Read the value back via **CheckSetting** (graphics: `dumpsys gfxinfo <pkg> \| findstr Pipeline`). Some keys need root or a newer Android. |
+| **Most apps crash after enabling ANGLE** | Common on non-Pixel GPUs; **a reboot won't help** (it persists). Gaming → Force ANGLE → **Disable**/**Delete**. |
+| **Wi-Fi died after Network Boost** | Gaming → Network Boost → **Revert** (clears any old Wi-Fi keys). |
+| **ART Service printed a wall of text** | Not errors — older versions dumped a line per package. Current builds show a summary (optimised/failed) and only real failures; a few failures are normal. |
+| **"Unknown option: --compile-layouts" / "Unknown command"** | Expected on Android 12+ (removed; gone on 14+ under ART Service). DCX neo skips it automatically and continues. |
+| **Want to undo everything** | **Restore** a backup, or reboot for non-persistent changes. |
+| **Colours / alignment look wrong** | Use Windows Terminal or a recent `cmd.exe`; very old consoles don't render ANSI colours or box characters. |
 
 ---
 
 ## Credits
 
-- **AnOrmaluser12** — original author. ([@AnOrmaluser12](https://github.com/AnOrmaluser12))
-- **S1nt3r** — updates and fixes.
+- **AnOrmaluser12** — original author ([@AnOrmaluser12](https://github.com/AnOrmaluser12))
+- **S1nt3r** — updates and fixes
 
 DCX is provided **as-is, with no warranty**. You are responsible for any
 changes you apply to your device.
@@ -443,6 +301,10 @@ changes you apply to your device.
 ---
 
 ## License & Media Notice
-This project's source code is licensed under the GNU GPLv3. 
 
-Exception: The image file [4152900.jpg] is excluded from the GPL-3.0 license. It is owned by its respective creator and is included strictly for personal, non-commercial display. If you fork or reuse this project, you must remove or replace this image.
+This project's source code is licensed under the **GNU GPLv3**.
+
+Exception: the image file [4152900.jpg] is excluded from the GPL-3.0 license.
+It is owned by its respective creator and is included strictly for personal,
+non-commercial display. If you fork or reuse this project, you must remove or
+replace this image.
