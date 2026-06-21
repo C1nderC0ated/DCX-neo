@@ -111,7 +111,7 @@ echo.
 echo                           %r%Gaming%w%         %gold%Battery%w%   %g%Optimize Android%w%
 echo                             [1]            [2]            [3]                                        
 echo.
-echo                            %d%Auto%w%       %d%CheckSetting%w%       %d%Github%w%
+echo                            %d%Auto%w%       %d%CheckSetting%w%      %d%App Mgr%w%
 echo                             [4]            [5]            [6]
 echo.
 echo.
@@ -128,7 +128,7 @@ if "%kb%"=="2" goto Battery
 if "%kb%"=="3" goto Optimize
 if "%kb%"=="4" goto Auto
 if "%kb%"=="5" goto Check
-if "%kb%"=="6" goto github
+if "%kb%"=="6" goto appmgr
 if "%kb%"=="7" goto reboot
 if "%kb%"=="8" goto exitscript
 if "%kb%"=="9" goto shell
@@ -391,10 +391,6 @@ exit /b
 adb reboot
 timeout /t 1 /nobreak > nul
 adb disconnect
-goto menu
-
-:github
-start https://github.com/C1nderC0ated/xprt/releases/tag/1.1.1.1
 goto menu
 
 :check
@@ -4165,6 +4161,256 @@ adb shell device_config put storage_native_boot target_dirty_ratio %aducsa%
 echo Press Any Button To Go Back
 pause > nul
 goto Gaming
+
+:appmgr
+cls
+title App Manager
+call :logo
+echo                            %b%[%w% App Manager %b%]%w%
+echo.
+echo   Background control + debloat. Every action here is reversible.
+echo.
+echo                 %g%[%w%1%g%]%w% Restrict app background (deny RUN_IN_BACKGROUND)
+echo                 %g%[%w%2%g%]%w% Allow app background (revert)
+echo                 %g%[%w%3%g%]%w% Debloat - remove an app by package name
+echo                 %g%[%w%4%g%]%w% Debloat - suggested bloatware (auto-detect brand)
+echo                 %g%[%w%5%g%]%w% List installed packages (to Notepad)
+echo                 %g%[%w%6%g%]%w% Restore a removed app
+echo                 %g%[%w%7%g%]%w% Back
+set /p am="Choose An Option >> "
+if "%am%"=="1" goto appmgr_restrict
+if "%am%"=="2" goto appmgr_allow
+if "%am%"=="3" goto appmgr_debloat_input
+if "%am%"=="4" goto appmgr_suggest
+if "%am%"=="5" goto appmgr_listpkgs
+if "%am%"=="6" goto appmgr_restore_input
+if "%am%"=="7" goto menu
+goto appmgr
+:: ===================================================================
+:: Restrict / Allow background  (cmd appops RUN_IN_BACKGROUND)
+:: ===================================================================
+:appmgr_restrict
+cls
+title Restrict Background
+call :logo
+echo  Denies RUN_IN_BACKGROUND for an app so it can't run in the
+echo  background (saves battery). Reversible with "Allow background".
+echo  Tip: use "List installed packages" first if you don't know the name.
+echo.
+set /p pkg="Package name (blank = cancel) >> "
+if "%pkg%"=="" goto appmgr
+adb shell pm list packages < nul 2>nul | findstr /C:"package:%pkg%" >nul
+if errorlevel 1 (
+    echo [%r%!%w%] "%pkg%" is not installed.
+    pause >nul
+    goto appmgr_restrict
+)
+adb shell cmd appops set %pkg% RUN_IN_BACKGROUND deny
+echo.
+echo Done - %pkg% is now denied background execution.
+pause >nul
+goto appmgr
+
+:appmgr_allow
+cls
+title Allow Background
+call :logo
+echo  Re-allows RUN_IN_BACKGROUND for an app (undo of Restrict).
+echo.
+set /p pkg="Package name (blank = cancel) >> "
+if "%pkg%"=="" goto appmgr
+adb shell pm list packages < nul 2>nul | findstr /C:"package:%pkg%" >nul
+if errorlevel 1 (
+    echo [%r%!%w%] "%pkg%" is not installed.
+    pause >nul
+    goto appmgr_allow
+)
+adb shell cmd appops set %pkg% RUN_IN_BACKGROUND allow
+echo.
+echo Done - %pkg% may run in the background again.
+pause >nul
+goto appmgr
+:: ===================================================================
+:: Debloat by package name  (pm uninstall -k --user 0)
+:: -k keeps app data; reversible via Restore or factory reset.
+:: A short hard-block list refuses known bootloop-causing packages.
+:: ===================================================================
+:appmgr_debloat_input
+cls
+title Debloat by Package
+call :logo
+echo  %r%Removes an app for the current user%w% (pm uninstall -k --user 0).
+echo  Data is kept (-k) and it's reversible via Restore or a factory
+echo  reset, but removing a critical package can cause a bootloop.
+echo.
+echo  %y%Only remove apps you recognise.%w% Never remove system UI, phone,
+echo  or anything you can't identify. On Transsion (Tecno/Infinix) phones
+echo  never remove com.hoffnung - it looks like bloat but bootloops.
+echo.
+set /p pkg="Package name (blank = cancel) >> "
+if "%pkg%"=="" goto appmgr
+set "BLOCKED=0"
+for %%c in (com.android.systemui com.hoffnung com.android.phone com.android.settings com.miui.daemon com.android.systemui.plugins com.android.providers.telephony com.huawei.hwid com.huawei.android.pushagent com.huawei.hwasm com.huawei.android.hwouc com.huawei.systemserver) do if /i "%pkg%"=="%%c" set "BLOCKED=1"
+if "%BLOCKED%"=="1" (
+    echo [%r%BLOCKED%w%] "%pkg%" is a critical package and will not be removed.
+    pause >nul
+    goto appmgr_debloat_input
+)
+adb shell pm list packages < nul 2>nul | findstr /C:"package:%pkg%" >nul
+if errorlevel 1 (
+    echo [%r%!%w%] "%pkg%" is not installed.
+    pause >nul
+    goto appmgr_debloat_input
+)
+echo.
+echo  About to remove: %pkg%
+echo    [Y] Remove    [N] Cancel
+choice /c:YN /n >nul
+if errorlevel 2 goto appmgr
+adb shell pm uninstall -k --user 0 %pkg%
+echo.
+echo Done. To bring it back: App Manager -^> Restore (or a factory reset).
+pause >nul
+goto appmgr
+
+:appmgr_restore_input
+cls
+title Restore Removed App
+call :logo
+echo  Reinstalls an app removed with Debloat (pm install-existing).
+echo  Works as long as it was removed with -k and not fully wiped.
+echo.
+set /p pkg="Package name to restore (blank = cancel) >> "
+if "%pkg%"=="" goto appmgr
+adb shell cmd package install-existing %pkg%
+echo.
+echo If it was present, %pkg% is restored for the current user.
+pause >nul
+goto appmgr
+:: ===================================================================
+:: List installed packages to a file and open it (read-only, safe).
+:: ===================================================================
+:appmgr_listpkgs
+cls
+title Installed Packages
+call :logo
+echo  [%g%1%w%] All packages
+echo  [%g%2%w%] User + updated apps only (-3) - usually where bloat lives
+echo  [%g%3%w%] Back
+set /p lp="Choose An Option >> "
+if "%lp%"=="3" goto appmgr
+set "PKGLIST=%TEMP%\dcx_installed_packages.txt"
+if "%lp%"=="1" adb shell pm list packages < nul 2>nul > "%PKGLIST%"
+if "%lp%"=="2" adb shell pm list packages -3 < nul 2>nul > "%PKGLIST%"
+if not exist "%PKGLIST%" goto appmgr
+start "" notepad "%PKGLIST%"
+echo Opened in Notepad. Use these names with Restrict / Debloat.
+pause >nul
+goto appmgr
+:: ===================================================================
+:: Suggested bloatware - auto-detect brand, only offer packages that
+:: are (a) on a vetted safe-to-remove list AND (b) actually installed.
+:: Package lists are sourced from UAD-NG and community debloat guides.
+:: ===================================================================
+:appmgr_suggest
+cls
+title Suggested Bloatware
+call :logo
+set "BRAND="
+for /f "delims=" %%i in ('adb shell getprop ro.product.brand 2^>nul ^<nul') do set "BRAND=%%i"
+set "MANU="
+for /f "delims=" %%i in ('adb shell getprop ro.product.manufacturer 2^>nul ^<nul') do set "MANU=%%i"
+set "PKGDUMP=%TEMP%\dcx_pkgs.txt"
+adb shell pm list packages < nul 2>nul > "%PKGDUMP%"
+echo  Detected brand: %BRAND%   manufacturer: %MANU%
+echo.
+echo  These groups only remove well-documented, safe-to-remove apps that
+echo  are actually installed. Removal is for the current user (-k keeps
+echo  data) and reversible via Restore or a factory reset. Critical
+echo  packages (system UI, telephony, etc) are never listed.
+echo.
+echo                 %g%[%w%1%g%]%w% Facebook bloat (any brand)
+echo                 %g%[%w%2%g%]%w% Optional Google apps (YouTube, Drive, Meet...)
+set "BRANDCAT=0"
+echo %BRAND% %MANU%| findstr /I "xiaomi redmi poco" >nul && set "BRANDCAT=Xiaomi"
+echo %BRAND% %MANU%| findstr /I "tecno infinix itel transsion" >nul && set "BRANDCAT=Transsion"
+echo %BRAND% %MANU%| findstr /I "samsung" >nul && set "BRANDCAT=Samsung"
+echo %BRAND% %MANU%| findstr /I "huawei honor" >nul && set "BRANDCAT=Huawei"
+if not "%BRANDCAT%"=="0" echo                 %g%[%w%3%g%]%w% %BRANDCAT% bloat
+echo                 %g%[%w%4%g%]%w% Back
+set /p sg="Choose An Option >> "
+if "%sg%"=="1" goto appmgr_bloat_fb
+if "%sg%"=="2" goto appmgr_bloat_google
+if "%sg%"=="3" goto appmgr_bloat_brand
+if "%sg%"=="4" goto appmgr
+goto appmgr_suggest
+
+:appmgr_bloat_fb
+set "BLOATDESC=Facebook background services + the Facebook app (pure bloat)."
+set "BLOATSET=com.facebook.katana com.facebook.appmanager com.facebook.services com.facebook.system"
+goto _remove_present_set
+
+:appmgr_bloat_google
+set "BLOATDESC=Optional Google apps - no bootloop, you just lose those apps."
+set "BLOATSET=com.google.android.apps.tachyon com.google.android.youtube com.google.android.apps.youtube.music com.google.android.apps.docs com.google.android.videos com.google.android.apps.wellbeing"
+goto _remove_present_set
+
+:appmgr_bloat_brand
+if "%BRANDCAT%"=="Xiaomi" set "BLOATDESC=MIUI/HyperOS ads, analytics and optional stock apps."
+if "%BRANDCAT%"=="Xiaomi" set "BLOATSET=com.miui.analytics com.miui.msa.global com.miui.systemAdSolution com.xiaomi.mipicks com.mi.globalbrowser com.miui.yellowpage com.miui.videoplayer com.miui.player com.mi.globalminusscreen"
+if "%BRANDCAT%"=="Transsion" set "BLOATDESC=Transsion (Tecno/Infinix/itel) preinstalled bloat."
+if "%BRANDCAT%"=="Transsion" set "BLOATSET=com.transsion.ossettingsext com.afmobi.boomplayer com.funbase.xradio com.transsion.fmradio com.infinix.xshare com.transsnet.store com.transsion.carlcare net.bat.store com.talpa.hibrowser com.transsion.smartpanel com.transsion.magazineservice.xos com.transsion.healthlife com.transsion.tecnospot com.transsion.magicshow com.transsion.statisticalsales com.transsion.plat.appupdate com.transsion.batterylab com.rlk.weathers"
+if "%BRANDCAT%"=="Samsung" set "BLOATDESC=Samsung Free / Bixby / tips (optional)."
+if "%BRANDCAT%"=="Samsung" set "BLOATSET=com.samsung.android.app.spage com.samsung.android.bixby.agent com.samsung.android.app.tips com.samsung.android.game.gamehome"
+if "%BRANDCAT%"=="Huawei" set "BLOATDESC=Huawei/Honor (EMUI/HarmonyOS) optional apps and promo services."
+if "%BRANDCAT%"=="Huawei" set "BLOATSET=com.huawei.search com.huawei.hitouch com.huawei.intelligent com.huawei.browser com.huawei.android.thememanager com.huawei.health com.huawei.tips com.huawei.hiskytone com.huawei.vassistant com.huawei.appmarket com.huawei.fastapp com.huawei.android.totemweather com.huawei.hifolder com.huawei.parentcontrol com.huawei.bd"
+if "%BRANDCAT%"=="0" goto appmgr_suggest
+goto _remove_present_set
+:: -------------------------------------------------------------------
+:: Shared remover: shows which of %BLOATSET% are installed (using the
+:: %PKGDUMP% list), then removes them all after one confirmation.
+:: -------------------------------------------------------------------
+:_remove_present_set
+cls
+title Debloat : review
+call :logo
+echo  %BLOATDESC%
+echo.
+if not exist "%PKGDUMP%" adb shell pm list packages < nul 2>nul > "%PKGDUMP%"
+echo  Installed packages from this group (these will be removed):
+echo.
+set "_found="
+set "_n=0"
+for %%p in (%BLOATSET%) do (
+    findstr /C:"package:%%p" "%PKGDUMP%" >nul
+    if not errorlevel 1 (
+        echo     %%p
+        set "_found=!_found! %%p"
+        set /a _n+=1
+    )
+)
+echo.
+if "%_n%"=="0" (
+    echo  None of this group's packages are installed. Nothing to do.
+    pause >nul
+    goto appmgr_suggest
+)
+echo  Total: %_n% package(s). Removed for the current user only (-k keeps
+echo  data). Restore later via App Manager -^> Restore, or a factory reset.
+echo.
+echo    [Y] Remove these now
+echo    [N] Cancel
+choice /c:YN /n >nul
+if errorlevel 2 goto appmgr_suggest
+echo.
+for %%p in (%_found%) do (
+    echo Removing %%p ...
+    adb shell pm uninstall -k --user 0 %%p
+)
+echo.
+echo Done.
+pause >nul
+goto appmgr_suggest
 
 :logo
 echo.
