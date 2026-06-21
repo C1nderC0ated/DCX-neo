@@ -25,7 +25,7 @@ DCX neo is a community tool, not affiliated with Google or any manufacturer.
 ## Table of contents
 
 - [Requirements](#requirements) · [Setup](#setup) · [First run](#first-run)
-- [Menu reference](#menu-reference): [Main](#main-menu) · [Gaming](#gaming) · [Battery](#battery) · [Optimize](#optimize-android) · [Auto](#auto-setup) · [CheckSetting](#checksetting-diagnostics) · [Backup & Restore](#backup--restore) · [Benchmark](#benchmark)
+- [Menu reference](#menu-reference): [Main](#main-menu) · [Gaming](#gaming) · [Battery](#battery) · [Optimize](#optimize-android) · [Auto](#auto-setup) · [CheckSetting](#checksetting-diagnostics) · [Backup & Restore](#backup--restore) · [Benchmark](#benchmark) · [App Manager](#app-manager)
 - [What actually works](#what-actually-works-vs-placebo) · [Persistence & root](#persistence--root) · [Troubleshooting](#troubleshooting) · [Credits](#credits)
 
 ---
@@ -74,7 +74,7 @@ screens also show a live header with **uptime** and **CPU load**.
 | 3 | **Optimize Android** | One-shot maintenance (dexopt, fstrim, cache, compile…). |
 | 4 | **Auto** | Applies a batch of safe optimisations in one go. |
 | 5 | **CheckSetting** | Full device diagnostic report. |
-| 6 | **Github** | Opens the project page. |
+| 6 | **App Mgr** | Background restriction + debloat (remove/restore apps). |
 | 7 | **Reboot** | Reboots the device. |
 | 8 | **Exit** | Closes DCX neo (stops the ADB server when appropriate). |
 | 9 | **Shell** | Interactive `adb shell`. |
@@ -236,6 +236,43 @@ works on devices that lack `seq`.
 
 ---
 
+### App Manager
+
+App-level controls (background restriction + debloat). **Everything here is
+reversible.**
+
+| # | Option | What it does |
+|---|---|---|
+| 1 | **Restrict app background** | Deny `RUN_IN_BACKGROUND` for a package you name (stops it running in the background; saves battery). |
+| 2 | **Allow app background** | Undo the above for a package. |
+| 3 | **Debloat by package name** | Remove an app for the current user (`pm uninstall -k --user 0`). Validated + confirmed; data kept. |
+| 4 | **Suggested bloatware** | Auto-detects your brand and lists only **vetted, safe-to-remove** packages that are **actually installed** (cross-vendor Facebook, optional Google apps, plus Xiaomi / Transsion / Samsung / Huawei sets). |
+| 5 | **List installed packages** | Dump all packages — or user/updated apps (`-3`) where bloat usually lives — to Notepad. |
+| 6 | **Restore a removed app** | Bring a debloated app back (`pm install-existing`). |
+| 7 | **Back** | — |
+
+**How removal works (and why it's safe).** Debloat uses
+`pm uninstall -k --user 0`: the app is removed only for the current user and
+its data is **kept** (`-k`). The APK stays in `/system`, so you can restore it
+any time via **option 6** or a **factory reset**. OTA updates may also bring
+packages back.
+
+> **⚠️ Debloat warnings**
+> - Only remove apps you recognise. Removing a critical package can cause a
+>   **bootloop**. DCX neo hard-blocks known offenders — including
+>   **`com.hoffnung`**, which on Transsion (Tecno/Infinix/itel) phones looks
+>   like bloat but bootloops the device — plus system UI, phone, settings,
+>   telephony providers, and Huawei core services (`com.huawei.hwid`, push,
+>   FIDO/`hwasm`, OTA).
+> - The **Suggested** lists only ever show packages that are both
+>   community-vetted as safe *and* installed, and every removal asks for
+>   confirmation. Package lists are sourced from UAD-NG and community debloat
+>   guides.
+> - If something breaks after a debloat, use **Restore** (option 6) or reboot;
+>   a factory reset restores everything.
+
+---
+
 ## What actually works vs. placebo
 
 Android only reads a specific set of settings, properties and `device_config`
@@ -254,6 +291,8 @@ reads** — they're stored but do nothing. DCX neo focuses on commands with a
 - **`deviceidle force-idle`, app hibernation, `master_sync_status`,
   `hotword_detection_enabled`, `persist.log.tag "*:S"`** — real battery/log
   switches.
+- **`cmd appops … RUN_IN_BACKGROUND deny`, `pm uninstall -k --user 0`** —
+  background restriction and (reversible) debloat (App Manager).
 
 > CPU/GPU frequency and governor changes are **not** possible via `setprop` —
 > they live in kernel sysfs and need **root**. DCX neo doesn't pretend
@@ -285,6 +324,7 @@ reads** — they're stored but do nothing. DCX neo focuses on commands with a
 | **Wi-Fi died after Network Boost** | Gaming → Network Boost → **Revert** (clears any old Wi-Fi keys). |
 | **ART Service printed a wall of text** | Not errors — older versions dumped a line per package. Current builds show a summary (optimised/failed) and only real failures; a few failures are normal. |
 | **"Unknown option: --compile-layouts" / "Unknown command"** | Expected on Android 12+ (removed; gone on 14+ under ART Service). DCX neo skips it automatically and continues. |
+| **Bootloop / something broke after debloat** | Boot to recovery and **factory reset** restores every removed app (they're never deleted from `/system`). To revert a single app without resetting, use **App Mgr → Restore**. |
 | **Want to undo everything** | **Restore** a backup, or reboot for non-persistent changes. |
 | **Colours / alignment look wrong** | Use Windows Terminal or a recent `cmd.exe`; very old consoles don't render ANSI colours or box characters. |
 
