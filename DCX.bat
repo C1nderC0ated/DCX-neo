@@ -3404,7 +3404,8 @@ echo                                     %r%[%w%5%r%]%w% Toggle Performance
 echo                                     %r%[%w%6%r%]%w% Network Boost
 echo                                     %r%[%w%7%r%]%w% GPU Renderer (Skia GL/Vulkan)
 echo                                     %r%[%w%8%r%]%w% Force ANGLE for All Apps
-echo                                     %r%[%w%9%r%]%w% Back
+echo                                     %r%[%w%9%r%]%w% Display Scaler (Resolution / DPI)
+echo                                     %r%[%w%10%r%]%w% Back
 set /p game="Choose An Option >> "
 if "%game%"=="1" goto gms
 if "%game%"=="2" goto thermal
@@ -3414,8 +3415,162 @@ if "%game%"=="5" goto performance
 if "%game%"=="6" goto netboost
 if "%game%"=="7" goto gpurenderer
 if "%game%"=="8" goto angleall
-if "%game%"=="9" goto menu
+if "%game%"=="9" goto dispscaler
+if "%game%"=="10" goto menu
 :: FIX: invalid input previously fell into :gms
+goto Gaming
+:: ===================================================================
+:: NEW: Display Scaler (REAL, no-root)  -  wm size / wm density
+::
+:: Lowering the render resolution is one of the most effective
+:: no-root ways to gain GPU headroom in games and cut power draw:
+:: fewer pixels to shade every frame. We scale density by the SAME
+:: factor so dp stays constant -> the UI keeps the exact same size,
+:: the image is just rendered with fewer pixels (slightly softer).
+::
+::   wm size  WxH   /  wm size reset     - logical resolution
+::   wm density N   /  wm density reset  - DPI
+::
+:: Both are official commands (Android 4.3+/API 18+), persist across
+:: reboot WITHOUT root, and are fully reversible. Presets are computed
+:: live from the panel's TRUE physical resolution so they always fit
+:: the device. Because DCX drives this over USB, even an unusable
+:: on-screen result is recoverable from here via Reset.
+:: ===================================================================
+:dispscaler
+cls
+title Display Scaler (Resolution / DPI)
+call :logo
+:: Read the panel's TRUE native resolution + density as the baseline.
+set "PW=" & set "PH=" & set "PD=" & set "PDR=" & set "SZ=" & set "OVR=" & set "OVRD="
+for /f "tokens=2 delims=:" %%a in ('adb shell wm size ^<nul 2^>nul ^| findstr /C:"Physical size"') do set "SZ=%%a"
+for /f "tokens=1,2 delims=x " %%a in ("%SZ%") do ( set "PW=%%a" & set "PH=%%b" )
+for /f "tokens=2 delims=:" %%a in ('adb shell wm density ^<nul 2^>nul ^| findstr /C:"Physical density"') do set "PDR=%%a"
+for /f "tokens=* delims= " %%a in ("%PDR%") do set "PD=%%a"
+for /f "tokens=2 delims=:" %%a in ('adb shell wm size ^<nul 2^>nul ^| findstr /C:"Override size"') do set "OVR=%%a"
+for /f "tokens=2 delims=:" %%a in ('adb shell wm density ^<nul 2^>nul ^| findstr /C:"Override density"') do set "OVRD=%%a"
+:: Validate we actually parsed numbers before doing any maths.
+if not defined PW goto dispscaler_err
+if not defined PH goto dispscaler_err
+if not defined PD goto dispscaler_err
+echo %PW%%PH%%PD%| findstr /r "[^0-9]" >nul && goto dispscaler_err
+set /a W85=PW*85/100, H85=PH*85/100, D85=PD*85/100
+set /a W75=PW*75/100, H75=PH*75/100, D75=PD*75/100
+set /a W67=PW*67/100, H67=PH*67/100, D67=PD*67/100
+set /a W50=PW*50/100, H50=PH*50/100, D50=PD*50/100
+echo.
+echo  Native : %g%%PW%x%PH%%w% @ %g%%PD% dpi%w%   (the panel's real resolution)
+if defined OVR echo  Active override :%gold%%OVR%%w% /%gold%%OVRD%%w% dpi
+echo.
+echo  Lowering the render resolution gives games more GPU headroom and
+echo  saves battery. Density is scaled to match, so the UI keeps the same
+echo  size - the image is just drawn with fewer pixels (slightly softer).
+echo  All reversible, no root, and applied over USB.
+echo.
+echo                    %g%[%w%1%g%]%w% 85%% scale  -^> %W85%x%H85% @ %D85% dpi   (subtle, very safe)
+echo                    %g%[%w%2%g%]%w% 75%% scale  -^> %W75%x%H75% @ %D75% dpi   (recommended)
+echo                    %g%[%w%3%g%]%w% 67%% scale  -^> %W67%x%H67% @ %D67% dpi   (big FPS gain)
+echo                    %g%[%w%4%g%]%w% 50%% scale  -^> %W50%x%H50% @ %D50% dpi   (max, looks soft)
+echo                    %g%[%w%5%g%]%w% Custom resolution / density
+echo                    %g%[%w%6%g%]%w% Reset to native (fixes any weirdness)
+echo                    %g%[%w%7%g%]%w% Back
+set /p ds="Choose An Option >> "
+if "%ds%"=="1" ( set "NW=%W85%" & set "NH=%H85%" & set "ND=%D85%" & goto dispscaler_set )
+if "%ds%"=="2" ( set "NW=%W75%" & set "NH=%H75%" & set "ND=%D75%" & goto dispscaler_set )
+if "%ds%"=="3" ( set "NW=%W67%" & set "NH=%H67%" & set "ND=%D67%" & goto dispscaler_set )
+if "%ds%"=="4" ( set "NW=%W50%" & set "NH=%H50%" & set "ND=%D50%" & goto dispscaler_set )
+if "%ds%"=="5" goto dispscaler_custom
+if "%ds%"=="6" goto dispscaler_reset
+if "%ds%"=="7" goto Gaming
+goto dispscaler
+
+:dispscaler_set
+:: expects NW NH ND set by the caller
+cls
+title Display Scaler : apply
+call :logo
+echo  About to set:
+echo     Resolution : %g%%NW%x%NH%%w%   (native %PW%x%PH%)
+echo     Density    : %g%%ND% dpi%w%   (native %PD%)
+echo.
+echo  %y%The UI keeps the same size%w% - only the render resolution changes,
+echo  so games get more GPU headroom and the panel uses less power. A
+echo  lower resolution looks slightly softer. Fully reversible.
+echo.
+echo  %g%Applied over USB%w% - even if the screen looks wrong you can come
+echo  straight back here and choose Reset.
+echo.
+echo    [Y] Apply    [N] Cancel
+choice /c:YN /n >nul
+if errorlevel 2 goto dispscaler
+adb shell wm size %NW%x%NH%
+adb shell wm density %ND%
+echo.
+echo  Applied. If anything looks off, come back and choose Reset.
+pause >nul
+goto dispscaler
+
+:dispscaler_custom
+cls
+title Display Scaler : custom
+call :logo
+echo  Native resolution: %g%%PW%x%PH%%w%    native density: %g%%PD% dpi%w%
+echo.
+echo  Enter a custom WIDTH, HEIGHT and DENSITY. Tip: keep the same
+echo  width:height ratio as native to avoid stretching, and scale density
+echo  by the same factor to keep the UI size consistent.
+echo.
+set "CW=" & set "CH=" & set "CD="
+set /p "CW=Width  (blank = cancel) >> "
+if "%CW%"=="" goto dispscaler
+set /p "CH=Height (blank = cancel) >> "
+if "%CH%"=="" goto dispscaler
+set /p "CD=Density dpi (blank = cancel) >> "
+if "%CD%"=="" goto dispscaler
+echo %CW%| findstr /r "^[1-9][0-9]*$" >nul || goto dispscaler_custom_bad
+echo %CH%| findstr /r "^[1-9][0-9]*$" >nul || goto dispscaler_custom_bad
+echo %CD%| findstr /r "^[1-9][0-9]*$" >nul || goto dispscaler_custom_bad
+:: sane bounds so a typo can't leave the UI unusable
+if %CW% LSS 320 goto dispscaler_custom_bad
+if %CH% LSS 320 goto dispscaler_custom_bad
+if %CW% GTR 8000 goto dispscaler_custom_bad
+if %CH% GTR 8000 goto dispscaler_custom_bad
+if %CD% LSS 80 goto dispscaler_custom_bad
+if %CD% GTR 900 goto dispscaler_custom_bad
+set "NW=%CW%" & set "NH=%CH%" & set "ND=%CD%"
+goto dispscaler_set
+
+:dispscaler_custom_bad
+echo [%r%!%w%] Invalid values. Width/height 320-8000, density 80-900, digits only.
+timeout /t 2 /nobreak >nul
+goto dispscaler_custom
+
+:dispscaler_reset
+cls
+title Display Scaler : reset
+call :logo
+echo  Restoring the panel's native resolution and density...
+adb shell wm size reset
+adb shell wm density reset
+echo.
+echo  Done - back to native (%PW%x%PH% @ %PD% dpi).
+pause >nul
+goto dispscaler
+
+:dispscaler_err
+cls
+title Display Scaler
+call :logo
+echo [%r%!%w%] Could not read the display size/density from this device.
+echo     'wm size' / 'wm density' returned something unexpected, so the
+echo     presets can't be computed safely.
+echo.
+echo  You can still force a manual reset:
+echo     adb shell wm size reset
+echo     adb shell wm density reset
+echo.
+echo Press Any Button To Go Back
+pause >nul
 goto Gaming
 :: ===================================================================
 :: NEW: GPU Renderer toggle (REAL Android property `debug.hwui.renderer`)
