@@ -3419,6 +3419,7 @@ if "%game%"=="9" goto dispscaler
 if "%game%"=="10" goto menu
 :: FIX: invalid input previously fell into :gms
 goto Gaming
+
 :: ===================================================================
 :: NEW: Display Scaler (REAL, no-root)  -  wm size / wm density
 ::
@@ -3472,16 +3473,18 @@ echo                    %g%[%w%2%g%]%w% 75%% scale  -^> %W75%x%H75% @ %D75% dpi 
 echo                    %g%[%w%3%g%]%w% 67%% scale  -^> %W67%x%H67% @ %D67% dpi   (big FPS gain)
 echo                    %g%[%w%4%g%]%w% 50%% scale  -^> %W50%x%H50% @ %D50% dpi   (max, looks soft)
 echo                    %g%[%w%5%g%]%w% Custom resolution / density
-echo                    %g%[%w%6%g%]%w% Reset to native (fixes any weirdness)
-echo                    %g%[%w%7%g%]%w% Back
+echo                    %g%[%w%6%g%]%w% UI size only (DPI, keeps resolution)
+echo                    %g%[%w%7%g%]%w% Reset to native (fixes any weirdness)
+echo                    %g%[%w%8%g%]%w% Back
 set /p ds="Choose An Option >> "
 if "%ds%"=="1" ( set "NW=%W85%" & set "NH=%H85%" & set "ND=%D85%" & goto dispscaler_set )
 if "%ds%"=="2" ( set "NW=%W75%" & set "NH=%H75%" & set "ND=%D75%" & goto dispscaler_set )
 if "%ds%"=="3" ( set "NW=%W67%" & set "NH=%H67%" & set "ND=%D67%" & goto dispscaler_set )
 if "%ds%"=="4" ( set "NW=%W50%" & set "NH=%H50%" & set "ND=%D50%" & goto dispscaler_set )
 if "%ds%"=="5" goto dispscaler_custom
-if "%ds%"=="6" goto dispscaler_reset
-if "%ds%"=="7" goto Gaming
+if "%ds%"=="6" goto dispscaler_dpi
+if "%ds%"=="7" goto dispscaler_reset
+if "%ds%"=="8" goto Gaming
 goto dispscaler
 
 :dispscaler_set
@@ -3545,6 +3548,109 @@ echo [%r%!%w%] Invalid values. Width/height 320-8000, density 80-900, digits onl
 timeout /t 2 /nobreak >nul
 goto dispscaler_custom
 
+:: -------------------------------------------------------------------
+:: UI size (DPI only) - changes element size WITHOUT touching the
+:: resolution. This is the working stand-in for the developer-options
+:: "Smallest width" entry, which some OEMs (notably Huawei EMUI/
+:: HarmonyOS) leave present but non-functional. Lower dpi = smaller UI
+:: / more content. Presets are a percentage of the panel's native
+:: density, so 85%% lands on the common 'stock UI is too big' fix.
+:: -------------------------------------------------------------------
+:dispscaler_dpi
+cls
+title Display Scaler : UI size (DPI)
+call :logo
+:: Re-read the panel's native (physical) density as the 100%% baseline.
+set "PDR=" & set "PD=" & set "OVRD="
+for /f "tokens=2 delims=:" %%a in ('adb shell wm density ^<nul 2^>nul ^| findstr /C:"Physical density"') do set "PDR=%%a"
+for /f "tokens=* delims= " %%a in ("%PDR%") do set "PD=%%a"
+for /f "tokens=2 delims=:" %%a in ('adb shell wm density ^<nul 2^>nul ^| findstr /C:"Override density"') do set "OVRD=%%a"
+if not defined PD goto dispscaler_err
+echo %PD%| findstr /r "[^0-9]" >nul && goto dispscaler_err
+set /a U110=PD*110/100, U90=PD*90/100, U85=PD*85/100, U80=PD*80/100
+echo.
+echo  Changes ONLY the DPI (UI element size); resolution stays native.
+echo  This is the reliable replacement for the developer-options
+echo  "Smallest width" entry that some OEMs (e.g. Huawei) disable.
+echo.
+echo  Native density (100%% UI) : %g%%PD% dpi%w%
+if defined OVRD echo  Active override           : %gold%%OVRD% dpi%w%
+echo.
+echo  Lower %% = smaller UI, more content fits.
+echo.
+echo                    %g%[%w%1%g%]%w% 110%% UI -^> %U110% dpi   (bigger)
+echo                    %g%[%w%2%g%]%w% 100%% UI -^> %PD% dpi   (native)
+echo                    %g%[%w%3%g%]%w% 90%%  UI -^> %U90% dpi
+echo                    %g%[%w%4%g%]%w% 85%%  UI -^> %U85% dpi   (fix for over-large stock UI)
+echo                    %g%[%w%5%g%]%w% 80%%  UI -^> %U80% dpi   (smallest)
+echo                    %g%[%w%6%g%]%w% Custom dpi
+echo                    %g%[%w%7%g%]%w% Reset to native dpi
+echo                    %g%[%w%8%g%]%w% Back
+set /p du="Choose An Option >> "
+if "%du%"=="1" ( set "ND=%U110%" & goto dispscaler_dpi_set )
+if "%du%"=="2" ( set "ND=%PD%" & goto dispscaler_dpi_set )
+if "%du%"=="3" ( set "ND=%U90%" & goto dispscaler_dpi_set )
+if "%du%"=="4" ( set "ND=%U85%" & goto dispscaler_dpi_set )
+if "%du%"=="5" ( set "ND=%U80%" & goto dispscaler_dpi_set )
+if "%du%"=="6" goto dispscaler_dpi_custom
+if "%du%"=="7" goto dispscaler_dpi_reset
+if "%du%"=="8" goto dispscaler
+goto dispscaler_dpi
+
+:dispscaler_dpi_set
+:: expects ND (target density) set by the caller
+cls
+title Display Scaler : apply UI size
+call :logo
+echo  About to set density to %g%%ND% dpi%w%   (native %PD%), resolution unchanged.
+echo.
+echo  Lower dpi = smaller UI / more content. Fully reversible, no root.
+echo  %g%Applied over USB%w% - if it looks wrong, come back and Reset.
+echo.
+echo    [Y] Apply    [N] Cancel
+choice /c:YN /n >nul
+if errorlevel 2 goto dispscaler_dpi
+adb shell wm density %ND%
+echo.
+echo  Done - density is now %ND% dpi. This persists across reboot.
+pause >nul
+goto dispscaler_dpi
+
+:dispscaler_dpi_custom
+cls
+title Display Scaler : custom dpi
+call :logo
+echo  Native density: %g%%PD% dpi%w%   (lower = smaller UI, higher = bigger)
+echo.
+set "CD="
+set /p "CD=Density dpi (blank = cancel) >> "
+if "%CD%"=="" goto dispscaler_dpi
+echo %CD%| findstr /r "^[1-9][0-9]*$" >nul || goto dispscaler_dpi_custom_bad
+if %CD% LSS 80 goto dispscaler_dpi_custom_bad
+if %CD% GTR 900 goto dispscaler_dpi_custom_bad
+set "ND=%CD%"
+goto dispscaler_dpi_set
+
+:dispscaler_dpi_custom_bad
+echo [%r%!%w%] Invalid density. Use a whole number 80-900.
+timeout /t 2 /nobreak >nul
+goto dispscaler_dpi_custom
+
+:dispscaler_dpi_reset
+cls
+title Display Scaler : reset dpi
+call :logo
+echo  Restoring native density (%PD% dpi)...
+adb shell wm density reset
+adb shell settings delete secure display_density_forced > nul 2>&1
+echo.
+echo  %y%Heads up:%w% native density can be larger than you like on some
+echo  phones. If the UI is now too big, pick a UI-size preset above
+echo  (e.g. 85%%) instead of leaving it at native.
+pause >nul
+goto dispscaler_dpi
+
+
 :dispscaler_reset
 cls
 title Display Scaler : reset
@@ -3552,8 +3658,15 @@ call :logo
 echo  Restoring the panel's native resolution and density...
 adb shell wm size reset
 adb shell wm density reset
+:: Some OEM builds (notably Huawei EMUI/HarmonyOS, and older Sony/LG)
+:: do NOT actually clear the forced override on 'reset' - the value is
+:: left behind in the settings DB and survives a reboot. Delete the
+:: backing keys directly so the native size/density really come back.
+adb shell settings delete global display_size_forced > nul 2>&1
+adb shell settings delete secure display_density_forced > nul 2>&1
 echo.
 echo  Done - back to native (%PW%x%PH% @ %PD% dpi).
+echo  %y%If the UI still looks the wrong size, reboot once to apply.%w%
 pause >nul
 goto dispscaler
 
@@ -3572,6 +3685,7 @@ echo.
 echo Press Any Button To Go Back
 pause >nul
 goto Gaming
+
 :: ===================================================================
 :: NEW: GPU Renderer toggle (REAL Android property `debug.hwui.renderer`)
 :: This is the actual HWUI pipeline switch. Valid values:
