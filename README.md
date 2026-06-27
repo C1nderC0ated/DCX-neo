@@ -95,7 +95,7 @@ screens also show a live header with **uptime** and **CPU load**.
 | 6 | **Network Boost** | Safe TCP receive-window hint, optional private DNS (Cloudflare/Google/AdGuard), preferred network mode (LTE/5G), full revert. ⚠️ see below. |
 | 7 | **GPU Renderer** | Switch HWUI renderer: `skiagl` (default) / `skiavk` (Skia Vulkan) / clear. |
 | 8 | **Force ANGLE for All Apps** | Route all GLES apps through ANGLE. ⚠️ see below. |
-| 9 | **Display Scaler** | Lower the render resolution + matching DPI (`wm size` / `wm density`) for more GPU headroom in games and lower power draw. Safe presets are computed live from your panel's native resolution (85 / 75 / 67 / 50 %), with custom and one-tap reset. Reversible, no root, persists across reboot. |
+| 9 | **Display Scaler** | Lower the render resolution + matching DPI (`wm size` / `wm density`) for more GPU headroom in games and lower power draw. Safe presets are computed live from your panel's native resolution (85 / 75 / 67 / 50 %), with custom and one-tap reset. A separate **UI size (DPI-only)** mode changes element size without touching resolution — a working stand-in for the **Smallest width** developer option, which some OEMs (e.g. Huawei EMUI/HarmonyOS) leave disabled. Reversible, no root, persists across reboot. |
 | 10 | **Back** | — |
 
 > **⚠️ Two of these are device-dependent (from real-world testing):**
