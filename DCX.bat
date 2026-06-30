@@ -152,21 +152,27 @@ call :logo
 echo.
 set "BACKUPDIR=%USERPROFILE%\dcx_backups"
 if not exist "%BACKUPDIR%" mkdir "%BACKUPDIR%"
-set "TS=%date:~-4%%date:~3,2%%date:~0,2%_%time:~0,2%%time:~3,2%%time:~6,2%"
-set "TS=%TS: =0%"
+:: FIX: build the timestamp via PowerShell so it is locale-independent.
+:: The old %date%/%time% substring slicing assumed a US M/D/Y format and
+:: produced garbled or invalid filenames on other regional date formats.
+for /f %%t in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "TS=%%t"
 set "BAKFILE=%BACKUPDIR%\dcx_backup_%TS%.bat"
 echo  Saving current settings to:
 echo    %BAKFILE%
 echo.
 :: Build a restore script. Each captured value becomes a put/setprop
 :: command; missing values become delete to clear any stale override.
+:: FIX: the literal ')' in the comment line below must be escaped as '^)'.
+:: It was previously '^^)', which inside this ( ... ) block collapses to a
+:: literal caret + an UNescaped ')' that closed the block early, aborting
+:: the whole backup with ". was unexpected at this time." (no file written).
 (
     echo @echo off
     echo :: DCX Settings Backup created %date% %time%
     echo :: This file is a stand-alone restore script - run it with the
     echo :: same device connected to revert to the captured state.
     echo ::
-    echo :: You can also edit it (delete lines you don't want to restore^^).
+    echo :: You can also edit it (delete lines you don't want to restore^).
     echo.
     echo adb start-server ^>nul 2^>^&1
     echo echo Restoring DCX-managed settings...
@@ -402,8 +408,10 @@ echo  Generating full device report...
 echo.
 :: Build a timestamped report so old reports aren't overwritten
 :: and the user can compare before/after applying tweaks.
-set "TS=%date:~-4%%date:~3,2%%date:~0,2%_%time:~0,2%%time:~3,2%%time:~6,2%"
-set "TS=%TS: =0%"
+:: FIX: build the timestamp via PowerShell so it is locale-independent.
+:: The old %date%/%time% substring slicing assumed a US M/D/Y format and
+:: produced garbled or invalid filenames on other regional date formats.
+for /f %%t in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "TS=%%t"
 set "REPORT=%TEMP%\dcx_report_%TS%.txt"
 (
     echo ===========================================================
@@ -550,6 +558,9 @@ echo %b%[%w%2%b%]%w% Go Back
 set /p kb="Choose An Option >> "
 if "%kb%"=="1" goto setupautorun
 if "%kb%"=="2" goto menu
+:: FIX: guard against invalid input - previously any other key fell
+:: straight through into :setupautorun and ran Auto Setup unprompted.
+goto Auto
 
 :setupautorun
 cls && title SurfaceFlinger Setup!
@@ -1589,7 +1600,7 @@ title Compile App
 echo.
 echo.
 echo Enter The Mode You Want !
-echo Valid modes: speed, speed-profile, verify, quicken, everything
+echo Valid modes: speed, speed-profile, verify, quicken, everything, everything-profile
 echo Recommended: speed (best performance, slower install)
 echo.
 set /p mode="Choose A Mode >> "
@@ -1633,6 +1644,8 @@ echo [2] %c%Back%w%
 set /p k="Choose An Option >> "
 if "%k%"=="1" goto sdgb
 if "%k%"=="2" goto Optimize
+:: FIX: guard against invalid input - previously fell through to :sdgb
+goto cache
 
 :sdgb
 cls
@@ -1715,6 +1728,8 @@ if "%set%"=="9" goto toggleprofilling
 if "%set%"=="10" goto togglelogs
 if "%set%"=="11" goto nextpage
 if "%set%"=="12" goto menu
+:: FIX: guard against invalid input - previously fell through to :nextpage
+goto Battery
 
 :nextpage
 cls
@@ -1763,8 +1778,10 @@ call :logo
 echo.
 echo  Generating wake-lock + battery-stats report. Takes ~10 seconds.
 echo.
-set "TS=%date:~-4%%date:~3,2%%date:~0,2%_%time:~0,2%%time:~3,2%%time:~6,2%"
-set "TS=%TS: =0%"
+:: FIX: build the timestamp via PowerShell so it is locale-independent.
+:: The old %date%/%time% substring slicing assumed a US M/D/Y format and
+:: produced garbled or invalid filenames on other regional date formats.
+for /f %%t in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "TS=%%t"
 set "WLREPORT=%TEMP%\dcx_wakelocks_%TS%.txt"
 (
     echo ===========================================================
@@ -2097,12 +2114,15 @@ set /p ksd="Choose An Option >> "
 if "%ksd%"=="1" goto sethibdernatephs
 if "%ksd%"=="2" goto stockpackage
 if "%ksd%"=="3" goto nextpage
+:: FIX: guard against invalid input - previously fell through to :stockpackage
+goto nexthibernateappphase
 
 :stockpackage
 cls
 title Revert Your Package To Stock
 call :logo
 set /p pkgv2="Put Your Package Name Here >> "
+if "%pkgv2%"=="" goto nexthibernateappphase
 echo.
 echo [#] Set %pkgv2% To Stock . . . .
 echo.
@@ -2184,6 +2204,8 @@ set /p ksd="Choose An Option >> "
 if "%ksd%"=="1" goto devicesysdel
 if "%ksd%"=="2" goto devicesysrev
 if "%ksd%"=="3" goto nextpage
+:: FIX: guard against invalid input - previously fell through to :devicesysdel
+goto Deviceidle
 
 :devicesysdel
 cls
@@ -2255,6 +2277,8 @@ set /p ksd="Choose An Option >> "
 if "%ksd%"=="1" goto offlogsuni
 if "%ksd%"=="2" goto onlogsuni
 if "%ksd%"=="3" goto nextpage
+:: FIX: guard against invalid input - previously fell through to :offlogsuni
+goto universallogs
 
 :offlogsuni
 cls
@@ -2297,6 +2321,8 @@ set /p ksd="Choose An Option >> "
 if "%ksd%"=="1" goto offlogsuserapp
 if "%ksd%"=="2" goto onlogsuserapp
 if "%ksd%"=="3" goto nextpage
+:: FIX: guard against invalid input - previously fell through to :offlogsuserapp
+goto logappsuser
 
 :offlogsuserapp
 cls
@@ -2359,6 +2385,8 @@ set /p conx="Choose An Option >> "
 if "%conx%"=="1" goto skiplogv
 if "%conx%"=="2" goto mainlogv
 if "%conx%"=="3" goto Battery
+:: FIX: guard against invalid input - previously fell through to :mainlogv
+goto offlogss
 
 :mainlogv
 cls
@@ -3476,7 +3504,17 @@ echo                    %g%[%w%5%g%]%w% Custom resolution / density
 echo                    %g%[%w%6%g%]%w% UI size only (DPI, keeps resolution)
 echo                    %g%[%w%7%g%]%w% Reset to native (fixes any weirdness)
 echo                    %g%[%w%8%g%]%w% Back
+:dispscaler_ask
+:: FIX (input "eaten" / press-twice): re-prompt WITHOUT redrawing on empty or
+:: invalid input. A blank read here is usually a phantom empty line the console
+:: hands set /p right after the slow `wm size`/`wm density` probes above; the old
+:: `goto dispscaler` treated it as a miss and redrew the whole menu (re-running
+:: those probes), so the user's real keypress only landed on the second try.
+:: Absorbing it with a tight re-ask makes the first keypress register, and stray
+:: keys no longer re-run the adb probes. The preset vars (W85.. ND) stay in scope.
+set "ds="
 set /p ds="Choose An Option >> "
+if not defined ds goto dispscaler_ask
 if "%ds%"=="1" ( set "NW=%W85%" & set "NH=%H85%" & set "ND=%D85%" & goto dispscaler_set )
 if "%ds%"=="2" ( set "NW=%W75%" & set "NH=%H75%" & set "ND=%D75%" & goto dispscaler_set )
 if "%ds%"=="3" ( set "NW=%W67%" & set "NH=%H67%" & set "ND=%D67%" & goto dispscaler_set )
@@ -3485,7 +3523,7 @@ if "%ds%"=="5" goto dispscaler_custom
 if "%ds%"=="6" goto dispscaler_dpi
 if "%ds%"=="7" goto dispscaler_reset
 if "%ds%"=="8" goto Gaming
-goto dispscaler
+goto dispscaler_ask
 
 :dispscaler_set
 :: expects NW NH ND set by the caller
@@ -3586,7 +3624,13 @@ echo                    %g%[%w%5%g%]%w% 80%%  UI -^> %U80% dpi   (smallest)
 echo                    %g%[%w%6%g%]%w% Custom dpi
 echo                    %g%[%w%7%g%]%w% Reset to native dpi
 echo                    %g%[%w%8%g%]%w% Back
+:dispscaler_dpi_ask
+:: FIX (input "eaten" / press-twice): same tight re-ask as :dispscaler - absorb a
+:: phantom empty read so the first keypress registers, and don't re-run the
+:: density probe on stray keys. Preset vars (U110.. PD) stay in scope.
+set "du="
 set /p du="Choose An Option >> "
+if not defined du goto dispscaler_dpi_ask
 if "%du%"=="1" ( set "ND=%U110%" & goto dispscaler_dpi_set )
 if "%du%"=="2" ( set "ND=%PD%" & goto dispscaler_dpi_set )
 if "%du%"=="3" ( set "ND=%U90%" & goto dispscaler_dpi_set )
@@ -3595,7 +3639,7 @@ if "%du%"=="5" ( set "ND=%U80%" & goto dispscaler_dpi_set )
 if "%du%"=="6" goto dispscaler_dpi_custom
 if "%du%"=="7" goto dispscaler_dpi_reset
 if "%du%"=="8" goto dispscaler
-goto dispscaler_dpi
+goto dispscaler_dpi_ask
 
 :dispscaler_dpi_set
 :: expects ND (target density) set by the caller
@@ -4071,6 +4115,8 @@ echo [%r%2%w%] Go Back
 set /p kb="Choose An Option >> "
 if "%kb%"=="1" goto settingthermal
 if "%kb%"=="2" goto Gaming
+:: FIX: guard against invalid input - previously fell through to :settingthermal
+goto thermal
 
 :settingthermal
 @echo off
@@ -4159,6 +4205,7 @@ goto overlay
 cls
 title Remove Settings
 set /p package="Put Your Package Name Here >> "
+if "%package%"=="" goto Gaming
 adb shell device_config delete game_overlay %package% > nul
 adb shell cmd game reset --user 0 %package%
 cls
@@ -4176,6 +4223,7 @@ goto Gaming
 cls
 title Low Settings
 set /p package="Put Your Package Name Here >> "
+if "%package%"=="" goto Gaming
 adb shell device_config put game_overlay %package% mode=1
 adb shell cmd game downscale 0.55 %package%
 cls
@@ -4193,6 +4241,7 @@ goto Gaming
 cls
 title Medium Settings
 set /p package="Put Your Package Name Here >> "
+if "%package%"=="" goto Gaming
 adb shell device_config put game_overlay %package% mode=1
 adb shell device_config get game_overlay %package%
 adb shell cmd game downscale 0.75 %package%
@@ -4219,6 +4268,8 @@ echo [%r%2%w%] Back
 set /p kb="Choose An Option >> "
 if "%kb%"=="1" goto toggleperf
 if "%kb%"=="2" goto Gaming
+:: FIX: guard against invalid input - previously fell through to :toggleperf
+goto performance
 
 :toggleperf
 cls
@@ -4239,17 +4290,13 @@ goto toggleperf
 @echo off
 cls
 title Performance Mode : Off
-:: Check the key and save the value to a temporary file.
-adb shell device_config get storage_native_boot target_dirty_ratio > reset_temp_result.txt
-:: Retrieve and process the value.
-set /p resultrs=<reset_temp_result.txt
-if "%resultrs%"=="null" goto skipdeviceconfigandremove
-if "%resultrs%"=="" goto skipdeviceconfigandremove
-set resultrs=80
-adb shell device_config put storage_native_boot target_dirty_ratio %resultrs%
+:: FIX: revert by REMOVING the override so the platform default returns.
+:: The old code set the ratio to 80 on "Off" instead of deleting it, so
+:: toggling Off did not actually revert anything.
+adb shell device_config delete storage_native_boot target_dirty_ratio > nul 2>&1
+adb shell device_config delete storage_native_boot target_dirty_background_ratio > nul 2>&1
 
 :skipdeviceconfigandremove
-del reset_temp_result.txt 2>nul
 adb shell logcat -G 256kb
 adb shell settings delete global activity_manager_constants > nul 2>&1
 adb shell device_config put runtime_native_boot iorap_readahead_enable false > nul 2>&1
@@ -4418,13 +4465,16 @@ if "%result%"=="null" (
 )
 :: Delete temporary files
 del temp_result.txt
-:: Check if the result is valid before performing the calculation.
-if not defined result (
-    goto skipcheckdeviceconfig
-)
-set /a aducsa=%result%+10
-echo storage_native_boot/target_dirty_ratio : %aducsa%
-adb shell device_config put storage_native_boot target_dirty_ratio %aducsa%
+:: FIX: set an ABSOLUTE target so repeating "On" is idempotent. The old
+:: code did `current+10` every run (unbounded growth on repeated toggles)
+:: and, because of the early-out above, did nothing at all when the key
+:: was previously unset. 35 is a modestly elevated write-back ratio - a
+:: sane performance default without much extra crash-data-loss risk;
+:: "Off" now deletes the key to truly revert (see :offperf).
+echo storage_native_boot/target_dirty_ratio : 35
+echo storage_native_boot/target_dirty_background_ratio : 5
+adb shell device_config put storage_native_boot target_dirty_ratio 35
+adb shell device_config put storage_native_boot target_dirty_background_ratio 5
 
 :skipcheckdeviceconfig
 echo Press Any Button To Go Back
