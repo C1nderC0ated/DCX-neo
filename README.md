@@ -154,7 +154,7 @@ with an interpretation guide for spotting the app draining your battery.
 | 1 | **Run bg-dexopt-job** | Trigger the background dexopt job. |
 | 2 | **Run Fstrim** | Trim the filesystem. Runs **silently** (no output on success is normal); shows free space before/after. On some devices it only completes while charging + idle. |
 | 3 | **Run Kill-all** | Force-stop background apps (skips the foreground app and protected packages). |
-| 4 | **Run Compile App** | Compile a single package (mode + name validated). |
+| 4 | **Run Compile App** | Compile a single package — pick a mode (`speed` / `speed-profile` / `verify` / `quicken` / `everything` / `everything-profile`) and name; both are validated and the package must be installed. |
 | 5 | **Run Clear Cache** | Trim or wipe app caches (wipe needs root). |
 | 6 | **Run Tweak SurfaceFlinger** | Refresh-rate-specific SF timing tweaks (below). |
 | 7 | **Run Clear Last Used** | Reset app usage stats. |
