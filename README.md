@@ -25,7 +25,7 @@ DCX neo is a community tool, not affiliated with Google or any manufacturer.
 ## Table of contents
 
 - [Requirements](#requirements) · [Setup](#setup) · [First run](#first-run)
-- [Menu reference](#menu-reference): [Main](#main-menu) · [Gaming](#gaming) · [Battery](#battery) · [Optimize](#optimize-android) · [Auto](#auto-setup) · [CheckSetting](#checksetting-diagnostics) · [Backup & Restore](#backup--restore) · [Benchmark](#benchmark) · [App Manager](#app-manager)
+- [Menu reference](#menu-reference): [Main](#main-menu) · [Gaming](#gaming) · [Battery](#battery) · [Optimize](#optimize-android) · [Auto](#auto-setup) · [CheckSetting](#checksetting-diagnostics) · [Backup & Restore](#backup--restore) · [Benchmark](#benchmark) · [App Manager](#app-manager) · [Wireless ADB](#wireless-adb)
 - [What actually works](#what-actually-works-vs-placebo) · [Persistence & root](#persistence--root) · [Troubleshooting](#troubleshooting) · [Credits](#credits)
 
 ---
@@ -37,7 +37,7 @@ DCX neo is a community tool, not affiliated with Google or any manufacturer.
 | **Windows PC** | Runs in `cmd.exe`. Windows 10/11 recommended. |
 | **ADB** | On your `PATH`, **or** as `adb.exe` in an `adb\` folder next to `DCX.bat`. |
 | **Android device** | With **USB debugging** enabled and the PC authorised. |
-| **USB cable** | Or a working wireless-ADB connection. |
+| **USB cable** | Or Wi-Fi — the built-in **Wireless ADB** menu (option 13) handles pairing/connecting. |
 
 ---
 
@@ -56,7 +56,8 @@ DCX neo is a community tool, not affiliated with Google or any manufacturer.
 ## First run
 
 On startup DCX neo defines ANSI colours, verifies ADB is present, waits up to
-10 s for an authorised device (with guidance if none appears), then detects
+10 s for an authorised device — if none appears you can now jump straight to
+**[W] Wireless ADB setup** or **[R]etry** instead of exiting — then detects
 and prints your device model and Android API level, e.g.
 `Device: Pixel 7   API level: 34`. The Main, Gaming, Battery and Optimize
 screens also show a live header with **uptime** and **CPU load**.
@@ -80,6 +81,7 @@ screens also show a live header with **uptime** and **CPU load**.
 | 9 | **Shell** | Interactive `adb shell`. |
 | 10 | **Benchmark** | Quick CPU + storage micro-benchmark. |
 | 11 / 12 | **Backup / Restore** | Save / re-apply toggleable settings. |
+| 13 | **Wireless ADB** | Pair (Android 11+), connect by IP, enable via USB (`adb tcpip`) with auto-IP, disconnect. |
 
 ---
 
@@ -276,6 +278,28 @@ packages back.
 
 ---
 
+### Wireless ADB
+
+Run DCX over Wi-Fi with no cable. Reachable from the main menu (**13**) or
+straight from the startup screen when no USB device is found (**[W]**).
+
+| # | Option | What it does |
+|---|---|---|
+| 1 | **Pair with code** | Android 11+ one-time pairing: enter the `ip:port` **and 6-digit code** from Developer options → Wireless debugging → *Pair device with pairing code* (keep that dialog open — the code dies when it closes). |
+| 2 | **Connect** | Connect to `ip[:port]`. On Android 11+ use the ip:port from the **main** Wireless-debugging screen — it's a **different port** than the pairing one, and it changes after a reboot or re-toggle. Plain IP assumes port 5555. |
+| 3 | **Enable over USB** | The classic method for any Android version: flips adbd to TCP/IP on port 5555 (`adb tcpip 5555`) while the cable is attached, auto-detects the phone's Wi-Fi IP from `ip route`, and offers to connect immediately. Reverts on reboot or via option 5. |
+| 4 | **Disconnect** | Drop all Wi-Fi connections (USB unaffected). |
+| 5 | **Back to USB** | `adb usb` for devices switched with option 3. |
+| 6 | **Help** | Where to find the ports/code, per-version notes (incl. Huawei EMUI/HarmonyOS builds that hide the pairing dialog — option 3 works there). |
+
+> **Security note:** while Wireless debugging is on, any PC paired with the
+> phone on the same network can run adb commands. Turn it off when done.
+
+The old standalone `wirelessadb.bat` is superseded by this menu (it only did
+`adb connect`, with no Android 11+ pairing support).
+
+---
+
 ## What actually works vs. placebo
 
 Android only reads a specific set of settings, properties and `device_config`
@@ -324,7 +348,8 @@ reads** — they're stored but do nothing. DCX neo focuses on commands with a
 | Problem | Fix |
 |---|---|
 | **"ADB not found"** on launch | Install Platform Tools and add to `PATH`, or put `adb.exe` in an `adb\` folder next to `DCX.bat`. |
-| **"No authorised device found"** | Enable USB debugging, replug, tap **Allow** on the phone. Check `adb devices` shows `device` (not `unauthorized`). |
+| **"No authorised device found"** | Enable USB debugging, replug, tap **Allow** on the phone. Check `adb devices` shows `device` (not `unauthorized`). No cable? Press **[W]** on that screen for Wireless ADB. |
+| **Wireless connect says "failed to authenticate" / "connection refused"** | Pair this PC first (Wireless ADB → option 1), or the port went stale — it changes on reboot/re-toggle, grab it fresh from the Wireless-debugging screen. |
 | **Something feels broken after tweaking** | **Reboot** — most live tweaks reset on reboot and that clears it. |
 | **A tweak "didn't do anything"** | Read the value back via **CheckSetting** (graphics: `dumpsys gfxinfo <pkg> \| findstr Pipeline`). Some keys need root or a newer Android. |
 | **Most apps crash after enabling ANGLE** | Common on non-Pixel GPUs; **a reboot won't help** (it persists). Gaming → Force ANGLE → **Disable**/**Delete**. |
