@@ -32,7 +32,7 @@ if exist adb\ cd adb
 :: Verify ADB is available
 adb version > nul 2>&1
 if %errorlevel% neq 0 (
-    echo [%r%!%w%] ADB not found!
+    echo [%r%^^!%w%] ADB not found^^!
     echo     Please install ADB and ensure it is in your PATH
     echo     or place this script next to an 'adb' folder.
     echo.
@@ -50,6 +50,7 @@ echo                                  %w%Press Any Button To Continue
 pause > nul
 title Connecting . . .
 adb start-server > nul 2>&1
+:startup_wait
 :: ============================================================
 :: NEW: Wait for a device and verify it is connected/authorised
 :: before issuing further adb shell calls. Previously the script
@@ -69,18 +70,29 @@ for /l %%i in (1,1,10) do (
 if "%DEVICE_OK%"=="0" (
     cls
     call :logo
-    echo [%r%!%w%] No authorised device found.
+    echo [%r%^^!%w%] No authorised device found.
     echo     - Enable USB debugging on the device
     echo     - Approve the RSA fingerprint prompt
     echo     - Check the cable / driver
     echo.
     echo     Run 'adb devices' manually to verify.
     echo.
-    echo Press any key to exit...
-    pause > nul
-    adb kill-server > nul 2>&1
-    exit /b
+    echo     No cable handy? Wireless ADB can connect over Wi-Fi instead.
+    echo.
+    echo    [W] Wireless ADB setup    [R] Retry    [X] Exit
+    choice /c WRX /n >nul
+    if errorlevel 3 (
+        adb kill-server > nul 2>&1
+        exit /b
+    )
+    if errorlevel 2 goto startup_wait
+    rem Wireless path skips the probe below - give SDK/MODEL safe
+    rem defaults; :wadb_back re-runs :detect_device once connected.
+    set "SDK=0"
+    set "MODEL=(not connected yet)"
+    goto wirelessadb
 )
+:detect_device
 :: Retrieve the current Android API level safely
 set "SDK="
 for /f "delims=" %%i in ('adb shell getprop ro.build.version.sdk 2^>nul ^<nul') do set "SDK=%%i"
@@ -102,8 +114,8 @@ cls
 title Main Menu
 call :logo
 echo          ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul') do echo           [%g%+%w%]Uptime: %%a %%b %%c
-for /f "tokens=1 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul') do set cpucheck=%%i
+for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul 2^>nul') do echo           [%g%+%w%]Uptime: %%a %%b %%c
+for /f "tokens=1 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul 2^>nul') do set cpucheck=%%i
 echo           [%g%+%w%]%cpucheck% LOAD
 echo          ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 echo.
@@ -122,19 +134,23 @@ echo.
 echo                          %m%Benchmark%w%        %m%Backup%w%         %b%Restore%w%
 echo                             [10]           [11]           [12]
 echo.
-set /p kb="                            Choose An Option >> "
-if "%kb%"=="1" goto Gaming
-if "%kb%"=="2" goto Battery
-if "%kb%"=="3" goto Optimize
-if "%kb%"=="4" goto Auto
-if "%kb%"=="5" goto Check
-if "%kb%"=="6" goto appmgr
-if "%kb%"=="7" goto reboot
-if "%kb%"=="8" goto exitscript
-if "%kb%"=="9" goto shell
-if "%kb%"=="10" goto benchmark
-if "%kb%"=="11" goto backup
-if "%kb%"=="12" goto restore
+echo                                           %gold%Wireless ADB%w%
+echo                                            [13]
+echo.
+set "kb=" & set /p kb="                            Choose An Option >> "
+if "!kb!"=="1" goto Gaming
+if "!kb!"=="2" goto Battery
+if "!kb!"=="3" goto Optimize
+if "!kb!"=="4" goto Auto
+if "!kb!"=="5" goto Check
+if "!kb!"=="6" goto appmgr
+if "!kb!"=="7" goto reboot
+if "!kb!"=="8" goto exitscript
+if "!kb!"=="9" goto shell
+if "!kb!"=="10" goto benchmark
+if "!kb!"=="11" goto backup
+if "!kb!"=="12" goto restore
+if "!kb!"=="13" goto wirelessadb
 goto menu
 :: ===================================================================
 :: NEW: Backup / Restore of toggleable settings
@@ -212,12 +228,12 @@ echo.
 echo  %b%[%w%1%b%]%w% Open backups folder in Explorer
 echo  %b%[%w%2%b%]%w% View this backup in Notepad
 echo  %b%[%w%3%b%]%w% Back to main menu
-set /p bk="Choose An Option >> "
-if "%bk%"=="1" (
+set "bk=" & set /p bk="Choose An Option >> "
+if "!bk!"=="1" (
     start "" "%BACKUPDIR%"
     goto menu
 )
-if "%bk%"=="2" (
+if "!bk!"=="2" (
     start "" notepad "%BAKFILE%"
     goto menu
 )
@@ -238,9 +254,9 @@ set "_val="
 for /f "delims=" %%v in ('adb shell settings get %_ns% %_key% 2^>nul ^<nul') do set "_val=%%v"
 if "%_val%"=="" set "_val=null"
 if /i "%_val%"=="null" (
-    echo adb shell settings delete %_ns% %_key% ^>nul 2^>^&1>> "%_out%"
+    >>"%_out%" echo adb shell settings delete %_ns% %_key% ^>nul 2^>^&1
 ) else (
-    echo adb shell settings put %_ns% %_key% %_val%>> "%_out%"
+    >>"%_out%" echo adb shell settings put %_ns% %_key% %_val%
 )
 endlocal
 exit /b
@@ -254,9 +270,9 @@ set "_val="
 for /f "delims=" %%v in ('adb shell device_config get %_ns% %_key% 2^>nul ^<nul') do set "_val=%%v"
 if "%_val%"=="" set "_val=null"
 if /i "%_val%"=="null" (
-    echo :: %_ns%/%_key% was unset at backup time>> "%_out%"
+    >>"%_out%" echo :: %_ns%/%_key% was unset at backup time
 ) else (
-    echo adb shell device_config put %_ns% %_key% %_val%>> "%_out%"
+    >>"%_out%" echo adb shell device_config put %_ns% %_key% %_val%
 )
 endlocal
 exit /b
@@ -267,7 +283,7 @@ set "_key=%~1"
 set "_out=%~2"
 set "_val="
 for /f "delims=" %%v in ('adb shell getprop %_key% 2^>nul ^<nul') do set "_val=%%v"
-echo adb shell setprop %_key% "%_val%">> "%_out%"
+>>"%_out%" echo adb shell setprop %_key% "%_val%"
 endlocal
 exit /b
 :: ===================================================================
@@ -308,8 +324,8 @@ if "%i%"=="0" (
 echo.
 echo    [0] Cancel
 echo.
-set /p ri="Pick a backup to restore >> "
-if "%ri%"=="0" goto menu
+set "ri=" & set /p ri="Pick a backup to restore >> "
+if "!ri!"=="0" goto menu
 :: Look up the chosen filename
 call set "_chosen=%%_bk_n_%ri%%%"
 if "%_chosen%"=="" (
@@ -385,11 +401,11 @@ echo.
 echo.
 echo.
 echo.
-echo                   %d%Thanks For Using My Script, Goodbye And Have A Good Day!!%w%
+echo                   %d%Thanks For Using My Script, Goodbye And Have A Good Day^^!^^!%w%
 echo.
 echo.
 timeout /t 3 /nobreak > nul
-adb shell cmd notification post -S bigtext -t '⚙DCX⚙' 'Tag' 'Restart = Remove All Settings Applied, Please Use This Script At Least Once A Month To Keep Your Device Smooth, Bye!!' > nul 2>&1
+adb shell cmd notification post -S bigtext -t '⚙DCX⚙' 'Tag' 'Restart = Remove All Settings Applied, Please Use This Script At Least Once A Month To Keep Your Device Smooth, Bye^^!^^!' > nul 2>&1
 adb kill-server
 exit /b
 
@@ -398,6 +414,225 @@ adb reboot
 timeout /t 1 /nobreak > nul
 adb disconnect
 goto menu
+
+:: ===================================================================
+:: NEW: Wireless ADB (pair / connect / manage Wi-Fi debugging)
+::
+:: Two ways onto Wi-Fi, depending on Android version:
+::
+::   Android 11+ : Developer options -> Wireless debugging. The
+::     "Pair device with pairing code" dialog shows a ONE-TIME
+::     ip:port + 6-digit code -> option [1]. Pairing is per-PC and
+::     only needed once. The port for CONNECTING afterwards is the
+::     DIFFERENT one shown on the main Wireless-debugging screen.
+::
+::   Android 10 and below (or builds that hide pairing): connect the
+::     USB cable once and use option [3] - it flips adbd to TCP/IP on
+::     port 5555 and auto-detects the phone's Wi-Fi IP.
+::
+:: Honest notes: the Android 11+ connect port is random and changes
+:: after a reboot or re-toggling Wireless debugging, so reconnects
+:: need the fresh port. While the mode is on, any PC paired with the
+:: phone on the same network can run adb - turn it off when done.
+:: ===================================================================
+:wirelessadb
+cls
+title Wireless ADB
+call :logo
+echo                            %b%[%w% Wireless ADB %b%]%w%
+echo.
+echo  Run DCX over Wi-Fi - no cable needed. PC and phone must be on the
+echo  same network.
+echo.
+echo  Currently attached (USB and Wi-Fi entries both show here):
+for /f "skip=1 delims=" %%i in ('adb devices ^<nul 2^>nul') do echo     %%i
+echo.
+echo                 %g%[%w%1%g%]%w% Pair with code       (Android 11+, once per PC)
+echo                 %g%[%w%2%g%]%w% Connect to IP[:port]
+echo                 %g%[%w%3%g%]%w% Enable over USB      (adb tcpip 5555 + auto-IP)
+echo                 %g%[%w%4%g%]%w% Disconnect all Wi-Fi connections
+echo                 %g%[%w%5%g%]%w% Switch device back to USB mode
+echo                 %g%[%w%6%g%]%w% Help - where the ports and code live
+echo                 %g%[%w%7%g%]%w% Back
+set "wa=" & set /p wa="Choose An Option >> "
+if "!wa!"=="1" goto wadb_pair
+if "!wa!"=="2" goto wadb_connect
+if "!wa!"=="3" goto wadb_tcpip
+if "!wa!"=="4" goto wadb_disconnect
+if "!wa!"=="5" goto wadb_usb
+if "!wa!"=="6" goto wadb_help
+if "!wa!"=="7" goto wadb_back
+goto wirelessadb
+
+:wadb_back
+:: If we arrived from the no-device startup path, the model/API probe
+:: was skipped (SDK defaulted to 0) - run it now that a device may be
+:: attached. Re-probing on a genuine API-0 is harmless.
+if "!SDK!"=="0" goto detect_device
+goto menu
+
+:wadb_pair
+cls
+title Wireless ADB : pair
+call :logo
+echo  On the phone: Developer options -^> Wireless debugging -^>
+echo  %g%Pair device with pairing code%w%. Keep that dialog OPEN - the
+echo  code and port stop working the moment it closes.
+echo.
+set "WIP=" & set /p WIP="Pairing ip:port (blank = cancel) >> "
+if "!WIP!"=="" goto wirelessadb
+echo !WIP!| findstr /r "^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*:[0-9][0-9]*$" >nul || goto wadb_pair_bad
+set "WCODE=" & set /p WCODE="6-digit pairing code (blank = cancel) >> "
+if "!WCODE!"=="" goto wirelessadb
+echo !WCODE!| findstr /r "^[0-9][0-9][0-9][0-9][0-9][0-9]$" >nul || goto wadb_pair_bad
+echo.
+adb pair !WIP! !WCODE!
+echo.
+echo  If it said "Successfully paired": this PC is trusted now, but you
+echo  are NOT connected yet. The connect port is the DIFFERENT one on
+echo  the main Wireless-debugging screen -^> option [2].
+echo.
+echo Press Any Button To Go Back
+pause > nul
+goto wirelessadb
+
+:wadb_pair_bad
+echo [%r%^^!%w%] Expected ip:port like 192.168.1.23:37123 and a 6-digit code.
+timeout /t 2 /nobreak >nul
+goto wadb_pair
+
+:wadb_connect
+cls
+title Wireless ADB : connect
+call :logo
+echo  Enter the ip:port from the MAIN Wireless-debugging screen
+echo  (Android 11+), or just the phone's IP if you used option [3]
+echo  (port 5555 is assumed then).
+echo.
+set "WIP=" & set /p WIP="ip[:port] (blank = cancel) >> "
+if "!WIP!"=="" goto wirelessadb
+if "!WIP!"=="!WIP::=!" set "WIP=!WIP!:5555"
+echo !WIP!| findstr /r "^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*:[0-9][0-9]*$" >nul || goto wadb_connect_bad
+echo.
+adb connect !WIP!
+echo.
+echo  Now attached:
+for /f "skip=1 delims=" %%i in ('adb devices ^<nul 2^>nul') do echo     %%i
+echo.
+echo  "failed to authenticate" / "connection refused" usually means this
+echo  PC isn't paired with the phone yet -^> option [1] first, or the
+echo  port went stale (it changes on reboot/re-toggle).
+echo.
+echo Press Any Button To Go Back
+pause > nul
+goto wirelessadb
+
+:wadb_connect_bad
+echo [%r%^^!%w%] Expected an IPv4 address like 192.168.1.23 or 192.168.1.23:41235.
+timeout /t 2 /nobreak >nul
+goto wadb_connect
+
+:wadb_tcpip
+cls
+title Wireless ADB : enable over USB
+call :logo
+echo  Flips the USB-connected device's adbd into TCP/IP mode on port
+echo  5555 - the classic method: works on any Android version, no
+echo  pairing needed. %y%Needs the cable attached for this one step.%w%
+echo  Reverts on reboot, or via option [5].
+echo.
+echo    [Y] Enable    [N] Cancel
+choice /c:YN /n >nul
+if errorlevel 2 goto wirelessadb
+adb tcpip 5555
+timeout /t 2 /nobreak >nul
+:: Read the phone's Wi-Fi IP so the user doesn't have to dig through
+:: Settings. `ip route` lines look like:
+::   192.168.1.0/24 dev wlan0 proto kernel scope link src 192.168.1.42
+:: Prefer a wlan line; the shift-walk helper grabs the token after
+:: 'src' no matter where in the line it sits.
+set "WDEVIP="
+for /f "delims=" %%l in ('adb shell ip route ^<nul 2^>nul ^| findstr /C:"wlan"') do if not defined WDEVIP call :_wadb_src %%l
+if not defined WDEVIP for /f "delims=" %%l in ('adb shell ip route ^<nul 2^>nul ^| findstr /C:" src "') do if not defined WDEVIP call :_wadb_src %%l
+echo.
+if defined WDEVIP (
+    echo  Phone Wi-Fi IP detected: %g%!WDEVIP!%w%
+    echo.
+    echo    [Y] Connect to !WDEVIP!:5555 now    [N] Not yet
+    choice /c:YN /n >nul
+    if errorlevel 2 goto wirelessadb
+    adb connect !WDEVIP!:5555
+    echo.
+    echo  You can unplug the cable now. If the list shows the device
+    echo  twice, USB and Wi-Fi are both attached - that's normal.
+    for /f "skip=1 delims=" %%i in ('adb devices ^<nul 2^>nul') do echo     %%i
+) else (
+    echo  Could not auto-detect the IP - the phone may be off Wi-Fi.
+    echo  Find it under Settings -^> About phone -^> Status, then use
+    echo  option [2].
+)
+echo.
+echo Press Any Button To Go Back
+pause > nul
+goto wirelessadb
+
+:: _wadb_src <route line tokens...>
+::   Walks the arguments until it finds 'src' and keeps the next one.
+:_wadb_src
+if "%~1"=="" exit /b
+if "%~1"=="src" (
+    set "WDEVIP=%~2"
+    exit /b
+)
+shift
+goto _wadb_src
+
+:wadb_disconnect
+cls
+title Wireless ADB : disconnect
+adb disconnect
+echo Done - all Wi-Fi connections dropped. USB is unaffected.
+echo Press Any Button To Go Back
+pause > nul
+goto wirelessadb
+
+:wadb_usb
+cls
+title Wireless ADB : back to USB
+:: Only meaningful for devices switched with option [3]; for the
+:: Android 11+ mode just turn the Wireless-debugging toggle off.
+adb usb 2>nul
+echo Done - adbd is back on USB; any Wi-Fi connection to it dropped.
+echo (Android 11+ Wireless debugging: turn the toggle off on the phone.)
+echo Press Any Button To Go Back
+pause > nul
+goto wirelessadb
+
+:wadb_help
+cls
+title Wireless ADB : help
+call :logo
+echo  %g%Android 11 and newer%w% - Developer options -^> %g%Wireless debugging%w%:
+echo    - Toggle it ON while the phone is on your Wi-Fi.
+echo    - "Pair device with pairing code" shows ip:port + a 6-digit
+echo      code -^> option [1]. One-time per PC; keep the dialog open.
+echo    - The MAIN screen's "IP address and Port" is what option [2]
+echo      wants. That port is random and %y%changes after a reboot or
+echo      re-toggle%w% - grab it fresh each time.
+echo.
+echo  %g%Android 10 and older%w% (pairing does not exist there):
+echo    - Plug in USB once, use option [3], unplug. Port is fixed 5555.
+echo.
+echo  %g%Huawei EMUI / HarmonyOS%w%: same place in Developer options; some
+echo    builds hide the pairing dialog - option [3] over USB works too.
+echo.
+echo  %y%Security note:%w% while wireless debugging is on, any PC paired
+echo  with the phone on the same network can run adb commands. Turn it
+echo  off when you're done.
+echo.
+echo Press Any Button To Go Back
+pause > nul
+goto wirelessadb
 
 :check
 cls
@@ -434,28 +669,28 @@ set "REPORT=%TEMP%\dcx_report_%TS%.txt"
     for /f "delims=" %%i in ('adb shell getprop ro.build.type 2^>nul ^<nul')                   do echo   Build type          : %%i
     echo.
     echo [Memory]
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "MemTotal" ^<nul')     do echo   Total RAM           : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "MemAvailable" ^<nul') do echo   Available RAM       : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "MemFree" ^<nul')      do echo   Free RAM            : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "Buffers" ^<nul')      do echo   Buffers             : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "^Cached" ^<nul')      do echo   Cached              : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "SwapTotal" ^<nul')    do echo   Swap total          : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "SwapFree" ^<nul')     do echo   Swap free           : %%i kB
+    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul ^| findstr "MemTotal"')     do echo   Total RAM           : %%i kB
+    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul ^| findstr "MemAvailable"') do echo   Available RAM       : %%i kB
+    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul ^| findstr "MemFree"')      do echo   Free RAM            : %%i kB
+    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul ^| findstr "Buffers"')      do echo   Buffers             : %%i kB
+    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul ^| findstr "^Cached"')      do echo   Cached              : %%i kB
+    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul ^| findstr "SwapTotal"')    do echo   Swap total          : %%i kB
+    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul ^| findstr "SwapFree"')     do echo   Swap free           : %%i kB
     echo.
     echo [Storage]
     adb shell df -h /data 2^>nul
     echo.
     echo [State]
-    for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul') do echo   Uptime              : %%a %%b %%c
-    for /f "delims=" %%i in ('adb shell dumpsys cpuinfo ^| findstr /C:"Load:" ^<nul')      do echo   %%i
-    for /f "delims=" %%i in ('adb shell dumpsys battery ^| findstr /C:"level:" ^<nul')       do echo   Battery            %%i
-    for /f "delims=" %%i in ('adb shell dumpsys battery ^| findstr /C:"temperature:" ^<nul') do echo   Battery temp       %%i (deci-degrees C)
-    for /f "delims=" %%i in ('adb shell dumpsys battery ^| findstr /C:"voltage:" ^<nul')     do echo   Battery voltage    %%i
-    for /f "delims=" %%i in ('adb shell dumpsys battery ^| findstr /C:"status:" ^<nul')      do echo   Battery status     %%i
-    for /f "delims=" %%i in ('adb shell dumpsys battery ^| findstr /C:"health:" ^<nul')      do echo   Battery health     %%i
+    for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul 2^>nul') do echo   Uptime              : %%a %%b %%c
+    for /f "delims=" %%i in ('adb shell dumpsys cpuinfo ^<nul ^| findstr /C:"Load:"')      do echo   %%i
+    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul ^| findstr /C:"level:"')       do echo   Battery            %%i
+    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul ^| findstr /C:"temperature:"') do echo   Battery temp       %%i (deci-degrees C)
+    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul ^| findstr /C:"voltage:"')     do echo   Battery voltage    %%i
+    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul ^| findstr /C:"status:"')      do echo   Battery status     %%i
+    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul ^| findstr /C:"health:"')      do echo   Battery health     %%i
     echo.
     echo [Display]
-    for /f "tokens=2 delims==" %%i in ('adb shell dumpsys SurfaceFlinger ^| findstr "refresh-rate" ^<nul') do echo   Display refresh    : %%i Hz
+    for /f "tokens=2 delims==" %%i in ('adb shell dumpsys SurfaceFlinger ^<nul ^| findstr "refresh-rate"') do echo   Display refresh    : %%i Hz
     for /f "delims=" %%i in ('adb shell wm size 2^>nul ^<nul')                                              do echo   %%i
     for /f "delims=" %%i in ('adb shell wm density 2^>nul ^<nul')                                           do echo   %%i
     echo.
@@ -507,11 +742,11 @@ echo  %b%[%w%2%b%]%w% Show report in this window (paginated with MORE)
 echo  %b%[%w%3%b%]%w% Show short summary here ^& go back
 echo  %b%[%w%4%b%]%w% Back to main menu
 echo.
-set /p ck="Choose An Option >> "
-if "%ck%"=="1" goto check_open
-if "%ck%"=="2" goto check_paginate
-if "%ck%"=="3" goto check_summary
-if "%ck%"=="4" goto menu
+set "ck=" & set /p ck="Choose An Option >> "
+if "!ck!"=="1" goto check_open
+if "!ck!"=="2" goto check_paginate
+if "!ck!"=="3" goto check_summary
+if "!ck!"=="4" goto menu
 goto check
 
 :check_open
@@ -533,10 +768,10 @@ call :logo
 echo                            %b%[%w% Quick Summary %b%]%w%
 echo.
 for /f "delims=" %%i in ('adb shell getprop ro.product.model 2^>nul ^<nul') do echo   Device: %%i  ^(API %SDK%^)
-for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^| findstr "MemAvailable" ^<nul') do echo   Free RAM: %%i kB
-for /f "delims=" %%i in ('adb shell dumpsys battery ^| findstr /C:"level:" ^<nul')       do echo  %%i
-for /f "delims=" %%i in ('adb shell dumpsys battery ^| findstr /C:"temperature:" ^<nul') do echo  %%i (deci-degrees C)
-for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul') do echo   Uptime: %%a %%b %%c
+for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul ^| findstr "MemAvailable"') do echo   Free RAM: %%i kB
+for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul ^| findstr /C:"level:"')       do echo  %%i
+for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul ^| findstr /C:"temperature:"') do echo  %%i (deci-degrees C)
+for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul 2^>nul') do echo   Uptime: %%a %%b %%c
 echo.
 echo   Full report still saved at: %REPORT%
 echo.
@@ -555,30 +790,31 @@ echo.
 echo.
 echo %b%[%w%1%b%]%w% Run Auto Setup
 echo %b%[%w%2%b%]%w% Go Back
-set /p kb="Choose An Option >> "
-if "%kb%"=="1" goto setupautorun
-if "%kb%"=="2" goto menu
+set "kb=" & set /p kb="Choose An Option >> "
+if "!kb!"=="1" goto setupautorun
+if "!kb!"=="2" goto menu
 :: FIX: guard against invalid input - previously any other key fell
 :: straight through into :setupautorun and ran Auto Setup unprompted.
 goto Auto
 
 :setupautorun
-cls && title SurfaceFlinger Setup!
+cls && title SurfaceFlinger Setup^^!
 call :logo
 echo.
 echo.
 echo [%g%+%w%] Check Refresh Rate
 timeout /t 1 /nobreak > nul
-for /f "tokens=3 delims= " %%i in ('adb shell dumpsys SurfaceFlinger ^| findstr "refresh-rate" ^<nul') do (
+set "refresh_rate="
+for /f "tokens=3 delims= " %%i in ('adb shell dumpsys SurfaceFlinger ^<nul ^| findstr "refresh-rate"') do (
     set refresh_rate=%%i
 )
-set refresh_rate=%refresh_rate: =%
+if defined refresh_rate set "refresh_rate=%refresh_rate: =%"
 if "%refresh_rate%"=="" (
-    echo [%r%!%w%] Could not detect refresh rate. Auto setup cannot continue.
+    echo [%r%^^!%w%] Could not detect refresh rate. Auto setup cannot continue.
     pause > nul
     goto menu
 )
-echo [%b%!%w%]Refresh rate : %refresh_rate%
+echo [%b%^^!%w%]Refresh rate : %refresh_rate%
 timeout /t 1 /nobreak > nul
 for /f "delims=" %%i in ('powershell -Command "[math]::Round(1 / %refresh_rate%, 10)"') do set result=%%i
 for /f "delims=" %%i in ('powershell -Command "[math]::Round(%result% * 1000000000, 0)"') do set final=%%i
@@ -587,7 +823,7 @@ echo.
 timeout /t 1 /nobreak > nul
 echo.
 echo.
-echo [%b%!%w%] SurfaceFlinger Setup. . .
+echo [%b%^^!%w%] SurfaceFlinger Setup. . .
 for /f "delims=" %%i in ('powershell -Command "[math]::Round(%final% / 18.518520, 0)"') do set eaglpos=%%i
 for /f "delims=" %%i in ('powershell -Command "[math]::Round(%final% / 8.771929, 0)"') do set apsofs=%%i
 for /f "delims=" %%i in ('powershell -Command "[math]::Round(%final% / 4.7619050, 0)"') do set elfpsofsasdasx=%%i
@@ -624,12 +860,12 @@ adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %rgsmplsa%
 adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %rgsmplsa%
 adb shell setprop debug.sf.late.app.duration %rgsmplsa%
 adb shell setprop debug.sf.late.sf.duration %rgsmplsa%
-echo [%g%+%w%] Done !
+echo [%g%+%w%] Done ^^!
 echo.
 echo.
 timeout /t 2 /nobreak > nul
-echo [!] SurfaceFlinger Setup Is Complete, 2nd Setup Is Ready!
-echo [!] Please Wait!
+echo [^^!] SurfaceFlinger Setup Is Complete, 2nd Setup Is Ready^^!
+echo [^^!] Please Wait^^!
 timeout /t 10 /nobreak > nul
 set count=0
 title 2nd Setup
@@ -716,8 +952,8 @@ title Optimize Android
 mode 100,37
 call :logo
 echo          ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul') do echo           [%g%+%w%]Uptime: %%a %%b %%c
-for /f "tokens=1 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul') do set cpucheck=%%i
+for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul 2^>nul') do echo           [%g%+%w%]Uptime: %%a %%b %%c
+for /f "tokens=1 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul 2^>nul') do set cpucheck=%%i
 echo           [%g%+%w%]%cpucheck% LOAD
 echo          ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 echo.
@@ -733,17 +969,17 @@ echo                                     %g%[%w%8%g%]%w% Compile All Apps
 echo                                     %g%[%w%9%g%]%w% Animation Speed
 echo                                     %g%[%w%0%g%]%w% Back
 echo.
-set /p kb="Choose An Option >> "
-if "%kb%"=="1" goto dexopt
-if "%kb%"=="2" goto fstrim
-if "%kb%"=="3" goto killall
-if "%kb%"=="4" goto compile
-if "%kb%"=="5" goto cache
-if "%kb%"=="6" goto sftmenu
-if "%kb%"=="7" goto lstused
-if "%kb%"=="8" goto compileall
-if "%kb%"=="9" goto animspeed
-if "%kb%"=="0" goto menu
+set "kb=" & set /p kb="Choose An Option >> "
+if "!kb!"=="1" goto dexopt
+if "!kb!"=="2" goto fstrim
+if "!kb!"=="3" goto killall
+if "!kb!"=="4" goto compile
+if "!kb!"=="5" goto cache
+if "!kb!"=="6" goto sftmenu
+if "!kb!"=="7" goto lstused
+if "!kb!"=="8" goto compileall
+if "!kb!"=="9" goto animspeed
+if "!kb!"=="0" goto menu
 goto Optimize
 :: ===================================================================
 :: NEW: Compile All Apps  (from Compile.bat + smooth_android.sh)
@@ -771,13 +1007,13 @@ echo                                     %g%[%w%3%g%]%w% speed              (fas
 echo                                     %g%[%w%4%g%]%w% speed-profile      (default)
 echo                                     %g%[%w%5%g%]%w% heaviest optimization, will reduce the available storage space
 echo                                     %g%[%w%6%g%]%w% Back
-set /p ca="Choose An Option >> "
-if "%ca%"=="1" set "ca_mode=everything-profile" & goto compileall_run
-if "%ca%"=="2" set "ca_mode=everything"         & goto compileall_run
-if "%ca%"=="3" set "ca_mode=speed"              & goto compileall_run
-if "%ca%"=="4" set "ca_mode=speed-profile"      & goto compileall_run
-if "%ca%"=="5" goto compileall_heaviest
-if "%ca%"=="6" goto Optimize
+set "ca=" & set /p ca="Choose An Option >> "
+if "!ca!"=="1" set "ca_mode=everything-profile" & goto compileall_run
+if "!ca!"=="2" set "ca_mode=everything"         & goto compileall_run
+if "!ca!"=="3" set "ca_mode=speed"              & goto compileall_run
+if "!ca!"=="4" set "ca_mode=speed-profile"      & goto compileall_run
+if "!ca!"=="5" goto compileall_heaviest
+if "!ca!"=="6" goto Optimize
 goto compileall
 
 :compileall_run
@@ -880,18 +1116,18 @@ echo                                     %g%[%w%3%g%]%w% 0.75  (snappy, recommen
 echo                                     %g%[%w%4%g%]%w% 1.0   (default)
 echo                                     %g%[%w%5%g%]%w% Custom
 echo                                     %g%[%w%6%g%]%w% Back
-set /p as="Choose An Option >> "
-if "%as%"=="1" set "asv=0"    & goto animspeed_apply
-if "%as%"=="2" set "asv=0.5"  & goto animspeed_apply
-if "%as%"=="3" set "asv=0.75" & goto animspeed_apply
-if "%as%"=="4" set "asv=1.0"  & goto animspeed_apply
-if "%as%"=="5" goto animspeed_custom
-if "%as%"=="6" goto Optimize
+set "as=" & set /p as="Choose An Option >> "
+if "!as!"=="1" set "asv=0"    & goto animspeed_apply
+if "!as!"=="2" set "asv=0.5"  & goto animspeed_apply
+if "!as!"=="3" set "asv=0.75" & goto animspeed_apply
+if "!as!"=="4" set "asv=1.0"  & goto animspeed_apply
+if "!as!"=="5" goto animspeed_custom
+if "!as!"=="6" goto Optimize
 goto animspeed
 
 :animspeed_custom
 echo Enter a decimal value between 0 and 2 (e.g. 0.5):
-set /p asv="Value >> "
+set "asv=" & set /p asv="Value >> "
 goto animspeed_apply
 
 :animspeed_apply
@@ -905,10 +1141,10 @@ goto animspeed
 :lstused
 cls
 call :logo
-title Clear Last Used Is Running!
+title Clear Last Used Is Running^^!
 for /f "tokens=2 delims=:" %%a in ('adb shell pm list package ^<nul') do (
 adb shell cmd usagestats clear-last-used-timestamps %%a
-echo %%a ━ clear last used!
+echo %%a ━ clear last used^^!
 )
 echo.
 echo.
@@ -934,13 +1170,13 @@ echo                                      [%g%3%w%] 120hz
 echo                                      [%g%4%w%] 144hz
 echo                                      [%g%5%w%] Remove
 echo                                      [%g%6%w%] Back  
-set /p set="Choose An Option >> "
-if "%set%"=="1" goto sf60
-if "%set%"=="2" goto sf90
-if "%set%"=="3" goto sf120
-if "%set%"=="4" goto sf144
-if "%set%"=="5" goto removesf
-if "%set%"=="6" goto Optimize
+set "set=" & set /p set="Choose An Option >> "
+if "!set!"=="1" goto sf60
+if "!set!"=="2" goto sf90
+if "!set!"=="3" goto sf120
+if "!set!"=="4" goto sf144
+if "!set!"=="5" goto removesf
+if "!set!"=="6" goto Optimize
 goto sftmenu
 
 :sf60
@@ -955,11 +1191,11 @@ echo                                      [%g%3%w%] Battery Saver Mode
 echo                                      [%g%4%w%] Back
 echo.
 echo.
-set /p set="Choose An Option >> "
-if "%set%"=="1" goto sf60balance
-if "%set%"=="2" goto sf60gaming
-if "%set%"=="3" goto sf60battery
-if "%set%"=="4" goto sftmenu
+set "set=" & set /p set="Choose An Option >> "
+if "!set!"=="1" goto sf60balance
+if "!set!"=="2" goto sf60gaming
+if "!set!"=="3" goto sf60battery
+if "!set!"=="4" goto sftmenu
 :: FIX: invalid input previously fell into :sf60battery
 goto sf60
 
@@ -1099,11 +1335,11 @@ echo                                      [%g%3%w%] Battery Saver Mode
 echo                                      [%g%4%w%] Back
 echo.
 echo.
-set /p set="Choose An Option >> "
-if "%set%"=="1" goto sf90balance
-if "%set%"=="2" goto sf90gaming
-if "%set%"=="3" goto sf90battery
-if "%set%"=="4" goto sftmenu
+set "set=" & set /p set="Choose An Option >> "
+if "!set!"=="1" goto sf90balance
+if "!set!"=="2" goto sf90gaming
+if "!set!"=="3" goto sf90battery
+if "!set!"=="4" goto sftmenu
 :: FIX: invalid input previously fell into :sf90battery
 goto sf90
 
@@ -1232,11 +1468,11 @@ echo                                      [%g%3%w%] Battery Saver Mode
 echo                                      [%g%4%w%] Back
 echo.
 echo.
-set /p set="Choose An Option >> "
-if "%set%"=="1" goto sf120balance
-if "%set%"=="2" goto sf120gaming
-if "%set%"=="3" goto sf120battery
-if "%set%"=="4" goto sftmenu
+set "set=" & set /p set="Choose An Option >> "
+if "!set!"=="1" goto sf120balance
+if "!set!"=="2" goto sf120gaming
+if "!set!"=="3" goto sf120battery
+if "!set!"=="4" goto sftmenu
 :: FIX: invalid input previously fell into :sf120gaming
 goto sf120
 
@@ -1371,11 +1607,11 @@ echo                                      [%g%3%w%] Battery Saver Mode
 echo                                      [%g%4%w%] Back
 echo.
 echo.
-set /p set="Choose An Option >> "
-if "%set%"=="1" goto sf144balance
-if "%set%"=="2" goto sf144gaming
-if "%set%"=="3" goto sf144battery
-if "%set%"=="4" goto sftmenu
+set "set=" & set /p set="Choose An Option >> "
+if "!set!"=="1" goto sf144balance
+if "!set!"=="2" goto sf144gaming
+if "!set!"=="3" goto sf144battery
+if "!set!"=="4" goto sftmenu
 goto sf144
 
 :sf144gaming
@@ -1502,7 +1738,7 @@ title Remove SF
 call :logo
 echo.
 echo.
-echo                       [%r%!%w%] Please Restart Device To Finish The Process
+echo                       [%r%^^!%w%] Please Restart Device To Finish The Process
 echo.
 echo.
 :: NOTE: debug.sf properties persist until reboot. Please restart to clear them.
@@ -1536,14 +1772,14 @@ echo  stay fast. It runs %y%silently%w% - Android prints nothing on success,
 echo  which is why it can look like "nothing happened". That's normal.
 echo.
 echo  Free space on /data BEFORE:
-for /f "delims=" %%i in ('adb shell df -h /data 2^>nul ^| findstr /v "Filesystem" ^<nul') do echo    %%i
+for /f "delims=" %%i in ('adb shell df -h /data 2^>nul ^<nul ^| findstr /v "Filesystem"') do echo    %%i
 echo.
 echo  Running 'sm fstrim'...
 adb shell sm fstrim
 echo  Trigger sent.
 echo.
 echo  Free space on /data AFTER:
-for /f "delims=" %%i in ('adb shell df -h /data 2^>nul ^| findstr /v "Filesystem" ^<nul') do echo    %%i
+for /f "delims=" %%i in ('adb shell df -h /data 2^>nul ^<nul ^| findstr /v "Filesystem"') do echo    %%i
 echo.
 echo  %b%Note:%w% fstrim reclaims at the flash level, so the df numbers may
 echo  not change. On some devices the trim only fully runs while the
@@ -1562,7 +1798,7 @@ title kill process
 :: (force-stopping the focused app loses unsaved data in messengers,
 :: notes, browsers, etc.)
 set "FG_PKG="
-for /f "tokens=2 delims= " %%a in ('adb shell dumpsys activity activities 2^>nul ^| findstr /C:"mResumedActivity" ^<nul') do (
+for /f "tokens=2 delims= " %%a in ('adb shell dumpsys activity activities 2^>nul ^<nul ^| findstr /C:"mResumedActivity"') do (
     if not defined FG_PKG (
         for /f "tokens=1 delims=/" %%b in ("%%a") do set "FG_PKG=%%b"
     )
@@ -1599,31 +1835,31 @@ cls
 title Compile App
 echo.
 echo.
-echo Enter The Mode You Want !
+echo Enter The Mode You Want ^^!
 echo Valid modes: speed, speed-profile, verify, quicken, everything, everything-profile
 echo Recommended: speed (best performance, slower install)
 echo.
-set /p mode="Choose A Mode >> "
+set "mode=" & set /p mode="Choose A Mode >> "
 :: FIX: validate mode against the list ART actually accepts
 set "modeok=0"
 for %%m in (speed speed-profile verify quicken everything everything-profile) do (
-    if /i "%mode%"=="%%m" set "modeok=1"
+    if /i "!mode!"=="%%m" set "modeok=1"
 )
 if "%modeok%"=="0" (
-    echo [%r%!%w%] Invalid mode. Use one of: speed, speed-profile, verify, quicken, everything.
+    echo [%r%^^!%w%] Invalid mode. Use one of: speed, speed-profile, verify, quicken, everything.
     pause > nul
     goto Optimize
 )
-set /p package="Put Your Package Name Here >> "
-if "%package%"=="" (
-    echo [%r%!%w%] Package name cannot be empty.
+set "package=" & set /p package="Put Your Package Name Here >> "
+if "!package!"=="" (
+    echo [%r%^^!%w%] Package name cannot be empty.
     pause > nul
     goto Optimize
 )
 :: Verify the package actually exists on the device
 adb shell pm list packages 2>nul | findstr /C:"package:%package%" > nul
 if errorlevel 1 (
-    echo [%r%!%w%] Package "%package%" is not installed on the device.
+    echo [%r%^^!%w%] Package "%package%" is not installed on the device.
     pause > nul
     goto Optimize
 )
@@ -1641,9 +1877,9 @@ cls
 title Clear Cache
 echo [1] %c%Clear Cache%w%
 echo [2] %c%Back%w%
-set /p k="Choose An Option >> "
-if "%k%"=="1" goto sdgb
-if "%k%"=="2" goto Optimize
+set "k=" & set /p k="Choose An Option >> "
+if "!k!"=="1" goto sdgb
+if "!k!"=="2" goto Optimize
 :: FIX: guard against invalid input - previously fell through to :sdgb
 goto cache
 
@@ -1655,10 +1891,10 @@ echo [1] %c%Trim system cache (no root)%w%
 echo [2] %r%Wipe all app cache folders (root required)%w%
 echo [3] %c%Back%w%
 echo.
-set /p k="Choose an option >> "
-if "%k%"=="1" goto cache_trim
-if "%k%"=="2" goto cache_wipe
-if "%k%"=="3" goto Optimize
+set "k=" & set /p k="Choose an option >> "
+if "!k!"=="1" goto cache_trim
+if "!k!"=="2" goto cache_wipe
+if "!k!"=="3" goto Optimize
 goto sdgb
 
 :cache_trim
@@ -1697,8 +1933,8 @@ cls
 echo                                                                                            Page%g%[%w%1/2%g%]
 call :logo
 echo          ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul') do echo           [%g%+%w%]Uptime: %%a %%b %%c
-for /f "tokens=1 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul') do set cpucheck=%%i
+for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul 2^>nul') do echo           [%g%+%w%]Uptime: %%a %%b %%c
+for /f "tokens=1 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul 2^>nul') do set cpucheck=%%i
 echo           [%g%+%w%]%cpucheck% LOAD
 echo          ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 echo.
@@ -1715,19 +1951,19 @@ echo                                     %gold%[%w%9%gold%]%w% Toggle Lock Profi
 echo                                     %gold%[%w%10%gold%]%w% Toggle Logs/etc
 echo                                     %gold%[%w%11%gold%]%w% Next Page
 echo                                     %gold%[%w%12%gold%]%w% Back
-set /p set="Choose An Option >> "
-if "%set%"=="1" goto saverpower
-if "%set%"=="2" goto animation
-if "%set%"=="3" goto autowifi
-if "%set%"=="4" goto sync
-if "%set%"=="5" goto motion
-if "%set%"=="6" goto zram
-if "%set%"=="7" goto extremepower
-if "%set%"=="8" goto senderror
-if "%set%"=="9" goto toggleprofilling
-if "%set%"=="10" goto togglelogs
-if "%set%"=="11" goto nextpage
-if "%set%"=="12" goto menu
+set "set=" & set /p set="Choose An Option >> "
+if "!set!"=="1" goto saverpower
+if "!set!"=="2" goto animation
+if "!set!"=="3" goto autowifi
+if "!set!"=="4" goto sync
+if "!set!"=="5" goto motion
+if "!set!"=="6" goto zram
+if "!set!"=="7" goto extremepower
+if "!set!"=="8" goto senderror
+if "!set!"=="9" goto toggleprofilling
+if "!set!"=="10" goto togglelogs
+if "!set!"=="11" goto nextpage
+if "!set!"=="12" goto menu
 :: FIX: guard against invalid input - previously fell through to :nextpage
 goto Battery
 
@@ -1751,18 +1987,18 @@ echo                                     %gold%[%w%A%gold%]%w% Wake-Lock Audit  
 echo                                     %gold%[%w%0%gold%]%w% Back
 echo.
 echo.
-set /p ksd="Choose An Option >> "
-if "%ksd%"=="1" goto logappsuser
-if "%ksd%"=="2" goto universallogs
-if "%ksd%"=="3" goto Deviceidle
-if "%ksd%"=="4" goto hibernateapp
-if "%ksd%"=="5" goto refreshlock
-if "%ksd%"=="6" goto forcedoze
-if "%ksd%"=="7" goto apphibernation
-if "%ksd%"=="8" goto syncmaster
-if "%ksd%"=="9" goto hotwordtoggle
-if /i "%ksd%"=="A" goto wakelockaudit
-if "%ksd%"=="0" goto Battery
+set "ksd=" & set /p ksd="Choose An Option >> "
+if "!ksd!"=="1" goto logappsuser
+if "!ksd!"=="2" goto universallogs
+if "!ksd!"=="3" goto Deviceidle
+if "!ksd!"=="4" goto hibernateapp
+if "!ksd!"=="5" goto refreshlock
+if "!ksd!"=="6" goto forcedoze
+if "!ksd!"=="7" goto apphibernation
+if "!ksd!"=="8" goto syncmaster
+if "!ksd!"=="9" goto hotwordtoggle
+if /i "!ksd!"=="A" goto wakelockaudit
+if "!ksd!"=="0" goto Battery
 :: guard against invalid input
 goto nextpage
 :: ===================================================================
@@ -1822,7 +2058,7 @@ set "WLREPORT=%TEMP%\dcx_wakelocks_%TS%.txt"
     echo    - In Section 2, an app with ^>1h "Wake lock" since charge
     echo      is the prime suspect
     echo    - High wakeup count in Section 4 = app pinging too often
-    echo    - If mState != IDLE while screen is off, doze is blocked
+    echo    - If mState ^^!= IDLE while screen is off, doze is blocked
     echo ===========================================================
 ) > "%WLREPORT%" < nul
 echo  %g%Report saved to:%w%
@@ -1832,12 +2068,12 @@ echo  %b%[%w%1%b%]%w% Open in Notepad (searchable)
 echo  %b%[%w%2%b%]%w% Show paginated (MORE)
 echo  %b%[%w%3%b%]%w% Show summary only
 echo  %b%[%w%4%b%]%w% Back
-set /p wl="Choose An Option >> "
-if "%wl%"=="1" (
+set "wl=" & set /p wl="Choose An Option >> "
+if "!wl!"=="1" (
     start "" notepad "%WLREPORT%"
     goto wakelockaudit
 )
-if "%wl%"=="2" (
+if "!wl!"=="2" (
     cls
     more "%WLREPORT%"
     echo.
@@ -1845,7 +2081,7 @@ if "%wl%"=="2" (
     pause > nul
     goto wakelockaudit
 )
-if "%wl%"=="3" (
+if "!wl!"=="3" (
     cls
     echo Currently held wake locks:
     echo.
@@ -1859,7 +2095,7 @@ if "%wl%"=="3" (
     pause > nul
     goto wakelockaudit
 )
-if "%wl%"=="4" goto nextpage
+if "!wl!"=="4" goto nextpage
 goto wakelockaudit
 :: ===================================================================
 :: NEW: Refresh Rate Lock  (from Extra_Boost.bat / Power_Saving.bat)
@@ -1884,43 +2120,43 @@ echo                                     %g%[%w%3%g%]%w% Lock to 120 Hz  (smooth
 echo                                     %g%[%w%4%g%]%w% Adaptive (1 to 120 Hz)
 echo                                     %g%[%w%5%g%]%w% Restore defaults
 echo                                     %g%[%w%6%g%]%w% Back
-set /p rl="Choose An Option >> "
-if "%rl%"=="1" (
+set "rl=" & set /p rl="Choose An Option >> "
+if "!rl!"=="1" (
     adb shell settings put system min_refresh_rate 60
     adb shell settings put system peak_refresh_rate 60
     echo Locked at 60 Hz.
     pause > nul
     goto refreshlock
 )
-if "%rl%"=="2" (
+if "!rl!"=="2" (
     adb shell settings put system min_refresh_rate 90
     adb shell settings put system peak_refresh_rate 90
     echo Locked at 90 Hz. ^(Falls back if your panel doesn't support 90.^)
     pause > nul
     goto refreshlock
 )
-if "%rl%"=="3" (
+if "!rl!"=="3" (
     adb shell settings put system min_refresh_rate 120
     adb shell settings put system peak_refresh_rate 120
     echo Locked at 120 Hz. ^(Falls back if your panel doesn't support 120.^)
     pause > nul
     goto refreshlock
 )
-if "%rl%"=="4" (
+if "!rl!"=="4" (
     adb shell settings put system min_refresh_rate 1
     adb shell settings put system peak_refresh_rate 120
     echo Adaptive 1-120 Hz.
     pause > nul
     goto refreshlock
 )
-if "%rl%"=="5" (
+if "!rl!"=="5" (
     adb shell settings delete system min_refresh_rate
     adb shell settings delete system peak_refresh_rate
     echo Defaults restored.
     pause > nul
     goto refreshlock
 )
-if "%rl%"=="6" goto nextpage
+if "!rl!"=="6" goto nextpage
 goto refreshlock
 :: ===================================================================
 :: NEW: Force Doze Now  (from Power_Saving.bat)
@@ -1940,27 +2176,27 @@ echo                                     %g%[%w%1%g%]%w% Force doze now
 echo                                     %g%[%w%2%g%]%w% Unforce (return to normal scheduling)
 echo                                     %g%[%w%3%g%]%w% Show current state
 echo                                     %g%[%w%4%g%]%w% Back
-set /p fd="Choose An Option >> "
-if "%fd%"=="1" (
+set "fd=" & set /p fd="Choose An Option >> "
+if "!fd!"=="1" (
     adb shell dumpsys deviceidle force-idle
     echo Doze forced.
     pause > nul
     goto forcedoze
 )
-if "%fd%"=="2" (
+if "!fd!"=="2" (
     adb shell dumpsys deviceidle unforce
     echo Returned to normal scheduling.
     pause > nul
     goto forcedoze
 )
-if "%fd%"=="3" (
+if "!fd!"=="3" (
     cls
-    for /f "delims=" %%i in ('adb shell dumpsys deviceidle ^| findstr /C:"mState=" /C:"mLightState=" ^<nul') do echo   %%i
+    for /f "delims=" %%i in ('adb shell dumpsys deviceidle ^<nul ^| findstr /C:"mState=" /C:"mLightState="') do echo   %%i
     echo.
     pause > nul
     goto forcedoze
 )
-if "%fd%"=="4" goto nextpage
+if "!fd!"=="4" goto nextpage
 goto forcedoze
 :: ===================================================================
 :: NEW: App Hibernation toggle (Android 12+, from Power_Saving.bat)
@@ -1991,20 +2227,20 @@ echo.
 echo                                     %g%[%w%1%g%]%w% Enable
 echo                                     %g%[%w%2%g%]%w% Disable
 echo                                     %g%[%w%3%g%]%w% Back
-set /p ah="Choose An Option >> "
-if "%ah%"=="1" (
+set "ah=" & set /p ah="Choose An Option >> "
+if "!ah!"=="1" (
     adb shell device_config put app_hibernation app_hibernation_enabled true
     echo Enabled.
     pause > nul
     goto apphibernation
 )
-if "%ah%"=="2" (
+if "!ah!"=="2" (
     adb shell device_config put app_hibernation app_hibernation_enabled false
     echo Disabled.
     pause > nul
     goto apphibernation
 )
-if "%ah%"=="3" goto nextpage
+if "!ah!"=="3" goto nextpage
 goto apphibernation
 :: ===================================================================
 :: NEW: Account Sync toggle (from Balanced.bat)
@@ -2029,20 +2265,20 @@ echo.
 echo                                     %g%[%w%1%g%]%w% Enable sync (default)
 echo                                     %g%[%w%2%g%]%w% Disable sync (battery saver)
 echo                                     %g%[%w%3%g%]%w% Back
-set /p sm="Choose An Option >> "
-if "%sm%"=="1" (
+set "sm=" & set /p sm="Choose An Option >> "
+if "!sm!"=="1" (
     adb shell settings put global master_sync_status 1
     echo Sync enabled.
     pause > nul
     goto syncmaster
 )
-if "%sm%"=="2" (
+if "!sm!"=="2" (
     adb shell settings put global master_sync_status 0
     echo Sync disabled. You will need to open apps to fetch new content.
     pause > nul
     goto syncmaster
 )
-if "%sm%"=="3" goto nextpage
+if "!sm!"=="3" goto nextpage
 goto syncmaster
 :: ===================================================================
 :: NEW: Voice Hotword toggle (from Balanced.bat)
@@ -2065,27 +2301,27 @@ echo.
 echo                                     %g%[%w%1%g%]%w% Enable hotword
 echo                                     %g%[%w%2%g%]%w% Disable hotword
 echo                                     %g%[%w%3%g%]%w% Back
-set /p hw="Choose An Option >> "
-if "%hw%"=="1" (
+set "hw=" & set /p hw="Choose An Option >> "
+if "!hw!"=="1" (
     adb shell settings put global hotword_detection_enabled 1
     echo Hotword enabled.
     pause > nul
     goto hotwordtoggle
 )
-if "%hw%"=="2" (
+if "!hw!"=="2" (
     adb shell settings put global hotword_detection_enabled 0
     echo Hotword disabled.
     pause > nul
     goto hotwordtoggle
 )
-if "%hw%"=="3" goto nextpage
+if "!hw!"=="3" goto nextpage
 goto hotwordtoggle
 
 :hibernateapp
 if "%SDK%"=="" (
     cls
     call :logo
-    echo [%r%!%w%] Could not detect API level. Cannot safely continue.
+    echo [%r%^^!%w%] Could not detect API level. Cannot safely continue.
     echo Press Any Button To Go Back
     pause > nul
     goto nextpage
@@ -2093,7 +2329,7 @@ if "%SDK%"=="" (
 if %SDK% LSS 34 (
     cls
     call :logo
-    echo [%r%!%w%] Your API Level Is %SDK% , Some Adb Commands Won't Work.
+    echo [%r%^^!%w%] Your API Level Is %SDK% , Some Adb Commands Won't Work.
     echo Press Any Button To Go Back
     pause > nul
     goto nextpage
@@ -2110,10 +2346,10 @@ echo                                     %gold%[%w%2%gold%]%w% Set App To Stock
 echo                                     %gold%[%w%3%gold%]%w% Back
 echo.
 echo.
-set /p ksd="Choose An Option >> "
-if "%ksd%"=="1" goto sethibdernatephs
-if "%ksd%"=="2" goto stockpackage
-if "%ksd%"=="3" goto nextpage
+set "ksd=" & set /p ksd="Choose An Option >> "
+if "!ksd!"=="1" goto sethibdernatephs
+if "!ksd!"=="2" goto stockpackage
+if "!ksd!"=="3" goto nextpage
 :: FIX: guard against invalid input - previously fell through to :stockpackage
 goto nexthibernateappphase
 
@@ -2121,8 +2357,8 @@ goto nexthibernateappphase
 cls
 title Revert Your Package To Stock
 call :logo
-set /p pkgv2="Put Your Package Name Here >> "
-if "%pkgv2%"=="" goto nexthibernateappphase
+set "pkgv2=" & set /p pkgv2="Put Your Package Name Here >> "
+if "!pkgv2!"=="" goto nexthibernateappphase
 echo.
 echo [#] Set %pkgv2% To Stock . . . .
 echo.
@@ -2145,8 +2381,8 @@ goto nextpage
 cls
 title Set Your Package Here
 call :logo
-set /p pkgv2="Put Your Package Name Here >> "
-if "%pkgv2%"=="" (
+set "pkgv2=" & set /p pkgv2="Put Your Package Name Here >> "
+if "!pkgv2!"=="" (
     echo invalid package. . . .
     timeout /t 2 /nobreak > nul
     goto nexthibernateappphase
@@ -2200,10 +2436,10 @@ echo.
 echo                                     [%d%1%w%] Remove System App From Whitelist
 echo                                     [%d%2%w%] Revert
 echo                                     [%d%3%w%] Back
-set /p ksd="Choose An Option >> "
-if "%ksd%"=="1" goto devicesysdel
-if "%ksd%"=="2" goto devicesysrev
-if "%ksd%"=="3" goto nextpage
+set "ksd=" & set /p ksd="Choose An Option >> "
+if "!ksd!"=="1" goto devicesysdel
+if "!ksd!"=="2" goto devicesysrev
+if "!ksd!"=="3" goto nextpage
 :: FIX: guard against invalid input - previously fell through to :devicesysdel
 goto Deviceidle
 
@@ -2273,10 +2509,10 @@ echo.
 echo                                     [%d%1%w%] Off
 echo                                     [%d%2%w%] On
 echo                                     [%d%3%w%] Back
-set /p ksd="Choose An Option >> "
-if "%ksd%"=="1" goto offlogsuni
-if "%ksd%"=="2" goto onlogsuni
-if "%ksd%"=="3" goto nextpage
+set "ksd=" & set /p ksd="Choose An Option >> "
+if "!ksd!"=="1" goto offlogsuni
+if "!ksd!"=="2" goto onlogsuni
+if "!ksd!"=="3" goto nextpage
 :: FIX: guard against invalid input - previously fell through to :offlogsuni
 goto universallogs
 
@@ -2284,7 +2520,7 @@ goto universallogs
 cls
 title Universal Toggle Logs\etc : Off
 call :logo
-for /f "tokens=1 delims=:" %%a in ('adb shell getprop ^| findstr "log.tag" ^<nul') do (
+for /f "tokens=1 delims=:" %%a in ('adb shell getprop ^<nul ^| findstr "log.tag"') do (
     set "prop=%%a"
     set "prop=!prop: =!"
     set "prop=!prop:[=!"
@@ -2299,7 +2535,7 @@ goto nextpage
 cls
 title Universal toggle Logs\etc : On
 call :logo
-echo                       [%r%!%w%] Please Restart Device To Finish The Process
+echo                       [%r%^^!%w%] Please Restart Device To Finish The Process
 echo.
 echo.
 echo Press Any Button To Go Back
@@ -2317,10 +2553,10 @@ echo.
 echo                                     [%d%1%w%] Off
 echo                                     [%d%2%w%] On
 echo                                     [%d%3%w%] Back
-set /p ksd="Choose An Option >> "
-if "%ksd%"=="1" goto offlogsuserapp
-if "%ksd%"=="2" goto onlogsuserapp
-if "%ksd%"=="3" goto nextpage
+set "ksd=" & set /p ksd="Choose An Option >> "
+if "!ksd!"=="1" goto offlogsuserapp
+if "!ksd!"=="2" goto onlogsuserapp
+if "!ksd!"=="3" goto nextpage
 :: FIX: guard against invalid input - previously fell through to :offlogsuserapp
 goto logappsuser
 
@@ -2362,10 +2598,10 @@ echo.
 echo [%r%1%w%] Off
 echo [%r%2%w%] On 
 echo [%r%3%w%] Back
-set /p toggle="Choose An Option >> "
-if "%toggle%"=="1" goto offlogss
-if "%toggle%"=="2" goto onlogss
-if "%toggle%"=="3" goto Battery
+set "toggle=" & set /p toggle="Choose An Option >> "
+if "!toggle!"=="1" goto offlogss
+if "!toggle!"=="2" goto onlogss
+if "!toggle!"=="3" goto Battery
 :: guard against invalid input
 goto togglelogs
 
@@ -2381,10 +2617,10 @@ echo.
 echo [1] Skip And Continue
 echo [2] Yes
 echo [3] Back
-set /p conx="Choose An Option >> "
-if "%conx%"=="1" goto skiplogv
-if "%conx%"=="2" goto mainlogv
-if "%conx%"=="3" goto Battery
+set "conx=" & set /p conx="Choose An Option >> "
+if "!conx!"=="1" goto skiplogv
+if "!conx!"=="2" goto mainlogv
+if "!conx!"=="3" goto Battery
 :: FIX: guard against invalid input - previously fell through to :mainlogv
 goto offlogss
 
@@ -2949,7 +3185,7 @@ adb shell device_config put on_device_personalization fcp_enable_client_error_lo
 adb shell logcat -c
 echo.
 echo.
-echo [%r%!%w%] Please Restart Device To Finish The Process
+echo [%r%^^!%w%] Please Restart Device To Finish The Process
 echo.
 echo.
 timeout /t 2 /nobreak > nul
@@ -2969,10 +3205,10 @@ echo.
 echo [%r%1%w%] Off
 echo [%r%2%w%] On 
 echo [%r%3%w%] Back
-set /p toggle="Choose An Option >> "
-if "%toggle%"=="1" goto offsv
-if "%toggle%"=="2" goto onsv
-if "%toggle%"=="3" goto Battery
+set "toggle=" & set /p toggle="Choose An Option >> "
+if "!toggle!"=="1" goto offsv
+if "!toggle!"=="2" goto onsv
+if "!toggle!"=="3" goto Battery
 :: guard against invalid input
 goto saverpower
 
@@ -3007,10 +3243,10 @@ echo.
 echo [%r%1%w%] Off
 echo [%r%2%w%] On 
 echo [%r%3%w%] Back
-set /p toggle="Choose An Option >> "
-if "%toggle%"=="1" goto offani
-if "%toggle%"=="2" goto onani
-if "%toggle%"=="3" goto Battery
+set "toggle=" & set /p toggle="Choose An Option >> "
+if "!toggle!"=="1" goto offani
+if "!toggle!"=="2" goto onani
+if "!toggle!"=="3" goto Battery
 :: guard against invalid input
 goto animation
 
@@ -3085,7 +3321,7 @@ adb shell device_config delete systemui reduce_animations > nul 2>&1
 adb shell device_config delete battery_saver reduce_animations > nul 2>&1
 echo.
 echo.
-echo [%r%!%w%] Please Restart Device To Finish The Process
+echo [%r%^^!%w%] Please Restart Device To Finish The Process
 echo.
 echo.
 timeout /t 2 /nobreak > nul
@@ -3104,10 +3340,10 @@ echo.
 echo [%r%1%w%] Off
 echo [%r%2%w%] On 
 echo [%r%3%w%] Back
-set /p toggle="Choose An Option >> "
-if "%toggle%"=="1" goto offaut
-if "%toggle%"=="2" goto onaut
-if "%toggle%"=="3" goto Battery
+set "toggle=" & set /p toggle="Choose An Option >> "
+if "!toggle!"=="1" goto offaut
+if "!toggle!"=="2" goto onaut
+if "!toggle!"=="3" goto Battery
 :: guard against invalid input
 goto autowifi
 
@@ -3159,10 +3395,10 @@ echo.
 echo [%r%1%w%] Off
 echo [%r%2%w%] On 
 echo [%r%3%w%] Back
-set /p toggle="Choose An Option >> "
-if "%toggle%"=="1" goto offsync
-if "%toggle%"=="2" goto onsync
-if "%toggle%"=="3" goto Battery
+set "toggle=" & set /p toggle="Choose An Option >> "
+if "!toggle!"=="1" goto offsync
+if "!toggle!"=="2" goto onsync
+if "!toggle!"=="3" goto Battery
 :: guard against invalid input
 goto sync
 
@@ -3199,10 +3435,10 @@ echo.
 echo [%r%1%w%] Off
 echo [%r%2%w%] On 
 echo [%r%3%w%] Back
-set /p toggle="Choose An Option >> "
-if "%toggle%"=="1" goto offmotion
-if "%toggle%"=="2" goto onmotion
-if "%toggle%"=="3" goto Battery
+set "toggle=" & set /p toggle="Choose An Option >> "
+if "!toggle!"=="1" goto offmotion
+if "!toggle!"=="2" goto onmotion
+if "!toggle!"=="3" goto Battery
 :: guard against invalid input
 goto motion
 
@@ -3241,10 +3477,10 @@ echo.
 echo [%r%1%w%] Off
 echo [%r%2%w%] On 
 echo [%r%3%w%] Back
-set /p toggle="Choose An Option >> "
-if "%toggle%"=="1" goto offzram
-if "%toggle%"=="2" goto onzram
-if "%toggle%"=="3" goto Battery
+set "toggle=" & set /p toggle="Choose An Option >> "
+if "!toggle!"=="1" goto offzram
+if "!toggle!"=="2" goto onzram
+if "!toggle!"=="3" goto Battery
 :: guard against invalid input
 goto zram
 
@@ -3279,10 +3515,10 @@ echo.
 echo [%r%1%w%] Off
 echo [%r%2%w%] On 
 echo [%r%3%w%] Back
-set /p toggle="Choose An Option >> "
-if "%toggle%"=="1" goto offsvpp
-if "%toggle%"=="2" goto onsvpp
-if "%toggle%"=="3" goto Battery
+set "toggle=" & set /p toggle="Choose An Option >> "
+if "!toggle!"=="1" goto offsvpp
+if "!toggle!"=="2" goto onsvpp
+if "!toggle!"=="3" goto Battery
 :: guard against invalid input
 goto extremepower
 
@@ -3300,7 +3536,7 @@ adb shell settings delete global protect_battery > nul 2>&1
 adb shell settings delete global activity_manager_constants > nul 2>&1
 echo.
 echo.
-echo [%r%!%w%] Please Restart Device To Finish The Process
+echo [%r%^^!%w%] Please Restart Device To Finish The Process
 echo.
 echo.
 timeout /t 2 /nobreak > nul
@@ -3338,10 +3574,10 @@ echo.
 echo [%r%1%w%] Off
 echo [%r%2%w%] On 
 echo [%r%3%w%] Back
-set /p toggle="Choose An Option >> "
-if "%toggle%"=="1" goto offerr
-if "%toggle%"=="2" goto onerr
-if "%toggle%"=="3" goto Battery
+set "toggle=" & set /p toggle="Choose An Option >> "
+if "!toggle!"=="1" goto offerr
+if "!toggle!"=="2" goto onerr
+if "!toggle!"=="3" goto Battery
 :: guard against invalid input
 goto senderror
 
@@ -3389,10 +3625,10 @@ echo.
 echo [%r%1%w%] Off
 echo [%r%2%w%] On 
 echo [%r%3%w%] Back
-set /p toggle="Choose An Option >> "
-if "%toggle%"=="1" goto offprof
-if "%toggle%"=="2" goto onprof
-if "%toggle%"=="3" goto Battery
+set "toggle=" & set /p toggle="Choose An Option >> "
+if "!toggle!"=="1" goto offprof
+if "!toggle!"=="2" goto onprof
+if "!toggle!"=="3" goto Battery
 :: guard against invalid input
 goto toggleprofilling
 
@@ -3418,8 +3654,8 @@ title Gaming Mode
 cls
 call :logo
 echo          ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul') do echo           [%g%+%w%]Uptime: %%a %%b %%c
-for /f "tokens=1 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul') do set cpucheck=%%i
+for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul 2^>nul') do echo           [%g%+%w%]Uptime: %%a %%b %%c
+for /f "tokens=1 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul 2^>nul') do set cpucheck=%%i
 echo           [%g%+%w%]%cpucheck% LOAD
 echo          ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 echo.
@@ -3434,17 +3670,17 @@ echo                                     %r%[%w%7%r%]%w% GPU Renderer (Skia GL/V
 echo                                     %r%[%w%8%r%]%w% Force ANGLE for All Apps
 echo                                     %r%[%w%9%r%]%w% Display Scaler (Resolution / DPI)
 echo                                     %r%[%w%10%r%]%w% Back
-set /p game="Choose An Option >> "
-if "%game%"=="1" goto gms
-if "%game%"=="2" goto thermal
-if "%game%"=="3" goto package
-if "%game%"=="4" goto overlay
-if "%game%"=="5" goto performance
-if "%game%"=="6" goto netboost
-if "%game%"=="7" goto gpurenderer
-if "%game%"=="8" goto angleall
-if "%game%"=="9" goto dispscaler
-if "%game%"=="10" goto menu
+set "game=" & set /p game="Choose An Option >> "
+if "!game!"=="1" goto gms
+if "!game!"=="2" goto thermal
+if "!game!"=="3" goto package
+if "!game!"=="4" goto overlay
+if "!game!"=="5" goto performance
+if "!game!"=="6" goto netboost
+if "!game!"=="7" goto gpurenderer
+if "!game!"=="8" goto angleall
+if "!game!"=="9" goto dispscaler
+if "!game!"=="10" goto menu
 :: FIX: invalid input previously fell into :gms
 goto Gaming
 
@@ -3482,7 +3718,7 @@ for /f "tokens=2 delims=:" %%a in ('adb shell wm density ^<nul 2^>nul ^| findstr
 if not defined PW goto dispscaler_err
 if not defined PH goto dispscaler_err
 if not defined PD goto dispscaler_err
-echo %PW%%PH%%PD%| findstr /r "[^0-9]" >nul && goto dispscaler_err
+echo !PW!!PH!!PD!| findstr /r "[^0-9]" >nul && goto dispscaler_err
 set /a W85=PW*85/100, H85=PH*85/100, D85=PD*85/100
 set /a W75=PW*75/100, H75=PH*75/100, D75=PD*75/100
 set /a W67=PW*67/100, H67=PH*67/100, D67=PD*67/100
@@ -3515,14 +3751,14 @@ echo                    %g%[%w%8%g%]%w% Back
 set "ds="
 set /p ds="Choose An Option >> "
 if not defined ds goto dispscaler_ask
-if "%ds%"=="1" ( set "NW=%W85%" & set "NH=%H85%" & set "ND=%D85%" & goto dispscaler_set )
-if "%ds%"=="2" ( set "NW=%W75%" & set "NH=%H75%" & set "ND=%D75%" & goto dispscaler_set )
-if "%ds%"=="3" ( set "NW=%W67%" & set "NH=%H67%" & set "ND=%D67%" & goto dispscaler_set )
-if "%ds%"=="4" ( set "NW=%W50%" & set "NH=%H50%" & set "ND=%D50%" & goto dispscaler_set )
-if "%ds%"=="5" goto dispscaler_custom
-if "%ds%"=="6" goto dispscaler_dpi
-if "%ds%"=="7" goto dispscaler_reset
-if "%ds%"=="8" goto Gaming
+if "!ds!"=="1" ( set "NW=%W85%" & set "NH=%H85%" & set "ND=%D85%" & goto dispscaler_set )
+if "!ds!"=="2" ( set "NW=%W75%" & set "NH=%H75%" & set "ND=%D75%" & goto dispscaler_set )
+if "!ds!"=="3" ( set "NW=%W67%" & set "NH=%H67%" & set "ND=%D67%" & goto dispscaler_set )
+if "!ds!"=="4" ( set "NW=%W50%" & set "NH=%H50%" & set "ND=%D50%" & goto dispscaler_set )
+if "!ds!"=="5" goto dispscaler_custom
+if "!ds!"=="6" goto dispscaler_dpi
+if "!ds!"=="7" goto dispscaler_reset
+if "!ds!"=="8" goto Gaming
 goto dispscaler_ask
 
 :dispscaler_set
@@ -3563,14 +3799,14 @@ echo  by the same factor to keep the UI size consistent.
 echo.
 set "CW=" & set "CH=" & set "CD="
 set /p "CW=Width  (blank = cancel) >> "
-if "%CW%"=="" goto dispscaler
+if "!CW!"=="" goto dispscaler
 set /p "CH=Height (blank = cancel) >> "
-if "%CH%"=="" goto dispscaler
-set /p "CD=Density dpi (blank = cancel) >> "
-if "%CD%"=="" goto dispscaler
-echo %CW%| findstr /r "^[1-9][0-9]*$" >nul || goto dispscaler_custom_bad
-echo %CH%| findstr /r "^[1-9][0-9]*$" >nul || goto dispscaler_custom_bad
-echo %CD%| findstr /r "^[1-9][0-9]*$" >nul || goto dispscaler_custom_bad
+if "!CH!"=="" goto dispscaler
+set "CD=" & set /p "CD=Density dpi (blank = cancel) >> "
+if "!CD!"=="" goto dispscaler
+echo !CW!| findstr /r "^[1-9][0-9]*$" >nul || goto dispscaler_custom_bad
+echo !CH!| findstr /r "^[1-9][0-9]*$" >nul || goto dispscaler_custom_bad
+echo !CD!| findstr /r "^[1-9][0-9]*$" >nul || goto dispscaler_custom_bad
 :: sane bounds so a typo can't leave the UI unusable
 if %CW% LSS 320 goto dispscaler_custom_bad
 if %CH% LSS 320 goto dispscaler_custom_bad
@@ -3582,7 +3818,7 @@ set "NW=%CW%" & set "NH=%CH%" & set "ND=%CD%"
 goto dispscaler_set
 
 :dispscaler_custom_bad
-echo [%r%!%w%] Invalid values. Width/height 320-8000, density 80-900, digits only.
+echo [%r%^^!%w%] Invalid values. Width/height 320-8000, density 80-900, digits only.
 timeout /t 2 /nobreak >nul
 goto dispscaler_custom
 
@@ -3604,7 +3840,7 @@ for /f "tokens=2 delims=:" %%a in ('adb shell wm density ^<nul 2^>nul ^| findstr
 for /f "tokens=* delims= " %%a in ("%PDR%") do set "PD=%%a"
 for /f "tokens=2 delims=:" %%a in ('adb shell wm density ^<nul 2^>nul ^| findstr /C:"Override density"') do set "OVRD=%%a"
 if not defined PD goto dispscaler_err
-echo %PD%| findstr /r "[^0-9]" >nul && goto dispscaler_err
+echo !PD!| findstr /r "[^0-9]" >nul && goto dispscaler_err
 set /a U110=PD*110/100, U90=PD*90/100, U85=PD*85/100, U80=PD*80/100
 echo.
 echo  Changes ONLY the DPI (UI element size); resolution stays native.
@@ -3631,14 +3867,14 @@ echo                    %g%[%w%8%g%]%w% Back
 set "du="
 set /p du="Choose An Option >> "
 if not defined du goto dispscaler_dpi_ask
-if "%du%"=="1" ( set "ND=%U110%" & goto dispscaler_dpi_set )
-if "%du%"=="2" ( set "ND=%PD%" & goto dispscaler_dpi_set )
-if "%du%"=="3" ( set "ND=%U90%" & goto dispscaler_dpi_set )
-if "%du%"=="4" ( set "ND=%U85%" & goto dispscaler_dpi_set )
-if "%du%"=="5" ( set "ND=%U80%" & goto dispscaler_dpi_set )
-if "%du%"=="6" goto dispscaler_dpi_custom
-if "%du%"=="7" goto dispscaler_dpi_reset
-if "%du%"=="8" goto dispscaler
+if "!du!"=="1" ( set "ND=%U110%" & goto dispscaler_dpi_set )
+if "!du!"=="2" ( set "ND=%PD%" & goto dispscaler_dpi_set )
+if "!du!"=="3" ( set "ND=%U90%" & goto dispscaler_dpi_set )
+if "!du!"=="4" ( set "ND=%U85%" & goto dispscaler_dpi_set )
+if "!du!"=="5" ( set "ND=%U80%" & goto dispscaler_dpi_set )
+if "!du!"=="6" goto dispscaler_dpi_custom
+if "!du!"=="7" goto dispscaler_dpi_reset
+if "!du!"=="8" goto dispscaler
 goto dispscaler_dpi_ask
 
 :dispscaler_dpi_set
@@ -3668,15 +3904,15 @@ echo  Native density: %g%%PD% dpi%w%   (lower = smaller UI, higher = bigger)
 echo.
 set "CD="
 set /p "CD=Density dpi (blank = cancel) >> "
-if "%CD%"=="" goto dispscaler_dpi
-echo %CD%| findstr /r "^[1-9][0-9]*$" >nul || goto dispscaler_dpi_custom_bad
+if "!CD!"=="" goto dispscaler_dpi
+echo !CD!| findstr /r "^[1-9][0-9]*$" >nul || goto dispscaler_dpi_custom_bad
 if %CD% LSS 80 goto dispscaler_dpi_custom_bad
 if %CD% GTR 900 goto dispscaler_dpi_custom_bad
 set "ND=%CD%"
 goto dispscaler_dpi_set
 
 :dispscaler_dpi_custom_bad
-echo [%r%!%w%] Invalid density. Use a whole number 80-900.
+echo [%r%^^!%w%] Invalid density. Use a whole number 80-900.
 timeout /t 2 /nobreak >nul
 goto dispscaler_dpi_custom
 
@@ -3718,7 +3954,7 @@ goto dispscaler
 cls
 title Display Scaler
 call :logo
-echo [%r%!%w%] Could not read the display size/density from this device.
+echo [%r%^^!%w%] Could not read the display size/density from this device.
 echo     'wm size' / 'wm density' returned something unexpected, so the
 echo     presets can't be computed safely.
 echo.
@@ -3762,11 +3998,11 @@ echo                                     %g%[%w%1%g%]%w% Skia Vulkan (skiavk)
 echo                                     %g%[%w%2%g%]%w% Skia OpenGL  (skiagl - default)
 echo                                     %g%[%w%3%g%]%w% Clear override (let framework decide)
 echo                                     %g%[%w%4%g%]%w% Back
-set /p gpur="Choose An Option >> "
-if "%gpur%"=="1" goto gpurenderer_vk
-if "%gpur%"=="2" goto gpurenderer_gl
-if "%gpur%"=="3" goto gpurenderer_clear
-if "%gpur%"=="4" goto Gaming
+set "gpur=" & set /p gpur="Choose An Option >> "
+if "!gpur!"=="1" goto gpurenderer_vk
+if "!gpur!"=="2" goto gpurenderer_gl
+if "!gpur!"=="3" goto gpurenderer_clear
+if "!gpur!"=="4" goto Gaming
 goto gpurenderer
 
 :gpurenderer_vk
@@ -3843,11 +4079,11 @@ echo                                     %g%[%w%1%g%]%w% Enable  (ANGLE for all 
 echo                                     %g%[%w%2%g%]%w% Disable (native driver)
 echo                                     %g%[%w%3%g%]%w% Delete setting (Android default)
 echo                                     %g%[%w%4%g%]%w% Back
-set /p ang="Choose An Option >> "
-if "%ang%"=="1" goto angleall_on
-if "%ang%"=="2" goto angleall_off
-if "%ang%"=="3" goto angleall_del
-if "%ang%"=="4" goto Gaming
+set "ang=" & set /p ang="Choose An Option >> "
+if "!ang!"=="1" goto angleall_on
+if "!ang!"=="2" goto angleall_off
+if "!ang!"=="3" goto angleall_del
+if "!ang!"=="4" goto Gaming
 goto angleall
 
 :angleall_on
@@ -3905,12 +4141,12 @@ echo                                     %g%[%w%2%g%]%w% Set Cloudflare DNS (1.1
 echo                                     %g%[%w%3%g%]%w% Preferred network mode
 echo                                     %g%[%w%4%g%]%w% Revert (remove all)
 echo                                     %g%[%w%5%g%]%w% Back
-set /p nb="Choose An Option >> "
-if "%nb%"=="1" goto netboost_apply
-if "%nb%"=="2" goto netboost_dns
-if "%nb%"=="3" goto netboost_prefmode
-if "%nb%"=="4" goto netboost_revert
-if "%nb%"=="5" goto Gaming
+set "nb=" & set /p nb="Choose An Option >> "
+if "!nb!"=="1" goto netboost_apply
+if "!nb!"=="2" goto netboost_dns
+if "!nb!"=="3" goto netboost_prefmode
+if "!nb!"=="4" goto netboost_revert
+if "!nb!"=="5" goto Gaming
 goto netboost
 :: -----------------------------------------------------------------
 :: NEW: Preferred network mode toggle
@@ -3936,36 +4172,36 @@ echo                                     %g%[%w%2%g%]%w% LTE only (12)
 echo                                     %g%[%w%3%g%]%w% 5G preferred (20)  -^> fall back LTE/3G
 echo                                     %g%[%w%4%g%]%w% Restore default (delete)
 echo                                     %g%[%w%5%g%]%w% Back
-set /p pm="Choose An Option >> "
-if "%pm%"=="1" (
+set "pm=" & set /p pm="Choose An Option >> "
+if "!pm!"=="1" (
     adb shell settings put global preferred_network_mode 9
     adb shell settings put global preferred_network_mode1 9
     echo Set to LTE preferred.
     pause > nul
     goto netboost_prefmode
 )
-if "%pm%"=="2" (
+if "!pm!"=="2" (
     adb shell settings put global preferred_network_mode 12
     adb shell settings put global preferred_network_mode1 12
     echo Set to LTE only. WARNING: voice calls only work if VoLTE is active.
     pause > nul
     goto netboost_prefmode
 )
-if "%pm%"=="3" (
+if "!pm!"=="3" (
     adb shell settings put global preferred_network_mode 20
     adb shell settings put global preferred_network_mode1 20
     echo Set to 5G preferred.
     pause > nul
     goto netboost_prefmode
 )
-if "%pm%"=="4" (
+if "!pm!"=="4" (
     adb shell settings delete global preferred_network_mode
     adb shell settings delete global preferred_network_mode1
     echo Default restored.
     pause > nul
     goto netboost_prefmode
 )
-if "%pm%"=="5" goto netboost
+if "!pm!"=="5" goto netboost
 goto netboost_prefmode
 
 :netboost_apply
@@ -4038,10 +4274,10 @@ echo.
 echo [%r%1%w%] Off
 echo [%r%2%w%] On 
 echo [%r%3%w%] Back
-set /p toggle="Choose An Option >> "
-if "%toggle%"=="1" goto offgms
-if "%toggle%"=="2" goto ongms
-if "%toggle%"=="3" goto Gaming
+set "toggle=" & set /p toggle="Choose An Option >> "
+if "!toggle!"=="1" goto offgms
+if "!toggle!"=="2" goto ongms
+if "!toggle!"=="3" goto Gaming
 :: guard against invalid input
 goto gms
 
@@ -4112,9 +4348,9 @@ echo Toggle Thermal Service
 echo.
 echo [%r%1%w%] Process To Setting Thermal
 echo [%r%2%w%] Go Back
-set /p kb="Choose An Option >> "
-if "%kb%"=="1" goto settingthermal
-if "%kb%"=="2" goto Gaming
+set "kb=" & set /p kb="Choose An Option >> "
+if "!kb!"=="1" goto settingthermal
+if "!kb!"=="2" goto Gaming
 :: FIX: guard against invalid input - previously fell through to :settingthermal
 goto thermal
 
@@ -4122,7 +4358,7 @@ goto thermal
 @echo off
 cls
 echo Put A Number Between 0 To 6 To Change
-echo How Thermal Service Work!
+echo How Thermal Service Work^^!
 echo.
 echo  0 = NONE     (no throttling)
 echo  1 = LIGHT
@@ -4132,12 +4368,12 @@ echo  4 = CRITICAL
 echo  5 = EMERGENCY
 echo  6 = SHUTDOWN (do not use)
 echo.
-set /p kb=">> "
+set "kb=" & set /p kb=">> "
 :: FIX: validate input - previously any garbage was accepted
 set "valid=0"
-for %%v in (0 1 2 3 4 5 6) do if "%kb%"=="%%v" set "valid=1"
+for %%v in (0 1 2 3 4 5 6) do if "!kb!"=="%%v" set "valid=1"
 if "%valid%"=="0" (
-    echo [%r%!%w%] Invalid value. Must be a number between 0 and 6.
+    echo [%r%^^!%w%] Invalid value. Must be a number between 0 and 6.
     timeout /t 2 /nobreak > nul
     goto thermal
 )
@@ -4158,10 +4394,10 @@ echo.
 echo [%r%1%w%] Off
 echo [%r%2%w%] On 
 echo [%r%3%w%] Back
-set /p kb="Choose An Option >> "
-if "%kb%"=="1" goto offpck
-if "%kb%"=="2" goto onpck
-if "%kb%"=="3" goto Gaming
+set "kb=" & set /p kb="Choose An Option >> "
+if "!kb!"=="1" goto offpck
+if "!kb!"=="2" goto onpck
+if "!kb!"=="3" goto Gaming
 :: guard against invalid input
 goto package
 
@@ -4193,25 +4429,25 @@ echo %b%[Remove]%w%  1
 echo %b%[Low]%w%     2
 echo %b%[Medium]%w%  3
 echo %b%[Back]  %w%  4
-set /p kb="Choose An Option >> "
-if "%kb%"=="1" goto removeset
-if "%kb%"=="2" goto low
-if "%kb%"=="3" goto med
-if "%kb%"=="4" goto Gaming
+set "kb=" & set /p kb="Choose An Option >> "
+if "!kb!"=="1" goto removeset
+if "!kb!"=="2" goto low
+if "!kb!"=="3" goto med
+if "!kb!"=="4" goto Gaming
 :: guard against invalid input
 goto overlay
 
 :removeset
 cls
 title Remove Settings
-set /p package="Put Your Package Name Here >> "
-if "%package%"=="" goto Gaming
+set "package=" & set /p package="Put Your Package Name Here >> "
+if "!package!"=="" goto Gaming
 adb shell device_config delete game_overlay %package% > nul
 adb shell cmd game reset --user 0 %package%
 cls
 echo.
 echo.
-echo [%r%!%w%] If %package% Is Glitching , Please Clear %package% Cache And Try it again. 
+echo [%r%^^!%w%] If %package% Is Glitching , Please Clear %package% Cache And Try it again. 
 echo.
 echo.
 echo %package% Settings Is Removed , Press Any Button To Go Back 
@@ -4222,14 +4458,14 @@ goto Gaming
 @echo off
 cls
 title Low Settings
-set /p package="Put Your Package Name Here >> "
-if "%package%"=="" goto Gaming
+set "package=" & set /p package="Put Your Package Name Here >> "
+if "!package!"=="" goto Gaming
 adb shell device_config put game_overlay %package% mode=1
 adb shell cmd game downscale 0.55 %package%
 cls
 echo.
 echo.
-echo [%r%!%w%] If %package% Is Glitching , Please Clear %package% Cache And Try it again. 
+echo [%r%^^!%w%] If %package% Is Glitching , Please Clear %package% Cache And Try it again. 
 echo.
 echo.
 echo Press Any Button To Go Back
@@ -4240,15 +4476,15 @@ goto Gaming
 @echo off
 cls
 title Medium Settings
-set /p package="Put Your Package Name Here >> "
-if "%package%"=="" goto Gaming
+set "package=" & set /p package="Put Your Package Name Here >> "
+if "!package!"=="" goto Gaming
 adb shell device_config put game_overlay %package% mode=1
 adb shell device_config get game_overlay %package%
 adb shell cmd game downscale 0.75 %package%
 cls
 echo.
 echo.
-echo [%r%!%w%] If %package% Is Glitching , Please Clear %package% Cache And Try it again. 
+echo [%r%^^!%w%] If %package% Is Glitching , Please Clear %package% Cache And Try it again. 
 echo.
 echo.
 echo Press Any Button To Go Back
@@ -4265,9 +4501,9 @@ echo Toggle Your Performance Here
 echo.
 echo [%r%1%w%] Toggle
 echo [%r%2%w%] Back
-set /p kb="Choose An Option >> "
-if "%kb%"=="1" goto toggleperf
-if "%kb%"=="2" goto Gaming
+set "kb=" & set /p kb="Choose An Option >> "
+if "!kb!"=="1" goto toggleperf
+if "!kb!"=="2" goto Gaming
 :: FIX: guard against invalid input - previously fell through to :toggleperf
 goto performance
 
@@ -4279,10 +4515,10 @@ echo.
 echo [%r%1%w%] Off
 echo [%r%2%w%] On
 echo [%r%3%w%] Back
-set /p kb="Choose An Option >> "
-if "%kb%"=="1" goto offperf
-if "%kb%"=="2" goto onperf
-if "%kb%"=="3" goto Gaming
+set "kb=" & set /p kb="Choose An Option >> "
+if "!kb!"=="1" goto offperf
+if "!kb!"=="2" goto onperf
+if "!kb!"=="3" goto Gaming
 :: guard against invalid input
 goto toggleperf
 
@@ -4304,7 +4540,7 @@ adb shell device_config delete surface_flinger_native_boot max_frame_buffer_acqu
 adb shell device_config delete surface_flinger_native_boot adpf_cpu_hint > nul 2>&1
 echo.
 echo.
-echo [%r%!%w%] Please Restart Device To Finish The Process
+echo [%r%^^!%w%] Please Restart Device To Finish The Process
 echo.
 echo.
 timeout /t 2 /nobreak > nul
@@ -4318,9 +4554,9 @@ cls
 title Performance Mode : On
 echo.
 echo.
-echo [%r%!%w%] All Powersaving Is Disabled
-echo [%r%!%w%] If You Want To Enable Power Saver Again, You Need To Disable Performance Mode
-echo [%r%!%w%] And Enable Power Saver Mode In Battery Mode
+echo [%r%^^!%w%] All Powersaving Is Disabled
+echo [%r%^^!%w%] If You Want To Enable Power Saver Again, You Need To Disable Performance Mode
+echo [%r%^^!%w%] And Enable Power Saver Mode In Battery Mode
 ::disable powersaver
 adb shell cmd power set-mode 0 > nul 2>&1
 adb shell cmd thermalservice override-status 0
@@ -4452,12 +4688,12 @@ adb shell device_config put surface_flinger_native_boot adpf_cpu_hint true
 :: Check the key and save the value to a temporary file.
 adb shell device_config get storage_native_boot target_dirty_ratio > temp_result.txt
 :: Retrieve the value from the temporary file and store it in the variable `result`.
-set /p result=<temp_result.txt
+set "result=" & set /p result=<temp_result.txt
 :: Check values ​​and process
-if "%result%"=="null" (
+if "!result!"=="null" (
     echo storage_native_boot/target_dirty_ratio is not detected.
     set "result="
-) else if "%result%"=="" (
+) else if "!result!"=="" (
     echo storage_native_boot/target_dirty_ratio is not detected.
     set "result="
 ) else (
@@ -4496,14 +4732,14 @@ echo                 %g%[%w%4%g%]%w% Debloat - suggested bloatware (auto-detect 
 echo                 %g%[%w%5%g%]%w% List installed packages (to Notepad)
 echo                 %g%[%w%6%g%]%w% Restore a removed app
 echo                 %g%[%w%7%g%]%w% Back
-set /p am="Choose An Option >> "
-if "%am%"=="1" goto appmgr_restrict
-if "%am%"=="2" goto appmgr_allow
-if "%am%"=="3" goto appmgr_debloat_input
-if "%am%"=="4" goto appmgr_suggest
-if "%am%"=="5" goto appmgr_listpkgs
-if "%am%"=="6" goto appmgr_restore_input
-if "%am%"=="7" goto menu
+set "am=" & set /p am="Choose An Option >> "
+if "!am!"=="1" goto appmgr_restrict
+if "!am!"=="2" goto appmgr_allow
+if "!am!"=="3" goto appmgr_debloat_input
+if "!am!"=="4" goto appmgr_suggest
+if "!am!"=="5" goto appmgr_listpkgs
+if "!am!"=="6" goto appmgr_restore_input
+if "!am!"=="7" goto menu
 goto appmgr
 :: ===================================================================
 :: Restrict / Allow background  (cmd appops RUN_IN_BACKGROUND)
@@ -4516,11 +4752,11 @@ echo  Denies RUN_IN_BACKGROUND for an app so it can't run in the
 echo  background (saves battery). Reversible with "Allow background".
 echo  Tip: use "List installed packages" first if you don't know the name.
 echo.
-set /p pkg="Package name (blank = cancel) >> "
-if "%pkg%"=="" goto appmgr
+set "pkg=" & set /p pkg="Package name (blank = cancel) >> "
+if "!pkg!"=="" goto appmgr
 adb shell pm list packages < nul 2>nul | findstr /C:"package:%pkg%" >nul
 if errorlevel 1 (
-    echo [%r%!%w%] "%pkg%" is not installed.
+    echo [%r%^^!%w%] "%pkg%" is not installed.
     pause >nul
     goto appmgr_restrict
 )
@@ -4536,11 +4772,11 @@ title Allow Background
 call :logo
 echo  Re-allows RUN_IN_BACKGROUND for an app (undo of Restrict).
 echo.
-set /p pkg="Package name (blank = cancel) >> "
-if "%pkg%"=="" goto appmgr
+set "pkg=" & set /p pkg="Package name (blank = cancel) >> "
+if "!pkg!"=="" goto appmgr
 adb shell pm list packages < nul 2>nul | findstr /C:"package:%pkg%" >nul
 if errorlevel 1 (
-    echo [%r%!%w%] "%pkg%" is not installed.
+    echo [%r%^^!%w%] "%pkg%" is not installed.
     pause >nul
     goto appmgr_allow
 )
@@ -4566,10 +4802,10 @@ echo  %y%Only remove apps you recognise.%w% Never remove system UI, phone,
 echo  or anything you can't identify. On Transsion (Tecno/Infinix) phones
 echo  never remove com.hoffnung - it looks like bloat but bootloops.
 echo.
-set /p pkg="Package name (blank = cancel) >> "
-if "%pkg%"=="" goto appmgr
+set "pkg=" & set /p pkg="Package name (blank = cancel) >> "
+if "!pkg!"=="" goto appmgr
 set "BLOCKED=0"
-for %%c in (com.android.systemui com.hoffnung com.android.phone com.android.settings com.miui.daemon com.android.systemui.plugins com.android.providers.telephony com.huawei.hwid com.huawei.android.pushagent com.huawei.hwasm com.huawei.android.hwouc com.huawei.systemserver) do if /i "%pkg%"=="%%c" set "BLOCKED=1"
+for %%c in (com.android.systemui com.hoffnung com.android.phone com.android.settings com.miui.daemon com.android.systemui.plugins com.android.providers.telephony com.huawei.hwid com.huawei.android.pushagent com.huawei.hwasm com.huawei.android.hwouc com.huawei.systemserver) do if /i "!pkg!"=="%%c" set "BLOCKED=1"
 if "%BLOCKED%"=="1" (
     echo [%r%BLOCKED%w%] "%pkg%" is a critical package and will not be removed.
     pause >nul
@@ -4577,7 +4813,7 @@ if "%BLOCKED%"=="1" (
 )
 adb shell pm list packages < nul 2>nul | findstr /C:"package:%pkg%" >nul
 if errorlevel 1 (
-    echo [%r%!%w%] "%pkg%" is not installed.
+    echo [%r%^^!%w%] "%pkg%" is not installed.
     pause >nul
     goto appmgr_debloat_input
 )
@@ -4599,8 +4835,8 @@ call :logo
 echo  Reinstalls an app removed with Debloat (pm install-existing).
 echo  Works as long as it was removed with -k and not fully wiped.
 echo.
-set /p pkg="Package name to restore (blank = cancel) >> "
-if "%pkg%"=="" goto appmgr
+set "pkg=" & set /p pkg="Package name to restore (blank = cancel) >> "
+if "!pkg!"=="" goto appmgr
 adb shell cmd package install-existing %pkg%
 echo.
 echo If it was present, %pkg% is restored for the current user.
@@ -4616,11 +4852,11 @@ call :logo
 echo  [%g%1%w%] All packages
 echo  [%g%2%w%] User + updated apps only (-3) - usually where bloat lives
 echo  [%g%3%w%] Back
-set /p lp="Choose An Option >> "
-if "%lp%"=="3" goto appmgr
+set "lp=" & set /p lp="Choose An Option >> "
+if "!lp!"=="3" goto appmgr
 set "PKGLIST=%TEMP%\dcx_installed_packages.txt"
-if "%lp%"=="1" adb shell pm list packages < nul 2>nul > "%PKGLIST%"
-if "%lp%"=="2" adb shell pm list packages -3 < nul 2>nul > "%PKGLIST%"
+if "!lp!"=="1" adb shell pm list packages < nul 2>nul > "%PKGLIST%"
+if "!lp!"=="2" adb shell pm list packages -3 < nul 2>nul > "%PKGLIST%"
 if not exist "%PKGLIST%" goto appmgr
 start "" notepad "%PKGLIST%"
 echo Opened in Notepad. Use these names with Restrict / Debloat.
@@ -4657,11 +4893,11 @@ echo %BRAND% %MANU%| findstr /I "samsung" >nul && set "BRANDCAT=Samsung"
 echo %BRAND% %MANU%| findstr /I "huawei honor" >nul && set "BRANDCAT=Huawei"
 if not "%BRANDCAT%"=="0" echo                 %g%[%w%3%g%]%w% %BRANDCAT% bloat
 echo                 %g%[%w%4%g%]%w% Back
-set /p sg="Choose An Option >> "
-if "%sg%"=="1" goto appmgr_bloat_fb
-if "%sg%"=="2" goto appmgr_bloat_google
-if "%sg%"=="3" goto appmgr_bloat_brand
-if "%sg%"=="4" goto appmgr
+set "sg=" & set /p sg="Choose An Option >> "
+if "!sg!"=="1" goto appmgr_bloat_fb
+if "!sg!"=="2" goto appmgr_bloat_google
+if "!sg!"=="3" goto appmgr_bloat_brand
+if "!sg!"=="4" goto appmgr
 goto appmgr_suggest
 
 :appmgr_bloat_fb
