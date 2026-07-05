@@ -301,7 +301,8 @@ straight from the startup screen when no USB device is found (**[W]**).
 > phone on the same network can run adb commands. Turn it off when done.
 
 The old standalone `wirelessadb.bat` has been **removed** — this menu replaces
-it (that script only did `adb connect`, with no Android 11+ pairing support).
+it (that script only did `adb connect`, with no Android 11+ pairing support),
+`opencmd.bat` still remains in case you want to use ADB separately of DCX neo.
 
 ---
 
