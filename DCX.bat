@@ -50,6 +50,7 @@ echo                                  %w%Press Any Button To Continue
 pause > nul
 title Connecting . . .
 adb start-server > nul 2>&1
+
 :startup_wait
 :: ============================================================
 :: NEW: Wait for a device and verify it is connected/authorised
@@ -92,6 +93,7 @@ if "%DEVICE_OK%"=="0" (
     set "MODEL=(not connected yet)"
     goto wirelessadb
 )
+
 :detect_device
 :: Retrieve the current Android API level safely
 set "SDK="
@@ -115,7 +117,8 @@ title Main Menu
 call :logo
 echo          ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul 2^>nul') do echo           [%g%+%w%]Uptime: %%a %%b %%c
-for /f "tokens=1 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul 2^>nul') do set cpucheck=%%i
+set "cpucheck=N/A"
+for /f "tokens=2 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul 2^>nul ^| findstr /C:"Load:"') do set "cpucheck=%%i"
 echo           [%g%+%w%]%cpucheck% LOAD
 echo          ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 echo.
@@ -134,10 +137,16 @@ echo.
 echo                          %m%Benchmark%w%        %m%Backup%w%         %b%Restore%w%
 echo                             [10]           [11]           [12]
 echo.
-echo                                           %gold%Wireless ADB%w%
+echo                                        %gold%Wireless ADB%w%
 echo                                            [13]
 echo.
+:menu_ask
+:: FIX (press-twice): re-prompt WITHOUT redrawing on empty/invalid input so a
+:: phantom empty line handed to set /p right after the uptime/cpuinfo probes is
+:: absorbed instead of being treated as a miss that redraws (re-runs the probes).
+:: Same fix validated on :dispscaler.
 set "kb=" & set /p kb="                            Choose An Option >> "
+if not defined kb goto menu_ask
 if "!kb!"=="1" goto Gaming
 if "!kb!"=="2" goto Battery
 if "!kb!"=="3" goto Optimize
@@ -151,7 +160,7 @@ if "!kb!"=="10" goto benchmark
 if "!kb!"=="11" goto backup
 if "!kb!"=="12" goto restore
 if "!kb!"=="13" goto wirelessadb
-goto menu
+goto menu_ask
 :: ===================================================================
 :: NEW: Backup / Restore of toggleable settings
 ::
@@ -246,44 +255,58 @@ goto menu
 ::   writes a `delete`; otherwise writes a `put` with the value.
 :: -------------------------------------------------------------------
 :_bk_settings
-setlocal
+:: FIX (robustness): enabledelayedexpansion + quote the value in the generated
+:: line. The old unquoted `%_val%` let a value containing a CMD metacharacter
+:: (& | < >) break backup GENERATION (echo `a&b` ran `b` as a command and wrote
+:: a truncated line). DCX-managed values don't contain those, but the backup
+:: also captures whatever the device currently holds under these keys.
+setlocal enabledelayedexpansion
 set "_ns=%~1"
 set "_key=%~2"
 set "_out=%~3"
 set "_val="
 for /f "delims=" %%v in ('adb shell settings get %_ns% %_key% 2^>nul ^<nul') do set "_val=%%v"
-if "%_val%"=="" set "_val=null"
-if /i "%_val%"=="null" (
+if "!_val!"=="" set "_val=null"
+if /i "!_val!"=="null" (
     >>"%_out%" echo adb shell settings delete %_ns% %_key% ^>nul 2^>^&1
 ) else (
-    >>"%_out%" echo adb shell settings put %_ns% %_key% %_val%
+    >>"%_out%" echo adb shell settings put %_ns% %_key% "!_val!"
 )
 endlocal
 exit /b
 
 :_bk_devcfg
-setlocal
+:: FIX (robustness): same as :_bk_settings - delayed expansion + quoted value.
+setlocal enabledelayedexpansion
 set "_ns=%~1"
 set "_key=%~2"
 set "_out=%~3"
 set "_val="
 for /f "delims=" %%v in ('adb shell device_config get %_ns% %_key% 2^>nul ^<nul') do set "_val=%%v"
-if "%_val%"=="" set "_val=null"
-if /i "%_val%"=="null" (
+if "!_val!"=="" set "_val=null"
+if /i "!_val!"=="null" (
     >>"%_out%" echo :: %_ns%/%_key% was unset at backup time
 ) else (
-    >>"%_out%" echo adb shell device_config put %_ns% %_key% %_val%
+    >>"%_out%" echo adb shell device_config put %_ns% %_key% "!_val!"
 )
 endlocal
 exit /b
 
 :_bk_prop
-setlocal
+:: FIX (robustness): (1) an UNSET prop makes getprop return empty; the old code
+:: then wrote `setprop key ""`, which on restore SETS the prop to empty instead
+:: of leaving it untouched. Emit a comment instead. (2) delayed expansion so a
+:: metachar value can't corrupt the generated line.
+setlocal enabledelayedexpansion
 set "_key=%~1"
 set "_out=%~2"
 set "_val="
 for /f "delims=" %%v in ('adb shell getprop %_key% 2^>nul ^<nul') do set "_val=%%v"
->>"%_out%" echo adb shell setprop %_key% "%_val%"
+if "!_val!"=="" (
+    >>"%_out%" echo :: prop %_key% was unset at backup time - not restoring
+) else (
+    >>"%_out%" echo adb shell setprop %_key% "!_val!"
+)
 endlocal
 exit /b
 :: ===================================================================
@@ -378,7 +401,7 @@ adb shell "time dd if=/data/local/tmp/_dcx_bench of=/dev/null bs=64k 2>&1 | tail
 adb shell rm -f /data/local/tmp/_dcx_bench
 echo.
 echo.
-echo [%g%Done%w%] Numbers vary - run twice after optimisation for comparison.
+echo [%g%Done%w%] Numbers vary - run twice after optimization for comparison.
 echo.
 echo Press Any Button To Go Back
 pause > nul
@@ -414,7 +437,6 @@ adb reboot
 timeout /t 1 /nobreak > nul
 adb disconnect
 goto menu
-
 :: ===================================================================
 :: NEW: Wireless ADB (pair / connect / manage Wi-Fi debugging)
 ::
@@ -575,7 +597,6 @@ echo.
 echo Press Any Button To Go Back
 pause > nul
 goto wirelessadb
-
 :: _wadb_src <route line tokens...>
 ::   Walks the arguments until it finds 'src' and keeps the next one.
 :_wadb_src
@@ -734,6 +755,12 @@ set "REPORT=%TEMP%\dcx_report_%TS%.txt"
     echo  End of report
     echo ===========================================================
 ) > "%REPORT%" < nul
+:: FIX (report hygiene): the ~10s report is generated ONCE above; the menu is a
+:: separate :check_menu label so open-in-notepad / paginate / invalid input
+:: re-show the menu instead of re-running every adb dump AND writing another
+:: timestamped temp file each time. (Re-entering :check fresh still makes a new
+:: dated report, which is the intended before/after-compare behavior.)
+:check_menu
 echo  %g%Report saved to:%w%
 echo    %REPORT%
 echo.
@@ -747,11 +774,11 @@ if "!ck!"=="1" goto check_open
 if "!ck!"=="2" goto check_paginate
 if "!ck!"=="3" goto check_summary
 if "!ck!"=="4" goto menu
-goto check
+goto check_menu
 
 :check_open
 start "" notepad "%REPORT%"
-goto check
+goto check_menu
 
 :check_paginate
 cls
@@ -760,7 +787,7 @@ more "%REPORT%"
 echo.
 echo Press Any Button To Go Back
 pause > nul
-goto check
+goto check_menu
 
 :check_summary
 cls
@@ -903,7 +930,7 @@ call :dropbox_lowprio
 adb shell cmd dropbox set-rate-limit 20000000000000
 adb shell cmd autofill set log_level off
 adb shell cmd thermalservice override-status 1
-:: ----- NEW SAFE OPTIMISATIONS (from the .sh script, vetted) -----
+:: ----- NEW SAFE OPTIMIZATIONS (from the .sh script, vetted) -----
 :: Universal log silencer (REAL, persists across reboots)
 adb shell setprop persist.log.tag "*:S" > nul 2>&1
 adb shell setprop log.tag "*:S" > nul 2>&1
@@ -953,7 +980,8 @@ mode 100,37
 call :logo
 echo          ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul 2^>nul') do echo           [%g%+%w%]Uptime: %%a %%b %%c
-for /f "tokens=1 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul 2^>nul') do set cpucheck=%%i
+set "cpucheck=N/A"
+for /f "tokens=2 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul 2^>nul ^| findstr /C:"Load:"') do set "cpucheck=%%i"
 echo           [%g%+%w%]%cpucheck% LOAD
 echo          ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 echo.
@@ -969,7 +997,12 @@ echo                                     %g%[%w%8%g%]%w% Compile All Apps
 echo                                     %g%[%w%9%g%]%w% Animation Speed
 echo                                     %g%[%w%0%g%]%w% Back
 echo.
+
+:Optimize_ask
+:: FIX (press-twice): re-prompt without redrawing on empty/invalid input,
+:: so a phantom empty line after the probes doesn't re-run them (see :dispscaler).
 set "kb=" & set /p kb="Choose An Option >> "
+if not defined kb goto Optimize_ask
 if "!kb!"=="1" goto dexopt
 if "!kb!"=="2" goto fstrim
 if "!kb!"=="3" goto killall
@@ -980,7 +1013,7 @@ if "!kb!"=="7" goto lstused
 if "!kb!"=="8" goto compileall
 if "!kb!"=="9" goto animspeed
 if "!kb!"=="0" goto menu
-goto Optimize
+goto Optimize_ask
 :: ===================================================================
 :: NEW: Compile All Apps  (from Compile.bat + smooth_android.sh)
 :: This re-compiles EVERY installed app with the chosen ART mode and
@@ -1078,7 +1111,7 @@ if errorlevel 1 (
 ) else (
     echo   [skipped] --compile-layouts is not supported on this device.
     echo   That's expected on Android 12+ - the view compiler was removed
-    echo   and ART Service handles layout optimisation during normal dexopt.
+    echo   and ART Service handles layout optimization during normal dexopt.
 )
 del "%TEMP%\dcx_layouts.txt" > nul 2>&1
 echo.
@@ -1170,13 +1203,13 @@ echo                                      [%g%3%w%] 120hz
 echo                                      [%g%4%w%] 144hz
 echo                                      [%g%5%w%] Remove
 echo                                      [%g%6%w%] Back  
-set "set=" & set /p set="Choose An Option >> "
-if "!set!"=="1" goto sf60
-if "!set!"=="2" goto sf90
-if "!set!"=="3" goto sf120
-if "!set!"=="4" goto sf144
-if "!set!"=="5" goto removesf
-if "!set!"=="6" goto Optimize
+set "opt=" & set /p opt="Choose An Option >> "
+if "!opt!"=="1" goto sf60
+if "!opt!"=="2" goto sf90
+if "!opt!"=="3" goto sf120
+if "!opt!"=="4" goto sf144
+if "!opt!"=="5" goto removesf
+if "!opt!"=="6" goto Optimize
 goto sftmenu
 
 :sf60
@@ -1191,11 +1224,11 @@ echo                                      [%g%3%w%] Battery Saver Mode
 echo                                      [%g%4%w%] Back
 echo.
 echo.
-set "set=" & set /p set="Choose An Option >> "
-if "!set!"=="1" goto sf60balance
-if "!set!"=="2" goto sf60gaming
-if "!set!"=="3" goto sf60battery
-if "!set!"=="4" goto sftmenu
+set "opt=" & set /p opt="Choose An Option >> "
+if "!opt!"=="1" goto sf60balance
+if "!opt!"=="2" goto sf60gaming
+if "!opt!"=="3" goto sf60battery
+if "!opt!"=="4" goto sftmenu
 :: FIX: invalid input previously fell into :sf60battery
 goto sf60
 
@@ -1335,11 +1368,11 @@ echo                                      [%g%3%w%] Battery Saver Mode
 echo                                      [%g%4%w%] Back
 echo.
 echo.
-set "set=" & set /p set="Choose An Option >> "
-if "!set!"=="1" goto sf90balance
-if "!set!"=="2" goto sf90gaming
-if "!set!"=="3" goto sf90battery
-if "!set!"=="4" goto sftmenu
+set "opt=" & set /p opt="Choose An Option >> "
+if "!opt!"=="1" goto sf90balance
+if "!opt!"=="2" goto sf90gaming
+if "!opt!"=="3" goto sf90battery
+if "!opt!"=="4" goto sftmenu
 :: FIX: invalid input previously fell into :sf90battery
 goto sf90
 
@@ -1468,11 +1501,11 @@ echo                                      [%g%3%w%] Battery Saver Mode
 echo                                      [%g%4%w%] Back
 echo.
 echo.
-set "set=" & set /p set="Choose An Option >> "
-if "!set!"=="1" goto sf120balance
-if "!set!"=="2" goto sf120gaming
-if "!set!"=="3" goto sf120battery
-if "!set!"=="4" goto sftmenu
+set "opt=" & set /p opt="Choose An Option >> "
+if "!opt!"=="1" goto sf120balance
+if "!opt!"=="2" goto sf120gaming
+if "!opt!"=="3" goto sf120battery
+if "!opt!"=="4" goto sftmenu
 :: FIX: invalid input previously fell into :sf120gaming
 goto sf120
 
@@ -1607,11 +1640,11 @@ echo                                      [%g%3%w%] Battery Saver Mode
 echo                                      [%g%4%w%] Back
 echo.
 echo.
-set "set=" & set /p set="Choose An Option >> "
-if "!set!"=="1" goto sf144balance
-if "!set!"=="2" goto sf144gaming
-if "!set!"=="3" goto sf144battery
-if "!set!"=="4" goto sftmenu
+set "opt=" & set /p opt="Choose An Option >> "
+if "!opt!"=="1" goto sf144balance
+if "!opt!"=="2" goto sf144gaming
+if "!opt!"=="3" goto sf144battery
+if "!opt!"=="4" goto sftmenu
 goto sf144
 
 :sf144gaming
@@ -1797,10 +1830,22 @@ title kill process
 :: FIX: detect the current foreground package so we don't kill it
 :: (force-stopping the focused app loses unsaved data in messengers,
 :: notes, browsers, etc.)
+:: FIX: the resumed-activity field is named differently across Android
+:: versions - "mResumedActivity" (older), "ResumedActivity:" and
+:: "topResumedActivity=" (Android 13+, incl. API 36 on Pixel). Match the
+:: shared substring "ResumedActivity" and pull the package out of the
+:: ActivityRecord{...} brace regardless of prefix or the '='/':' separator:
+:: after '{' the layout is always "<hash> u0 <pkg>/<activity> t<id>}", so
+:: the package is token 3, then split on '/'. The old code matched only
+:: "mResumedActivity" with tokens=2 - it found nothing on Android 16 (field
+:: renamed) and, even when it matched, tokens=2 grabbed "ActivityRecord{<hash>"
+:: instead of the package, so the focused app was never actually skipped.
 set "FG_PKG="
-for /f "tokens=2 delims= " %%a in ('adb shell dumpsys activity activities 2^>nul ^<nul ^| findstr /C:"mResumedActivity"') do (
+for /f "tokens=2 delims={" %%a in ('adb shell dumpsys activity activities 2^>nul ^<nul ^| findstr /C:"ResumedActivity"') do (
     if not defined FG_PKG (
-        for /f "tokens=1 delims=/" %%b in ("%%a") do set "FG_PKG=%%b"
+        for /f "tokens=3 delims= " %%b in ("%%a") do (
+            for /f "tokens=1 delims=/" %%c in ("%%b") do set "FG_PKG=%%c"
+        )
     )
 )
 if defined FG_PKG echo [%b%i%w%] Foreground app detected, will be skipped: %FG_PKG%
@@ -1872,7 +1917,9 @@ pause > nul
 goto Optimize
 
 :cache
-mode 45,12
+:: FIX: was `mode 45,12` - a 45x12 console truncated the sub-menus and made the
+:: window jarringly resize vs every other screen. Match the standard size.
+mode 100,37
 cls
 title Clear Cache
 echo [1] %c%Clear Cache%w%
@@ -1920,7 +1967,11 @@ goto Optimize
 :cache_wipe_go
 echo.
 echo Wiping all app cache folders...
-adb shell "su -c 'for p in /data/data/*/cache; do rm -rf \$p/*; done'"
+:: FIX: was `rm -rf \$p/*` - the backslash makes the inner su-shell treat $p as
+:: the literal string "$p" (proved via a rootless `sh -c` proxy: \$p -> RESULT=$p/x,
+:: $p -> RESULT=/data/local/tmp/x), so the old command matched nothing and wiped
+:: nothing. Plain $p expands to each cache dir. (Root-only path; unchanged otherwise.)
+adb shell "su -c 'for p in /data/data/*/cache; do rm -rf $p/*; done'"
 echo Cache wipe complete. A reboot is recommended.
 pause > nul
 goto Optimize
@@ -1934,7 +1985,8 @@ echo                                                                            
 call :logo
 echo          ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul 2^>nul') do echo           [%g%+%w%]Uptime: %%a %%b %%c
-for /f "tokens=1 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul 2^>nul') do set cpucheck=%%i
+set "cpucheck=N/A"
+for /f "tokens=2 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul 2^>nul ^| findstr /C:"Load:"') do set "cpucheck=%%i"
 echo           [%g%+%w%]%cpucheck% LOAD
 echo          ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 echo.
@@ -1951,21 +2003,28 @@ echo                                     %gold%[%w%9%gold%]%w% Toggle Lock Profi
 echo                                     %gold%[%w%10%gold%]%w% Toggle Logs/etc
 echo                                     %gold%[%w%11%gold%]%w% Next Page
 echo                                     %gold%[%w%12%gold%]%w% Back
-set "set=" & set /p set="Choose An Option >> "
-if "!set!"=="1" goto saverpower
-if "!set!"=="2" goto animation
-if "!set!"=="3" goto autowifi
-if "!set!"=="4" goto sync
-if "!set!"=="5" goto motion
-if "!set!"=="6" goto zram
-if "!set!"=="7" goto extremepower
-if "!set!"=="8" goto senderror
-if "!set!"=="9" goto toggleprofilling
-if "!set!"=="10" goto togglelogs
-if "!set!"=="11" goto nextpage
-if "!set!"=="12" goto menu
+
+:Battery_ask
+:: FIX (press-twice): re-prompt without redrawing on empty/invalid input,
+:: so a phantom empty line after the probes doesn't re-run them (see :dispscaler).
+:: Also rename this menu's var "set" -> "opt": it never actually collided with
+:: the set command, but a variable literally named "set" is a footgun to read.
+set "opt=" & set /p opt="Choose An Option >> "
+if not defined opt goto Battery_ask
+if "!opt!"=="1" goto saverpower
+if "!opt!"=="2" goto animation
+if "!opt!"=="3" goto autowifi
+if "!opt!"=="4" goto sync
+if "!opt!"=="5" goto motion
+if "!opt!"=="6" goto zram
+if "!opt!"=="7" goto extremepower
+if "!opt!"=="8" goto senderror
+if "!opt!"=="9" goto toggleprofilling
+if "!opt!"=="10" goto togglelogs
+if "!opt!"=="11" goto nextpage
+if "!opt!"=="12" goto menu
 :: FIX: guard against invalid input - previously fell through to :nextpage
-goto Battery
+goto Battery_ask
 
 :nextpage
 cls
@@ -2061,6 +2120,10 @@ set "WLREPORT=%TEMP%\dcx_wakelocks_%TS%.txt"
     echo    - If mState ^^!= IDLE while screen is off, doze is blocked
     echo ===========================================================
 ) > "%WLREPORT%" < nul
+:: FIX (report hygiene): generate once above; :wakelockaudit_menu re-shows the
+:: menu so notepad / paginate / summary / invalid input don't re-run the ~10s
+:: report and write another timestamped temp file each time.
+:wakelockaudit_menu
 echo  %g%Report saved to:%w%
 echo    %WLREPORT%
 echo.
@@ -2071,7 +2134,7 @@ echo  %b%[%w%4%b%]%w% Back
 set "wl=" & set /p wl="Choose An Option >> "
 if "!wl!"=="1" (
     start "" notepad "%WLREPORT%"
-    goto wakelockaudit
+    goto wakelockaudit_menu
 )
 if "!wl!"=="2" (
     cls
@@ -2079,7 +2142,7 @@ if "!wl!"=="2" (
     echo.
     echo Press Any Button To Go Back
     pause > nul
-    goto wakelockaudit
+    goto wakelockaudit_menu
 )
 if "!wl!"=="3" (
     cls
@@ -2093,10 +2156,10 @@ if "!wl!"=="3" (
     echo Full report at: %WLREPORT%
     echo.
     pause > nul
-    goto wakelockaudit
+    goto wakelockaudit_menu
 )
 if "!wl!"=="4" goto nextpage
-goto wakelockaudit
+goto wakelockaudit_menu
 :: ===================================================================
 :: NEW: Refresh Rate Lock  (from Extra_Boost.bat / Power_Saving.bat)
 :: Uses REAL Settings.System keys that Android honours:
@@ -2470,8 +2533,12 @@ call :logo
 title Removing system apps from Doze whitelist...
 :: FIX: previous protected list was just "gms shell ims downloads" -
 :: too narrow. Expanded to cover more critical components.
-adb shell dumpsys deviceidle sys-whitelist | findstr /R "^[ ]*[a-zA-Z0-9_.]*,[0-9]*$" > temp.txt
-for /f "tokens=1 delims=," %%A in (temp.txt) do (
+:: FIX (temp hygiene): write to %TEMP%, not temp.txt in the CURRENT directory -
+:: DCX may be launched from a read-only or shared location. Read it back with
+:: `type` so the quoted %TEMP% path is honored (for /f in ("path") would treat a
+:: quoted path as a literal string, not a filename).
+adb shell dumpsys deviceidle sys-whitelist | findstr /R "^[ ]*[a-zA-Z0-9_.]*,[0-9]*$" > "%TEMP%\dcx_idle_whitelist.txt"
+for /f "tokens=1 delims=," %%A in ('type "%TEMP%\dcx_idle_whitelist.txt"') do (
     echo %%A | findstr /I "gms gsf shell ims downloads providers settings systemui inputmethod telecom telephony bluetooth dialer mms phone alarm calendar fused" > nul
     if errorlevel 1 (
         adb shell cmd deviceidle sys-whitelist -%%A
@@ -2480,7 +2547,7 @@ for /f "tokens=1 delims=," %%A in (temp.txt) do (
         echo [%r%#%w%] %%A Is Protected
     )
 )
-del temp.txt
+del "%TEMP%\dcx_idle_whitelist.txt" > nul 2>&1
 echo.
 echo Done, Press Any Button To Go Back
 pause > nul
@@ -3096,7 +3163,11 @@ adb shell device_config put device_personalization_services AutofillVC__enable_c
 adb shell settings delete global chained_battery_attribution_enabled > nul 2>&1
 adb shell device_config put odad moirai_additional_metrics_enabled true
 adb shell device_config put odad log_classification_latency_westworld true
-adb shell settings put global battery_stats_constants track_cpu_times_by_proc_state=false
+:: FIX (revert-completeness): was `put ...track_cpu_times_by_proc_state=false`,
+:: which re-pinned a non-default value instead of reverting. Delete so battery
+:: stats tracking returns to the platform default (:offlogss pinned it to
+:: max_history_files=0 etc).
+adb shell settings delete global battery_stats_constants > nul 2>&1
 adb shell device_config put adservices fledge_auction_server_enable_debug_reporting true
 adb shell device_config put adservices fledge_app_package_name_logging_enabled true
 adb shell device_config put adservices mdd_network_stats_logging_sample_interval 100
@@ -3168,7 +3239,9 @@ adb shell settings delete system log.closeguard.Animation > nul 2>&1
 call :dropbox_lowprio
 adb shell cmd dropbox set-rate-limit 2000
 adb shell setprop persist.traced_perf.enable 1 > nul 2>&1
-adb shell device_config put odad enable_fa_stats_log_logging false
+:: FIX: copy-paste bug - this is the On/restore path so it must re-ENABLE
+:: (true). It was `false`, identical to :offlogss, so the key never reverted.
+adb shell device_config put odad enable_fa_stats_log_logging true
 adb shell device_config put device_personalization_services StatsLog__active_users_logger_enabled true
 adb shell device_config put device_personalization_services StatsLog__active_users_logger_non_persistent true
 adb shell device_config put device_personalization_services StatsLog__enable_new_logger_api true
@@ -3182,6 +3255,16 @@ adb shell cmd display dmd-logging-enable > nul 2>&1
 adb shell device_config put on_device_personalization odp_enable_client_error_logging true
 adb shell device_config put adservices measurement_enable_app_package_name_logging true
 adb shell device_config put on_device_personalization fcp_enable_client_error_logging true
+:: FIX (revert-completeness): :offlogss pins these PERSISTENT keys that this
+:: On/restore path never undid, so log/metric collection stayed disabled after
+:: toggling back On. settings survive reboot, so the restart prompt below does
+:: NOT cover them; set_sync_disabled_for_tests persistent also froze ALL
+:: device_config server sync until reset.
+adb shell device_config set_sync_disabled_for_tests none > nul 2>&1
+adb shell settings delete global looper_stats > nul 2>&1
+adb shell settings delete global sqlite_compatibility_wal_flags > nul 2>&1
+adb shell settings delete global autofill_logging_level > nul 2>&1
+adb shell device_config put on_device_personalization odp_background_jobs_logging_enabled true > nul 2>&1
 adb shell logcat -c
 echo.
 echo.
@@ -3289,6 +3372,11 @@ adb shell settings delete global shadow_animation_scale > nul 2>&1
 adb shell settings delete global remove_animations > nul 2>&1
 adb shell settings delete global fade_duration > nul 2>&1
 adb shell settings delete secure reduce_motion > nul 2>&1
+:: FIX (revert-completeness): :offani pins secure long_press_timeout and
+:: multi_press_timeout to 250; restoring animations ("On") must delete them
+:: so tap / long-press timing returns to the platform default (400 / 300 ms).
+adb shell settings delete secure long_press_timeout > nul 2>&1
+adb shell settings delete secure multi_press_timeout > nul 2>&1
 adb shell settings delete global animator_slow_preview > nul 2>&1
 adb shell settings delete global animation_scale_animator_duration > nul 2>&1
 adb shell settings delete global animation_scale_window_transition > nul 2>&1
@@ -3406,8 +3494,13 @@ goto sync
 @echo off
 cls
 title Sync : Off
-adb shell settings put global auto_sync 0
-adb shell settings put global master_sync_enabled 0
+:: FIX (consistency): unify on master_sync_status - the key :syncmaster uses,
+:: the backup captures (:_bk_settings global master_sync_status) and CheckSetting
+:: displays. auto_sync / master_sync_enabled are read by nothing on modern
+:: Android (all three are placebo settings keys; real master sync lives in
+:: SyncManager and isn't rootless-writable), but master_sync_status is at least
+:: the one DCX backs up, so a backup/restore now round-trips this toggle.
+adb shell settings put global master_sync_status 0
 adb shell device_config set_sync_disabled_for_tests persistent > nul 2>&1
 echo Press Any Button To Go Back
 pause > nul
@@ -3417,8 +3510,8 @@ goto Battery
 @echo off
 cls
 title Sync : On
-adb shell settings put global auto_sync 1
-adb shell settings put global master_sync_enabled 1
+:: FIX (consistency): see :offsync - unify on master_sync_status.
+adb shell settings put global master_sync_status 1
 adb shell device_config set_sync_disabled_for_tests none > nul 2>&1
 echo Press Any Button To Go Back
 pause > nul
@@ -3534,6 +3627,13 @@ adb shell settings put global battery_tip_constants app_restriction_enabled=true
 adb shell settings delete global battery_saver_constants > nul 2>&1
 adb shell settings delete global protect_battery > nul 2>&1
 adb shell settings delete global activity_manager_constants > nul 2>&1
+:: FIX (revert-completeness): :onsvpp forces the device into low-RAM mode
+:: (debug.force_low_ram true), which persists until reboot and degrades
+:: every app launched afterward. Clear it so "Off" starts reverting
+:: immediately; the reboot prompted below completes it. (The debug.rs.*
+:: RenderScript props :onsvpp sets are no-ops on Android 12+ and have no
+:: clean default to restore, so they are left to the reboot.)
+adb shell setprop debug.force_low_ram false > nul 2>&1
 echo.
 echo.
 echo [%r%^^!%w%] Please Restart Device To Finish The Process
@@ -3655,7 +3755,8 @@ cls
 call :logo
 echo          ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul 2^>nul') do echo           [%g%+%w%]Uptime: %%a %%b %%c
-for /f "tokens=1 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul 2^>nul') do set cpucheck=%%i
+set "cpucheck=N/A"
+for /f "tokens=2 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul 2^>nul ^| findstr /C:"Load:"') do set "cpucheck=%%i"
 echo           [%g%+%w%]%cpucheck% LOAD
 echo          ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 echo.
@@ -3670,7 +3771,12 @@ echo                                     %r%[%w%7%r%]%w% GPU Renderer (Skia GL/V
 echo                                     %r%[%w%8%r%]%w% Force ANGLE for All Apps
 echo                                     %r%[%w%9%r%]%w% Display Scaler (Resolution / DPI)
 echo                                     %r%[%w%10%r%]%w% Back
+
+:Gaming_ask
+:: FIX (press-twice): re-prompt without redrawing on empty/invalid input,
+:: so a phantom empty line after the probes doesn't re-run them (see :dispscaler).
 set "game=" & set /p game="Choose An Option >> "
+if not defined game goto Gaming_ask
 if "!game!"=="1" goto gms
 if "!game!"=="2" goto thermal
 if "!game!"=="3" goto package
@@ -3682,8 +3788,7 @@ if "!game!"=="8" goto angleall
 if "!game!"=="9" goto dispscaler
 if "!game!"=="10" goto menu
 :: FIX: invalid input previously fell into :gms
-goto Gaming
-
+goto Gaming_ask
 :: ===================================================================
 :: NEW: Display Scaler (REAL, no-root)  -  wm size / wm density
 ::
@@ -3740,6 +3845,7 @@ echo                    %g%[%w%5%g%]%w% Custom resolution / density
 echo                    %g%[%w%6%g%]%w% UI size only (DPI, keeps resolution)
 echo                    %g%[%w%7%g%]%w% Reset to native (fixes any weirdness)
 echo                    %g%[%w%8%g%]%w% Back
+
 :dispscaler_ask
 :: FIX (input "eaten" / press-twice): re-prompt WITHOUT redrawing on empty or
 :: invalid input. A blank read here is usually a phantom empty line the console
@@ -3821,7 +3927,6 @@ goto dispscaler_set
 echo [%r%^^!%w%] Invalid values. Width/height 320-8000, density 80-900, digits only.
 timeout /t 2 /nobreak >nul
 goto dispscaler_custom
-
 :: -------------------------------------------------------------------
 :: UI size (DPI only) - changes element size WITHOUT touching the
 :: resolution. This is the working stand-in for the developer-options
@@ -3860,6 +3965,7 @@ echo                    %g%[%w%5%g%]%w% 80%%  UI -^> %U80% dpi   (smallest)
 echo                    %g%[%w%6%g%]%w% Custom dpi
 echo                    %g%[%w%7%g%]%w% Reset to native dpi
 echo                    %g%[%w%8%g%]%w% Back
+
 :dispscaler_dpi_ask
 :: FIX (input "eaten" / press-twice): same tight re-ask as :dispscaler - absorb a
 :: phantom empty read so the first keypress registers, and don't re-run the
@@ -3930,7 +4036,6 @@ echo  (e.g. 85%%) instead of leaving it at native.
 pause >nul
 goto dispscaler_dpi
 
-
 :dispscaler_reset
 cls
 title Display Scaler : reset
@@ -3965,7 +4070,6 @@ echo.
 echo Press Any Button To Go Back
 pause >nul
 goto Gaming
-
 :: ===================================================================
 :: NEW: GPU Renderer toggle (REAL Android property `debug.hwui.renderer`)
 :: This is the actual HWUI pipeline switch. Valid values:
@@ -4535,9 +4639,27 @@ adb shell device_config delete storage_native_boot target_dirty_background_ratio
 :skipdeviceconfigandremove
 adb shell logcat -G 256kb
 adb shell settings delete global activity_manager_constants > nul 2>&1
-adb shell device_config put runtime_native_boot iorap_readahead_enable false > nul 2>&1
+adb shell device_config delete runtime_native_boot iorap_readahead_enable > nul 2>&1
 adb shell device_config delete surface_flinger_native_boot max_frame_buffer_acquired_buffers > nul 2>&1
 adb shell device_config delete surface_flinger_native_boot adpf_cpu_hint > nul 2>&1
+:: FIX (revert-completeness): :onperf pins PERSISTENT power state that
+:: survives reboot; "Off" must undo it or the device stays in the
+:: performance profile forever. (debug.* setprops are volatile - the
+:: reboot prompted below clears those - so only persistent state is
+:: reverted here. set-mode is NOT forced: "1" would turn low-power mode
+:: ON, the opposite of a revert; un-pinning low_power is enough.)
+adb shell cmd thermalservice reset > nul 2>&1
+adb shell cmd power set-adaptive-power-saver-enabled true > nul 2>&1
+adb shell settings delete global low_power > nul 2>&1
+adb shell settings delete system multicore_packet_scheduler > nul 2>&1
+adb shell settings delete global sem_enhanced_cpu_responsiveness > nul 2>&1
+if "%SDK%"=="" (
+    adb shell settings delete global device_idle_constants > nul 2>&1
+) else if %SDK% GEQ 31 (
+    adb shell device_config delete device_idle inactive_to > nul 2>&1
+) else (
+    adb shell settings delete global device_idle_constants > nul 2>&1
+)
 echo.
 echo.
 echo [%r%^^!%w%] Please Restart Device To Finish The Process
@@ -4562,11 +4684,11 @@ adb shell cmd power set-mode 0 > nul 2>&1
 adb shell cmd thermalservice override-status 0
 adb shell settings put global low_power 0
 if "%SDK%"=="" (
-    adb shell settings put global device_idle_constants inactive_to=300000 >nul
+    adb shell settings put global device_idle_constants inactive_to=300000 > nul 2>&1
 ) else if %SDK% GEQ 31 (
-    adb shell device_config put device_idle inactive_to 300000 >nul
+    adb shell device_config put device_idle inactive_to 300000 > nul 2>&1
 ) else (
-    adb shell settings put global device_idle_constants inactive_to=300000 >nul
+    adb shell settings put global device_idle_constants inactive_to=300000 > nul 2>&1
 )
 adb shell cmd power set-adaptive-power-saver-enabled false
 adb shell setprop debug.power_management_mode pref_max
@@ -4685,22 +4807,6 @@ adb shell setprop debug.media.c2.large.audio.frame false
 adb shell device_config put surface_flinger_native_boot max_frame_buffer_acquired_buffers 3
 adb shell device_config put surface_flinger_native_boot adpf_cpu_hint true
 ::this device config from google, i don't try do any gimmick device config here, source : https://cs.android.com/search?q=surface_flinger_native_boot&sq=
-:: Check the key and save the value to a temporary file.
-adb shell device_config get storage_native_boot target_dirty_ratio > temp_result.txt
-:: Retrieve the value from the temporary file and store it in the variable `result`.
-set "result=" & set /p result=<temp_result.txt
-:: Check values ​​and process
-if "!result!"=="null" (
-    echo storage_native_boot/target_dirty_ratio is not detected.
-    set "result="
-) else if "!result!"=="" (
-    echo storage_native_boot/target_dirty_ratio is not detected.
-    set "result="
-) else (
-    echo Detected key storage_native_boot/target_dirty_ratio: %result%
-)
-:: Delete temporary files
-del temp_result.txt
 :: FIX: set an ABSOLUTE target so repeating "On" is idempotent. The old
 :: code did `current+10` every run (unbounded growth on repeated toggles)
 :: and, because of the early-out above, did nothing at all when the key
