@@ -45,7 +45,7 @@ DCX neo is a community tool, not affiliated with Google or any manufacturer.
 
 1. **Install ADB** — download **Android SDK Platform Tools** from Google, then
    add it to your `PATH` *or* drop `adb.exe` (and its DLLs) into an `adb\`
-   folder next to `DCX.bat` (DCX neo `cd`s into it automatically).
+   folder next to `DCX.bat` (DCX neo `cd`s into it automatically, and the Release contains an adb folder).
 2. **Enable USB debugging** — Settings → About phone → tap **Build number**
    ×7 → Developer options → **USB debugging**. Connect and tap **Allow** on the
    RSA prompt.
@@ -136,7 +136,7 @@ Page · Back.
 | 5 | **Refresh Rate Lock** | Lock 60/90/120 Hz, adaptive (1–120), or restore. |
 | 6 | **Force Doze Now** | Force deep idle now; unforce; or show state. |
 | 7 | **App Hibernation** | Enable/disable Android 12+ system-wide hibernation. |
-| 8 | **Account Sync Toggle** | Master switch for all account auto-sync. |
+| 8 | **Account Sync Toggle** | Account auto-sync switch. Writes `master_sync_status`, which is **placebo on modern Android** — see [What works vs placebo](#what-actually-works-vs-placebo). |
 | 9 | **Voice Hotword Toggle** | Disable the always-on "Hey Google" pipeline. |
 | A | **Wake-Lock Audit** | Battery-drain diagnostic (below). |
 | 0 | **Back** | — |
@@ -217,13 +217,18 @@ toggle, and writes a **stand-alone restore `.bat`** to
 ```bat
 @echo off
 :: DCX neo Settings Backup created ...
-adb shell settings put global window_animation_scale 1.0
-adb shell settings put system min_refresh_rate 60
+adb shell settings put global window_animation_scale "1.0"
+adb shell settings put system min_refresh_rate "60"
 adb shell settings delete global angle_gl_driver_all_angle >nul 2>&1
 adb shell setprop debug.hwui.renderer "skiagl"
+:: prop persist.log.tag was unset at backup time - not restoring
 ...
 pause
 ```
+
+Captured values are quoted and any key that was unset at backup time becomes a
+`delete` (or, for a property, a comment) — so a restore returns you to the exact
+state you had and never pins a property to an empty string.
 
 Because it's a normal batch file you can run it directly without DCX neo, edit
 out lines you don't want, or share it to reproduce settings elsewhere.
@@ -295,8 +300,8 @@ straight from the startup screen when no USB device is found (**[W]**).
 > **Security note:** while Wireless debugging is on, any PC paired with the
 > phone on the same network can run adb commands. Turn it off when done.
 
-The old standalone `wirelessadb.bat` is superseded by this menu (it only did
-`adb connect`, with no Android 11+ pairing support).
+The old standalone `wirelessadb.bat` has been **removed** — this menu replaces
+it (that script only did `adb connect`, with no Android 11+ pairing support).
 
 ---
 
@@ -319,11 +324,19 @@ reads** — they're stored but do nothing. DCX neo focuses on commands with a
   (Display Scaler). Lowering the render resolution is a genuine, no-root way
   to gain GPU headroom and cut power draw; `wm size reset` /
   `wm density reset` fully revert it.
-- **`deviceidle force-idle`, app hibernation, `master_sync_status`,
+- **`deviceidle force-idle`, app hibernation,
   `hotword_detection_enabled`, `persist.log.tag "*:S"`** — real battery/log
   switches.
 - **`cmd appops … RUN_IN_BACKGROUND deny`, `pm uninstall -k --user 0`** —
   background restriction and (reversible) debloat (App Manager).
+
+> **Not every toggle is effective.** The **Account Sync** switch writes
+> `master_sync_status`, but on modern Android that key is a placebo — nothing
+> reads it, and the real master-sync state lives in the sync framework
+> (`adb shell dumpsys content` → *Auto sync*), which can't be flipped via
+> `settings` without root (verified on Android 17: writing `master_sync_status 0`
+> left *Auto sync: true* unchanged). It's kept only so Backup/Restore round-trips
+> the value.
 
 > CPU/GPU frequency and governor changes are **not** possible via `setprop` —
 > they live in kernel sysfs and need **root**. DCX neo doesn't pretend
