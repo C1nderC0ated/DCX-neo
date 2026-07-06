@@ -366,6 +366,7 @@ reads** — they're stored but do nothing. DCX neo focuses on commands with a
 | **Wireless connect says "failed to authenticate" / "connection refused"** | Pair this PC first (Wireless ADB → option 1), or the port went stale — it changes on reboot/re-toggle, grab it fresh from the Wireless-debugging screen. |
 | **Something feels broken after tweaking** | **Reboot** — most live tweaks reset on reboot and that clears it. |
 | **A tweak "didn't do anything"** | Read the value back via **CheckSetting** (graphics: `dumpsys gfxinfo <pkg> \| findstr Pipeline`). Some keys need root or a newer Android. |
+| **CheckSetting report or Wake-Lock Audit saved empty / blank** | Fixed. Both reports are built as one redirected `( … ) > file` block, and a bare `)` inside an echo annotation such as `(deci-degrees C)` or `(first 15)` closed the cmd block early — cmd ends a `( )` block at the first `)` even inside echo text, so the redirect detached and the file came out blank. The annotations are now escaped and the reports write in full; the same fix also covers the background-dexopt **failure list**, which broke the same way when a device actually reported dexopt failures. |
 | **Most apps crash after enabling ANGLE** | Common on non-Pixel GPUs; **a reboot won't help** (it persists). Gaming → Force ANGLE → **Disable**/**Delete**. |
 | **Wi-Fi died after Network Boost** | Gaming → Network Boost → **Revert** (clears any old Wi-Fi keys). |
 | **ART Service printed a wall of text** | Not errors — older versions dumped a line per package. Current builds show a summary (optimised/failed) and only real failures; a few failures are normal. |
@@ -394,3 +395,4 @@ Exception: the image file [4152900.jpg] is excluded from the GPL-3.0 license.
 It is owned by its respective creator and is included strictly for personal,
 non-commercial display. If you fork or reuse this project, you must remove or
 replace this image.
+
