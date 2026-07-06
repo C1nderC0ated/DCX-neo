@@ -705,7 +705,7 @@ set "REPORT=%TEMP%\dcx_report_%TS%.txt"
     for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul 2^>nul') do echo   Uptime              : %%a %%b %%c
     for /f "delims=" %%i in ('adb shell dumpsys cpuinfo ^<nul ^| findstr /C:"Load:"')      do echo   %%i
     for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul ^| findstr /C:"level:"')       do echo   Battery            %%i
-    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul ^| findstr /C:"temperature:"') do echo   Battery temp       %%i (deci-degrees C)
+    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul ^| findstr /C:"temperature:"') do echo   Battery temp       %%i ^(deci-degrees C^)
     for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul ^| findstr /C:"voltage:"')     do echo   Battery voltage    %%i
     for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul ^| findstr /C:"status:"')      do echo   Battery status     %%i
     for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul ^| findstr /C:"health:"')      do echo   Battery health     %%i
@@ -716,21 +716,21 @@ set "REPORT=%TEMP%\dcx_report_%TS%.txt"
     for /f "delims=" %%i in ('adb shell wm density 2^>nul ^<nul')                                           do echo   %%i
     echo.
     echo [Graphics renderer - current values]
-    for /f "delims=" %%i in ('adb shell getprop debug.hwui.renderer 2^>nul ^<nul')   do echo   debug.hwui.renderer        : "%%i" (skiagl=default, skiavk=Skia Vulkan, empty=auto)
+    for /f "delims=" %%i in ('adb shell getprop debug.hwui.renderer 2^>nul ^<nul')   do echo   debug.hwui.renderer        : "%%i" ^(skiagl=default, skiavk=Skia Vulkan, empty=auto^)
     for /f "delims=" %%i in ('adb shell getprop ro.hwui.renderer 2^>nul ^<nul')      do echo   ro.hwui.renderer           : "%%i"
-    for /f "delims=" %%i in ('adb shell settings get global angle_gl_driver_all_angle 2^>nul ^<nul') do echo   angle_gl_driver_all_angle  : %%i (1=force ANGLE for all GLES apps, 0/null=off)
-    for /f "delims=" %%i in ('adb shell getprop persist.log.tag 2^>nul ^<nul')       do echo   persist.log.tag            : "%%i" (set to "*:S" to silence all logs)
+    for /f "delims=" %%i in ('adb shell settings get global angle_gl_driver_all_angle 2^>nul ^<nul') do echo   angle_gl_driver_all_angle  : %%i ^(1=force ANGLE for all GLES apps, 0/null=off^)
+    for /f "delims=" %%i in ('adb shell getprop persist.log.tag 2^>nul ^<nul')       do echo   persist.log.tag            : "%%i" ^(set to "*:S" to silence all logs^)
     echo.
     echo [Animation / Refresh - current values]
     for /f "delims=" %%i in ('adb shell settings get global window_animation_scale 2^>nul ^<nul')     do echo   window_animation_scale     : %%i
     for /f "delims=" %%i in ('adb shell settings get global transition_animation_scale 2^>nul ^<nul') do echo   transition_animation_scale : %%i
     for /f "delims=" %%i in ('adb shell settings get global animator_duration_scale 2^>nul ^<nul')    do echo   animator_duration_scale    : %%i
-    for /f "delims=" %%i in ('adb shell settings get system min_refresh_rate 2^>nul ^<nul')           do echo   min_refresh_rate (Hz)      : %%i
-    for /f "delims=" %%i in ('adb shell settings get system peak_refresh_rate 2^>nul ^<nul')          do echo   peak_refresh_rate (Hz)     : %%i
+    for /f "delims=" %%i in ('adb shell settings get system min_refresh_rate 2^>nul ^<nul')           do echo   min_refresh_rate ^(Hz^)      : %%i
+    for /f "delims=" %%i in ('adb shell settings get system peak_refresh_rate 2^>nul ^<nul')          do echo   peak_refresh_rate ^(Hz^)     : %%i
     echo.
     echo [Battery savers / Sync - current values]
-    for /f "delims=" %%i in ('adb shell settings get global master_sync_status 2^>nul ^<nul')          do echo   master_sync_status         : %%i  (1=on, 0=off)
-    for /f "delims=" %%i in ('adb shell settings get global hotword_detection_enabled 2^>nul ^<nul')   do echo   hotword_detection_enabled  : %%i  (1=on, 0=off)
+    for /f "delims=" %%i in ('adb shell settings get global master_sync_status 2^>nul ^<nul')          do echo   master_sync_status         : %%i  ^(1=on, 0=off^)
+    for /f "delims=" %%i in ('adb shell settings get global hotword_detection_enabled 2^>nul ^<nul')   do echo   hotword_detection_enabled  : %%i  ^(1=on, 0=off^)
     for /f "delims=" %%i in ('adb shell device_config get app_hibernation app_hibernation_enabled 2^>nul ^<nul') do echo   app_hibernation_enabled    : %%i
     echo.
     echo [Network]
@@ -2084,30 +2084,30 @@ set "WLREPORT=%TEMP%\dcx_wakelocks_%TS%.txt"
     echo ===========================================================
     echo.
     echo [Section 1] Currently held wake locks
-    echo  (Each entry = something keeping CPU awake right now.
-    echo   PARTIAL_WAKE_LOCK is the most common battery drain.)
+    echo  ^(Each entry = something keeping CPU awake right now.
+    echo   PARTIAL_WAKE_LOCK is the most common battery drain.^)
     echo -----------------------------------------------------------
     adb shell dumpsys power 2^>nul ^| findstr /C:"Wake Locks:" /C:"PARTIAL_WAKE_LOCK" /C:"SCREEN_BRIGHT" /C:"FULL_WAKE_LOCK"
     echo.
     echo.
     echo [Section 2] Top wake-lock holders since last full charge
-    echo  (Look at "Wake lock" totals - highest = biggest drainers.)
+    echo  ^(Look at "Wake lock" totals - highest = biggest drainers.^)
     echo -----------------------------------------------------------
     adb shell "dumpsys batterystats --charged 2>/dev/null | head -200"
     echo.
     echo.
-    echo [Section 3] Doze (deep sleep) state
-    echo  (mState=IDLE means doze is active. ACTIVE = apps can run.)
+    echo [Section 3] Doze ^(deep sleep^) state
+    echo  ^(mState=IDLE means doze is active. ACTIVE = apps can run.^)
     echo -----------------------------------------------------------
     adb shell dumpsys deviceidle 2^>nul ^| findstr /C:"mState=" /C:"mLightState=" /C:"mActiveIdleOpCount" /C:"mScreenOn" /C:"mCharging"
     echo.
     echo.
-    echo [Section 4] Top alarms (background wakeups)
+    echo [Section 4] Top alarms ^(background wakeups^)
     echo -----------------------------------------------------------
     adb shell "dumpsys alarm 2>/dev/null | grep -E 'Top Alarms|wakeups in last|act=' | head -50"
     echo.
     echo.
-    echo [Section 5] Process CPU consumers (last sample)
+    echo [Section 5] Process CPU consumers ^(last sample^)
     echo -----------------------------------------------------------
     adb shell "dumpsys cpuinfo 2>/dev/null | head -25"
     echo.
@@ -5220,13 +5220,13 @@ echo     Packages optimised : %_dx_perf%
 echo     Failures           : %_dx_fail%
 if not "%_dx_fail%"=="0" (
     echo.
-    echo   Failed entries (first 15):
+    echo   Failed entries ^(first 15^):
     findstr /I /C:"FAILED" "%TEMP%\dcx_bgdex.txt" | more +0 2>nul
     echo.
     echo   Note: a few failures are normal - some system packages can't
     echo   be re-compiled. The full log is at:
     echo     %TEMP%\dcx_bgdex.txt
-    echo   (leaving it in place so you can inspect it)
+    echo   ^(leaving it in place so you can inspect it^)
 ) else (
     echo   No failures. All good.
     del "%TEMP%\dcx_bgdex.txt" > nul 2>&1
