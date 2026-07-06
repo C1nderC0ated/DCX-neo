@@ -690,28 +690,28 @@ set "REPORT=%TEMP%\dcx_report_%TS%.txt"
     for /f "delims=" %%i in ('adb shell getprop ro.build.type 2^>nul ^<nul')                   do echo   Build type          : %%i
     echo.
     echo [Memory]
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul ^| findstr "MemTotal"')     do echo   Total RAM           : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul ^| findstr "MemAvailable"') do echo   Available RAM       : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul ^| findstr "MemFree"')      do echo   Free RAM            : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul ^| findstr "Buffers"')      do echo   Buffers             : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul ^| findstr "^Cached"')      do echo   Cached              : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul ^| findstr "SwapTotal"')    do echo   Swap total          : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul ^| findstr "SwapFree"')     do echo   Swap free           : %%i kB
+    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul 2^>nul ^| findstr "MemTotal"')     do echo   Total RAM           : %%i kB
+    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul 2^>nul ^| findstr "MemAvailable"') do echo   Available RAM       : %%i kB
+    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul 2^>nul ^| findstr "MemFree"')      do echo   Free RAM            : %%i kB
+    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul 2^>nul ^| findstr "Buffers"')      do echo   Buffers             : %%i kB
+    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul 2^>nul ^| findstr "^Cached"')      do echo   Cached              : %%i kB
+    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul 2^>nul ^| findstr "SwapTotal"')    do echo   Swap total          : %%i kB
+    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul 2^>nul ^| findstr "SwapFree"')     do echo   Swap free           : %%i kB
     echo.
     echo [Storage]
     adb shell df -h /data 2^>nul
     echo.
     echo [State]
     for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul 2^>nul') do echo   Uptime              : %%a %%b %%c
-    for /f "delims=" %%i in ('adb shell dumpsys cpuinfo ^<nul ^| findstr /C:"Load:"')      do echo   %%i
-    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul ^| findstr /C:"level:"')       do echo   Battery            %%i
-    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul ^| findstr /C:"temperature:"') do echo   Battery temp       %%i ^(deci-degrees C^)
-    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul ^| findstr /C:"voltage:"')     do echo   Battery voltage    %%i
-    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul ^| findstr /C:"status:"')      do echo   Battery status     %%i
-    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul ^| findstr /C:"health:"')      do echo   Battery health     %%i
+    for /f "delims=" %%i in ('adb shell dumpsys cpuinfo ^<nul 2^>nul ^| findstr /C:"Load:"')      do echo   %%i
+    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul 2^>nul ^| findstr /C:"level:"')       do echo   Battery            %%i
+    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul 2^>nul ^| findstr /C:"temperature:"') do echo   Battery temp       %%i ^(deci-degrees C^)
+    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul 2^>nul ^| findstr /C:"voltage:"')     do echo   Battery voltage    %%i
+    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul 2^>nul ^| findstr /C:"status:"')      do echo   Battery status     %%i
+    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul 2^>nul ^| findstr /C:"health:"')      do echo   Battery health     %%i
     echo.
     echo [Display]
-    for /f "tokens=2 delims==" %%i in ('adb shell dumpsys SurfaceFlinger ^<nul ^| findstr "refresh-rate"') do echo   Display refresh    : %%i Hz
+    for /f "tokens=2 delims==" %%i in ('adb shell dumpsys SurfaceFlinger ^<nul 2^>nul ^| findstr "refresh-rate"') do echo   Display refresh    : %%i Hz
     for /f "delims=" %%i in ('adb shell wm size 2^>nul ^<nul')                                              do echo   %%i
     for /f "delims=" %%i in ('adb shell wm density 2^>nul ^<nul')                                           do echo   %%i
     echo.
@@ -746,7 +746,7 @@ set "REPORT=%TEMP%\dcx_report_%TS%.txt"
     adb shell dumpsys deviceidle whitelist 2^>nul
     echo.
     echo [Top 10 RAM consumers]
-    adb shell "dumpsys meminfo --oom 2>/dev/null | head -40"
+    adb shell "dumpsys meminfo --oom 2>/dev/null | head -40" 2^>nul
     echo.
     echo [Currently focused app]
     adb shell dumpsys activity activities 2^>nul ^| findstr /C:"mResumedActivity"
@@ -2093,7 +2093,7 @@ set "WLREPORT=%TEMP%\dcx_wakelocks_%TS%.txt"
     echo [Section 2] Top wake-lock holders since last full charge
     echo  ^(Look at "Wake lock" totals - highest = biggest drainers.^)
     echo -----------------------------------------------------------
-    adb shell "dumpsys batterystats --charged 2>/dev/null | head -200"
+    adb shell "dumpsys batterystats --charged 2>/dev/null | head -200" 2^>nul
     echo.
     echo.
     echo [Section 3] Doze ^(deep sleep^) state
@@ -2104,12 +2104,12 @@ set "WLREPORT=%TEMP%\dcx_wakelocks_%TS%.txt"
     echo.
     echo [Section 4] Top alarms ^(background wakeups^)
     echo -----------------------------------------------------------
-    adb shell "dumpsys alarm 2>/dev/null | grep -E 'Top Alarms|wakeups in last|act=' | head -50"
+    adb shell "dumpsys alarm 2>/dev/null | grep -E 'Top Alarms|wakeups in last|act=' | head -50" 2^>nul
     echo.
     echo.
     echo [Section 5] Process CPU consumers ^(last sample^)
     echo -----------------------------------------------------------
-    adb shell "dumpsys cpuinfo 2>/dev/null | head -25"
+    adb shell "dumpsys cpuinfo 2>/dev/null | head -25" 2^>nul
     echo.
     echo ===========================================================
     echo  Quick interpretation:
