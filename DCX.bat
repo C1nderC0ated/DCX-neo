@@ -5242,3 +5242,4 @@ exit /b
 :_bgdex_legacy
 adb shell pm bg-dexopt-job
 exit /b
+
