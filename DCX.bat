@@ -180,7 +180,14 @@ if not exist "%BACKUPDIR%" mkdir "%BACKUPDIR%"
 :: FIX: build the timestamp via PowerShell so it is locale-independent.
 :: The old %date%/%time% substring slicing assumed a US M/D/Y format and
 :: produced garbled or invalid filenames on other regional date formats.
-for /f %%t in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "TS=%%t"
+:: locale-safe, filename-safe timestamp (no PowerShell = no console code-page reset)
+set "TS=%date%_%time%"
+set "TS=%TS::=-%"
+set "TS=%TS:/=-%"
+set "TS=%TS:\=-%"
+set "TS=%TS:.=-%"
+set "TS=%TS:,=-%"
+set "TS=%TS: =_%"
 set "BAKFILE=%BACKUPDIR%\dcx_backup_%TS%.bat"
 echo  Saving current settings to:
 echo    %BAKFILE%
@@ -398,7 +405,7 @@ adb shell "time dd if=/dev/urandom of=/data/local/tmp/_dcx_bench bs=64k count=16
 echo.
 echo [%b%3/3%w%] Storage sequential read (10MB)...
 adb shell "time dd if=/data/local/tmp/_dcx_bench of=/dev/null bs=64k 2>&1 | tail -1"
-adb shell rm -f /data/local/tmp/_dcx_bench
+adb shell rm -f /data/local/tmp/_dcx_bench <nul
 echo.
 echo.
 echo [%g%Done%w%] Numbers vary - run twice after optimization for comparison.
@@ -667,7 +674,14 @@ echo.
 :: FIX: build the timestamp via PowerShell so it is locale-independent.
 :: The old %date%/%time% substring slicing assumed a US M/D/Y format and
 :: produced garbled or invalid filenames on other regional date formats.
-for /f %%t in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "TS=%%t"
+:: locale-safe, filename-safe timestamp (no PowerShell = no console code-page reset)
+set "TS=%date%_%time%"
+set "TS=%TS::=-%"
+set "TS=%TS:/=-%"
+set "TS=%TS:\=-%"
+set "TS=%TS:.=-%"
+set "TS=%TS:,=-%"
+set "TS=%TS: =_%"
 set "REPORT=%TEMP%\dcx_report_%TS%.txt"
 (
     echo ===========================================================
@@ -690,28 +704,28 @@ set "REPORT=%TEMP%\dcx_report_%TS%.txt"
     for /f "delims=" %%i in ('adb shell getprop ro.build.type 2^>nul ^<nul')                   do echo   Build type          : %%i
     echo.
     echo [Memory]
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul 2^>nul ^| findstr "MemTotal"')     do echo   Total RAM           : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul 2^>nul ^| findstr "MemAvailable"') do echo   Available RAM       : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul 2^>nul ^| findstr "MemFree"')      do echo   Free RAM            : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul 2^>nul ^| findstr "Buffers"')      do echo   Buffers             : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul 2^>nul ^| findstr "^Cached"')      do echo   Cached              : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul 2^>nul ^| findstr "SwapTotal"')    do echo   Swap total          : %%i kB
-    for /f "tokens=2" %%i in ('adb shell cat /proc/meminfo ^<nul 2^>nul ^| findstr "SwapFree"')     do echo   Swap free           : %%i kB
+    for /f "tokens=2" %%i in ('adb shell "cat /proc/meminfo 2>/dev/null | grep MemTotal"')     do echo   Total RAM           : %%i kB
+    for /f "tokens=2" %%i in ('adb shell "cat /proc/meminfo 2>/dev/null | grep MemAvailable"') do echo   Available RAM       : %%i kB
+    for /f "tokens=2" %%i in ('adb shell "cat /proc/meminfo 2>/dev/null | grep MemFree"')      do echo   Free RAM            : %%i kB
+    for /f "tokens=2" %%i in ('adb shell "cat /proc/meminfo 2>/dev/null | grep Buffers"')      do echo   Buffers             : %%i kB
+    for /f "tokens=2" %%i in ('adb shell "cat /proc/meminfo 2>/dev/null | grep '^Cached'"')      do echo   Cached              : %%i kB
+    for /f "tokens=2" %%i in ('adb shell "cat /proc/meminfo 2>/dev/null | grep SwapTotal"')    do echo   Swap total          : %%i kB
+    for /f "tokens=2" %%i in ('adb shell "cat /proc/meminfo 2>/dev/null | grep SwapFree"')     do echo   Swap free           : %%i kB
     echo.
     echo [Storage]
-    adb shell df -h /data 2^>nul
+    adb shell "df -h /data 2>/dev/null"
     echo.
     echo [State]
     for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul 2^>nul') do echo   Uptime              : %%a %%b %%c
-    for /f "delims=" %%i in ('adb shell dumpsys cpuinfo ^<nul 2^>nul ^| findstr /C:"Load:"')      do echo   %%i
-    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul 2^>nul ^| findstr /C:"level:"')       do echo   Battery            %%i
-    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul 2^>nul ^| findstr /C:"temperature:"') do echo   Battery temp       %%i ^(deci-degrees C^)
-    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul 2^>nul ^| findstr /C:"voltage:"')     do echo   Battery voltage    %%i
-    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul 2^>nul ^| findstr /C:"status:"')      do echo   Battery status     %%i
-    for /f "delims=" %%i in ('adb shell dumpsys battery ^<nul 2^>nul ^| findstr /C:"health:"')      do echo   Battery health     %%i
+    for /f "delims=" %%i in ('adb shell "dumpsys cpuinfo 2>/dev/null | grep 'Load:'"')      do echo   %%i
+    for /f "delims=" %%i in ('adb shell "dumpsys battery 2>/dev/null | grep 'level:'"')       do echo   Battery            %%i
+    for /f "delims=" %%i in ('adb shell "dumpsys battery 2>/dev/null | grep 'temperature:'"') do echo   Battery temp       %%i ^(deci-degrees C^)
+    for /f "delims=" %%i in ('adb shell "dumpsys battery 2>/dev/null | grep 'voltage:'"')     do echo   Battery voltage    %%i
+    for /f "delims=" %%i in ('adb shell "dumpsys battery 2>/dev/null | grep 'status:'"')      do echo   Battery status     %%i
+    for /f "delims=" %%i in ('adb shell "dumpsys battery 2>/dev/null | grep 'health:'"')      do echo   Battery health     %%i
     echo.
     echo [Display]
-    for /f "tokens=2 delims==" %%i in ('adb shell dumpsys SurfaceFlinger ^<nul 2^>nul ^| findstr "refresh-rate"') do echo   Display refresh    : %%i Hz
+    for /f "tokens=2 delims==" %%i in ('adb shell "dumpsys SurfaceFlinger 2>/dev/null | grep refresh-rate"') do echo   Display refresh    : %%i Hz
     for /f "delims=" %%i in ('adb shell wm size 2^>nul ^<nul')                                              do echo   %%i
     for /f "delims=" %%i in ('adb shell wm density 2^>nul ^<nul')                                           do echo   %%i
     echo.
@@ -740,16 +754,16 @@ set "REPORT=%TEMP%\dcx_report_%TS%.txt"
     echo.
     echo [Power state]
     for /f "delims=" %%i in ('adb shell settings get global low_power 2^>nul ^<nul') do echo   Battery saver         : %%i
-    adb shell cmd power get-mode 2^>nul
+    adb shell "cmd power get-mode 2>/dev/null"
     echo.
     echo [Doze whitelist - first 20 entries]
-    adb shell dumpsys deviceidle whitelist 2^>nul
+    adb shell "dumpsys deviceidle whitelist 2>/dev/null"
     echo.
     echo [Top 10 RAM consumers]
-    adb shell "dumpsys meminfo --oom 2>/dev/null | head -40" 2^>nul
+    adb shell "dumpsys meminfo --oom 2>/dev/null | head -40"
     echo.
     echo [Currently focused app]
-    adb shell dumpsys activity activities 2^>nul ^| findstr /C:"mResumedActivity"
+    adb shell "dumpsys activity activities 2>/dev/null | grep mResumedActivity"
     echo.
     echo ===========================================================
     echo  End of report
@@ -858,6 +872,7 @@ for /f "delims=" %%i in ('powershell -Command "[math]::Round(%final% / 3.7037029
 for /f "delims=" %%i in ('powershell -Command "[math]::Round(%final% / 3.3333336900, 0)"') do set sfelpoassd=%%i
 for /f "delims=" %%i in ('powershell -Command "[math]::Round(%final% / 1.851852 + 1, 0)"') do set rgsmplsa=%%i
 for /f "delims=" %%i in ('powershell -Command "[math]::Round(%final% / 0.8771929 -2, 0)"') do set rgstis=%%i
+chcp 65001 >nul
 timeout /t 2 /nobreak > nul
 ::elrdur
 adb shell setprop debug.sf.region_sampling_duration_ns %elrdur%
@@ -969,7 +984,7 @@ timeout /t 1 /nobreak > nul
 cls
 call :logo
 echo Done , Press Any Button To Go Back
-adb shell cmd notification post -S bigtext -t 'Auto Setup Is Complete⚙️' 'Tag' 'Auto Setup Is A Bunch Of Tweaks That Can Be Use For Daily Or Dont Know Anything About This Script' > nul 2>&1
+adb shell cmd notification post -S bigtext -t 'Auto Setup Is Complete⚙️' 'Tag' 'Auto Setup Is A Bunch Of Tweaks That Can Be Use For Daily Or Dont Know Anything About This Script' <nul > nul 2>&1
 pause > Nul
 goto menu
 
@@ -1166,7 +1181,7 @@ goto animspeed_apply
 :animspeed_apply
 adb shell settings put global window_animation_scale %asv%
 adb shell settings put global transition_animation_scale %asv%
-adb shell settings put global animator_duration_scale %asv%
+adb shell settings put global animator_duration_scale %asv% <nul
 echo Done. All three animation scales set to %asv%.
 pause > nul
 goto animspeed
@@ -1176,7 +1191,7 @@ cls
 call :logo
 title Clear Last Used Is Running^^!
 for /f "tokens=2 delims=:" %%a in ('adb shell pm list package ^<nul') do (
-adb shell cmd usagestats clear-last-used-timestamps %%a
+adb shell "cmd usagestats clear-last-used-timestamps %%a >/dev/null 2>&1"
 echo %%a ━ clear last used^^!
 )
 echo.
@@ -1268,7 +1283,7 @@ adb shell setprop debug.sf.early_phase_offset_ns %chsss%
 ::3000000
 set chbay=2800000
 adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %chbay%
-adb shell setprop debug.sf.high_fps_early_phase_offset_ns %chbay%
+adb shell setprop debug.sf.high_fps_early_phase_offset_ns %chbay% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
 goto sftmenu
@@ -1310,7 +1325,7 @@ adb shell setprop debug.sf.early_phase_offset_ns %chsss%
 ::3000000
 set chbay=3200000
 adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %chbay%
-adb shell setprop debug.sf.high_fps_early_phase_offset_ns %chbay%
+adb shell setprop debug.sf.high_fps_early_phase_offset_ns %chbay% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
 goto sftmenu
@@ -1353,7 +1368,7 @@ adb shell setprop debug.sf.early_phase_offset_ns %chsss%
 ::3000000
 set chbay=3200000
 adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %chbay%
-adb shell setprop debug.sf.high_fps_early_phase_offset_ns %chbay%
+adb shell setprop debug.sf.high_fps_early_phase_offset_ns %chbay% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
 goto sftmenu
@@ -1408,7 +1423,7 @@ adb shell setprop debug.sf.early_gl_phase_offset_ns %xcxz%
 adb shell setprop debug.sf.early_phase_offset_ns %xcxz%
 set xcfs=1733333
 adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %xcfs%
-adb shell setprop debug.sf.high_fps_early_phase_offset_ns %xcfs%
+adb shell setprop debug.sf.high_fps_early_phase_offset_ns %xcfs% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
 goto sftmenu
@@ -1445,7 +1460,7 @@ adb shell setprop debug.sf.early_gl_phase_offset_ns %xcxz%
 adb shell setprop debug.sf.early_phase_offset_ns %xcxz%
 set xcfs=2333333
 adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %xcfs%
-adb shell setprop debug.sf.high_fps_early_phase_offset_ns %xcfs%
+adb shell setprop debug.sf.high_fps_early_phase_offset_ns %xcfs% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
 goto sftmenu
@@ -1486,7 +1501,7 @@ adb shell setprop debug.sf.early_phase_offset_ns %xcxz%
 ::******
 set xcfs=1833333
 adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %xcfs%
-adb shell setprop debug.sf.high_fps_early_phase_offset_ns %xcfs%
+adb shell setprop debug.sf.high_fps_early_phase_offset_ns %xcfs% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
 goto sftmenu
@@ -1541,7 +1556,7 @@ adb shell setprop debug.sf.late.sf.duration %ltsdur%
 adb shell setprop debug.sf.region_sampling_period_ns %ltsdur%
 adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %ltsdur%
 adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %ltsdur%
-adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %ltsdur%
+adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %ltsdur% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
 goto sftmenu
@@ -1578,7 +1593,7 @@ adb shell setprop debug.sf.late.sf.duration %ltsdur%
 adb shell setprop debug.sf.region_sampling_period_ns %ltsdur%
 adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %ltsdur%
 adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %ltsdur%
-adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %ltsdur%
+adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %ltsdur% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
 goto sftmenu
@@ -1621,7 +1636,7 @@ adb shell setprop debug.sf.late.sf.duration %ltsdur%
 adb shell setprop debug.sf.region_sampling_period_ns %ltsdur%
 adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %ltsdur%
 adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %ltsdur%
-adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %ltsdur%
+adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %ltsdur% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
 goto sftmenu
@@ -1686,7 +1701,7 @@ adb shell setprop debug.sf.late.sf.duration %v144_late%
 adb shell setprop debug.sf.region_sampling_period_ns %v144_late%
 adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %v144_late%
 adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %v144_late%
-adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %v144_late%
+adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %v144_late% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
 goto sftmenu
@@ -1723,7 +1738,7 @@ adb shell setprop debug.sf.late.sf.duration %v144_late%
 adb shell setprop debug.sf.region_sampling_period_ns %v144_late%
 adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %v144_late%
 adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %v144_late%
-adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %v144_late%
+adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %v144_late% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
 goto sftmenu
@@ -1760,7 +1775,7 @@ adb shell setprop debug.sf.late.sf.duration %v144_late%
 adb shell setprop debug.sf.region_sampling_period_ns %v144_late%
 adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %v144_late%
 adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %v144_late%
-adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %v144_late%
+adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %v144_late% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
 goto sftmenu
@@ -1869,7 +1884,7 @@ for /f "tokens=2 delims=:" %%a in ('adb shell pm list package -3 ^<nul') do (
         adb shell am force-stop !PKG! > nul 2>&1
     )
 )
-adb shell am kill-all > nul 2>&1
+adb shell am kill-all <nul > nul 2>&1
 echo %d%Done%w%, Press Any Button To Go Back
 pause > nul
 goto Optimize
@@ -1910,7 +1925,7 @@ if errorlevel 1 (
 )
 echo.
 echo Compiling %package% with mode %mode%...
-adb shell cmd package compile -m %mode% -f %package%
+adb shell cmd package compile -m %mode% -f %package% <nul
 timeout /t 2 /nobreak > nul
 echo Done , Press Any Button To Go Back
 pause > nul
@@ -1947,7 +1962,7 @@ goto sdgb
 :cache_trim
 cls
 echo Trimming system cache (may take a moment)...
-adb shell pm trim-caches 1200G
+adb shell pm trim-caches 1200G <nul
 echo Done. Press any key.
 pause > nul
 goto Optimize
@@ -1966,12 +1981,21 @@ goto Optimize
 
 :cache_wipe_go
 echo.
+adb shell "su -c 'echo _DCXROOT'" <nul 2>nul | findstr /C:"_DCXROOT" >nul
+if not errorlevel 1 goto cache_wipe_root_ok
+echo [%r%^^!%w%] Root is not available on this device - nothing was wiped.
+echo      This wipe needs a rooted device such as Magisk.
+echo.
+echo Press Any Button To Go Back
+pause > nul
+goto Optimize
+:cache_wipe_root_ok
 echo Wiping all app cache folders...
 :: FIX: was `rm -rf \$p/*` - the backslash makes the inner su-shell treat $p as
 :: the literal string "$p" (proved via a rootless `sh -c` proxy: \$p -> RESULT=$p/x,
 :: $p -> RESULT=/data/local/tmp/x), so the old command matched nothing and wiped
 :: nothing. Plain $p expands to each cache dir. (Root-only path; unchanged otherwise.)
-adb shell "su -c 'for p in /data/data/*/cache; do rm -rf $p/*; done'"
+adb shell "su -c 'for p in /data/data/*/cache; do rm -rf $p/*; done'" <nul
 echo Cache wipe complete. A reboot is recommended.
 pause > nul
 goto Optimize
@@ -2076,7 +2100,14 @@ echo.
 :: FIX: build the timestamp via PowerShell so it is locale-independent.
 :: The old %date%/%time% substring slicing assumed a US M/D/Y format and
 :: produced garbled or invalid filenames on other regional date formats.
-for /f %%t in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "TS=%%t"
+:: locale-safe, filename-safe timestamp (no PowerShell = no console code-page reset)
+set "TS=%date%_%time%"
+set "TS=%TS::=-%"
+set "TS=%TS:/=-%"
+set "TS=%TS:\=-%"
+set "TS=%TS:.=-%"
+set "TS=%TS:,=-%"
+set "TS=%TS: =_%"
 set "WLREPORT=%TEMP%\dcx_wakelocks_%TS%.txt"
 (
     echo ===========================================================
@@ -2087,29 +2118,29 @@ set "WLREPORT=%TEMP%\dcx_wakelocks_%TS%.txt"
     echo  ^(Each entry = something keeping CPU awake right now.
     echo   PARTIAL_WAKE_LOCK is the most common battery drain.^)
     echo -----------------------------------------------------------
-    adb shell dumpsys power 2^>nul ^| findstr /C:"Wake Locks:" /C:"PARTIAL_WAKE_LOCK" /C:"SCREEN_BRIGHT" /C:"FULL_WAKE_LOCK"
+    adb shell "dumpsys power 2>/dev/null | grep -E 'Wake Locks:|PARTIAL_WAKE_LOCK|SCREEN_BRIGHT|FULL_WAKE_LOCK'"
     echo.
     echo.
     echo [Section 2] Top wake-lock holders since last full charge
     echo  ^(Look at "Wake lock" totals - highest = biggest drainers.^)
     echo -----------------------------------------------------------
-    adb shell "dumpsys batterystats --charged 2>/dev/null | head -200" 2^>nul
+    adb shell "dumpsys batterystats --charged 2>/dev/null | head -200"
     echo.
     echo.
     echo [Section 3] Doze ^(deep sleep^) state
     echo  ^(mState=IDLE means doze is active. ACTIVE = apps can run.^)
     echo -----------------------------------------------------------
-    adb shell dumpsys deviceidle 2^>nul ^| findstr /C:"mState=" /C:"mLightState=" /C:"mActiveIdleOpCount" /C:"mScreenOn" /C:"mCharging"
+    adb shell "dumpsys deviceidle 2>/dev/null | grep -E 'mState=|mLightState=|mActiveIdleOpCount|mScreenOn|mCharging'"
     echo.
     echo.
     echo [Section 4] Top alarms ^(background wakeups^)
     echo -----------------------------------------------------------
-    adb shell "dumpsys alarm 2>/dev/null | grep -E 'Top Alarms|wakeups in last|act=' | head -50" 2^>nul
+    adb shell "dumpsys alarm 2>/dev/null | grep -E 'Top Alarms|wakeups in last|act=' | head -50"
     echo.
     echo.
     echo [Section 5] Process CPU consumers ^(last sample^)
     echo -----------------------------------------------------------
-    adb shell "dumpsys cpuinfo 2>/dev/null | head -25" 2^>nul
+    adb shell "dumpsys cpuinfo 2>/dev/null | head -25"
     echo.
     echo ===========================================================
     echo  Quick interpretation:
@@ -2186,28 +2217,28 @@ echo                                     %g%[%w%6%g%]%w% Back
 set "rl=" & set /p rl="Choose An Option >> "
 if "!rl!"=="1" (
     adb shell settings put system min_refresh_rate 60
-    adb shell settings put system peak_refresh_rate 60
+    adb shell settings put system peak_refresh_rate 60 <nul
     echo Locked at 60 Hz.
     pause > nul
     goto refreshlock
 )
 if "!rl!"=="2" (
     adb shell settings put system min_refresh_rate 90
-    adb shell settings put system peak_refresh_rate 90
+    adb shell settings put system peak_refresh_rate 90 <nul
     echo Locked at 90 Hz. ^(Falls back if your panel doesn't support 90.^)
     pause > nul
     goto refreshlock
 )
 if "!rl!"=="3" (
     adb shell settings put system min_refresh_rate 120
-    adb shell settings put system peak_refresh_rate 120
+    adb shell settings put system peak_refresh_rate 120 <nul
     echo Locked at 120 Hz. ^(Falls back if your panel doesn't support 120.^)
     pause > nul
     goto refreshlock
 )
 if "!rl!"=="4" (
     adb shell settings put system min_refresh_rate 1
-    adb shell settings put system peak_refresh_rate 120
+    adb shell settings put system peak_refresh_rate 120 <nul
     echo Adaptive 1-120 Hz.
     pause > nul
     goto refreshlock
@@ -2292,13 +2323,13 @@ echo                                     %g%[%w%2%g%]%w% Disable
 echo                                     %g%[%w%3%g%]%w% Back
 set "ah=" & set /p ah="Choose An Option >> "
 if "!ah!"=="1" (
-    adb shell device_config put app_hibernation app_hibernation_enabled true
+    adb shell device_config put app_hibernation app_hibernation_enabled true <nul
     echo Enabled.
     pause > nul
     goto apphibernation
 )
 if "!ah!"=="2" (
-    adb shell device_config put app_hibernation app_hibernation_enabled false
+    adb shell device_config put app_hibernation app_hibernation_enabled false <nul
     echo Disabled.
     pause > nul
     goto apphibernation
@@ -2330,13 +2361,13 @@ echo                                     %g%[%w%2%g%]%w% Disable sync (battery s
 echo                                     %g%[%w%3%g%]%w% Back
 set "sm=" & set /p sm="Choose An Option >> "
 if "!sm!"=="1" (
-    adb shell settings put global master_sync_status 1
+    adb shell settings put global master_sync_status 1 <nul
     echo Sync enabled.
     pause > nul
     goto syncmaster
 )
 if "!sm!"=="2" (
-    adb shell settings put global master_sync_status 0
+    adb shell settings put global master_sync_status 0 <nul
     echo Sync disabled. You will need to open apps to fetch new content.
     pause > nul
     goto syncmaster
@@ -2366,13 +2397,13 @@ echo                                     %g%[%w%2%g%]%w% Disable hotword
 echo                                     %g%[%w%3%g%]%w% Back
 set "hw=" & set /p hw="Choose An Option >> "
 if "!hw!"=="1" (
-    adb shell settings put global hotword_detection_enabled 1
+    adb shell settings put global hotword_detection_enabled 1 <nul
     echo Hotword enabled.
     pause > nul
     goto hotwordtoggle
 )
 if "!hw!"=="2" (
-    adb shell settings put global hotword_detection_enabled 0
+    adb shell settings put global hotword_detection_enabled 0 <nul
     echo Hotword disabled.
     pause > nul
     goto hotwordtoggle
@@ -2431,7 +2462,7 @@ adb shell cmd activity set-inactive %pkgv2% false
 adb shell cmd activity set-standby-bucket %pkgv2% active
 adb shell cmd app_hibernation set-state %pkgv2% false
 adb shell cmd dropbox remove-low-priority %pkgv2%
-adb shell cmd tare set-vip 0 %pkgv2% true
+adb shell cmd tare set-vip 0 %pkgv2% true <nul
 echo.
 echo [#] %pkgv2% Is Back To Stock, Reboot To Finish The Process
 echo.
@@ -2481,7 +2512,7 @@ adb shell am force-stop %pkgv2%
 adb shell am kill %pkgv2%
 adb shell am stop-app %pkgv2%
 adb shell cmd activity force-stop %pkgv2%
-adb shell cmd activity kill %pkgv2%
+adb shell cmd activity kill %pkgv2% <nul
 echo.
 echo %pkgv2% In Hibernate State
 echo.
@@ -2560,7 +2591,7 @@ call :logo
 echo.
 echo.
 echo                           [%y%=%w%]All System Apps Is Revert Back To Deviceidle
-adb shell cmd deviceidle sys-whitelist reset
+adb shell cmd deviceidle sys-whitelist reset <nul
 echo Press Any Button To Go Back
 pause > nul
 goto nextpage
@@ -3265,7 +3296,7 @@ adb shell settings delete global looper_stats > nul 2>&1
 adb shell settings delete global sqlite_compatibility_wal_flags > nul 2>&1
 adb shell settings delete global autofill_logging_level > nul 2>&1
 adb shell device_config put on_device_personalization odp_background_jobs_logging_enabled true > nul 2>&1
-adb shell logcat -c
+adb shell logcat -c <nul
 echo.
 echo.
 echo [%r%^^!%w%] Please Restart Device To Finish The Process
@@ -3300,7 +3331,7 @@ goto saverpower
 cls
 title Power Saver : Off
 adb shell settings delete global low_power 
-adb shell settings delete global low_power_sticky
+adb shell settings delete global low_power_sticky <nul
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3310,7 +3341,7 @@ goto Battery
 cls
 title Power Saver : On
 adb shell settings put global low_power 1
-adb shell settings put global low_power_sticky 0
+adb shell settings put global low_power_sticky 0 <nul
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3350,7 +3381,7 @@ adb shell settings put global window_animation_scale 0.0
 adb shell settings put global transition_animation_scale 0.0
 adb shell settings put global animator_duration_scale 0.0
 adb shell settings put secure accessibility_disable_animations 1
-adb shell settings put global disable_window_blurs 1
+adb shell settings put global disable_window_blurs 1 <nul
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3406,7 +3437,7 @@ adb shell device_config delete systemui window_cornerRadius > nul 2>&1
 adb shell device_config delete systemui window_blur > nul 2>&1
 adb shell device_config delete systemui window_shadow > nul 2>&1
 adb shell device_config delete systemui reduce_animations > nul 2>&1
-adb shell device_config delete battery_saver reduce_animations > nul 2>&1
+adb shell device_config delete battery_saver reduce_animations <nul > nul 2>&1
 echo.
 echo.
 echo [%r%^^!%w%] Please Restart Device To Finish The Process
@@ -3449,7 +3480,7 @@ adb shell settings put global bluetooth_scan_always_enabled 0 > nul 2>&1
 adb shell settings put global network_recommendations_enabled 0 > nul 2>&1
 adb shell settings put global netstats_enabled 0 > nul 2>&1
 adb shell settings put global network_scoring_ui_enabled 0 > nul 2>&1
-adb shell settings put global wifi_watchdog_poor_network_test_enabled 0 > nul 2>&1
+adb shell settings put global wifi_watchdog_poor_network_test_enabled 0 <nul > nul 2>&1
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3468,7 +3499,7 @@ adb shell settings put global bluetooth_scan_always_enabled 1 > nul 2>&1
 adb shell settings delete global network_recommendations_enabled > nul 2>&1
 adb shell settings put global netstats_enabled 1 > nul 2>&1
 adb shell settings put global network_scoring_ui_enabled 1 > nul 2>&1
-adb shell settings delete global wifi_watchdog_poor_network_test_enabled > nul 2>&1
+adb shell settings delete global wifi_watchdog_poor_network_test_enabled <nul > nul 2>&1
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3501,7 +3532,7 @@ title Sync : Off
 :: SyncManager and isn't rootless-writable), but master_sync_status is at least
 :: the one DCX backs up, so a backup/restore now round-trips this toggle.
 adb shell settings put global master_sync_status 0
-adb shell device_config set_sync_disabled_for_tests persistent > nul 2>&1
+adb shell device_config set_sync_disabled_for_tests persistent <nul > nul 2>&1
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3512,7 +3543,7 @@ cls
 title Sync : On
 :: FIX (consistency): see :offsync - unify on master_sync_status.
 adb shell settings put global master_sync_status 1
-adb shell device_config set_sync_disabled_for_tests none > nul 2>&1
+adb shell device_config set_sync_disabled_for_tests none <nul > nul 2>&1
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3542,7 +3573,7 @@ title Motion : Off
 adb shell settings put system master_motion 0 > nul 2>&1
 adb shell settings put system motion_engine 0 > nul 2>&1
 adb shell settings put system air_motion_engine 0 > nul 2>&1
-adb shell settings put system air_motion_wake_up 0 > nul 2>&1
+adb shell settings put system air_motion_wake_up 0 <nul > nul 2>&1
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3554,7 +3585,7 @@ title Motion : On
 adb shell settings remove system master_motion > nul 2>&1
 adb shell settings remove system motion_engine > nul 2>&1
 adb shell settings remove system air_motion_engine > nul 2>&1
-adb shell settings remove system air_motion_wake_up > nul 2>&1
+adb shell settings remove system air_motion_wake_up <nul > nul 2>&1
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3582,7 +3613,7 @@ goto zram
 cls
 title ZRAM : Off
 adb shell settings put global zram 0
-adb shell settings put global zram_enabled 0
+adb shell settings put global zram_enabled 0 <nul
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3592,7 +3623,7 @@ goto Battery
 cls
 title ZRAM : On
 adb shell settings put global zram 1
-adb shell settings put global zram_enabled 1
+adb shell settings put global zram_enabled 1 <nul
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3633,7 +3664,7 @@ adb shell settings delete global activity_manager_constants > nul 2>&1
 :: immediately; the reboot prompted below completes it. (The debug.rs.*
 :: RenderScript props :onsvpp sets are no-ops on Android 12+ and have no
 :: clean default to restore, so they are left to the reboot.)
-adb shell setprop debug.force_low_ram false > nul 2>&1
+adb shell setprop debug.force_low_ram false <nul > nul 2>&1
 echo.
 echo.
 echo [%r%^^!%w%] Please Restart Device To Finish The Process
@@ -3659,7 +3690,7 @@ adb shell cmd power set-mode 1
 adb shell cmd power set-adaptive-power-saver-enabled true
 adb shell setprop debug.rs.max-threads 2
 adb shell setprop debug.rs.precision rs_fp_relaxed
-adb shell setprop debug.force_low_ram true
+adb shell setprop debug.force_low_ram true <nul
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3693,7 +3724,7 @@ adb shell settings put secure upload_log_pref 0 > nul 2>&1
 adb shell settings put system profiler.force_disable_ulog 1 > nul 2>&1
 adb shell settings put system profiler.force_disable_err_rpt 1 > nul 2>&1
 adb shell settings put secure usage_metrics_marketing_enabled 0 > nul 2>&1
-adb shell settings put secure USAGE_METRICS_UPLOAD_ENABLED 0 > nul 2>&1
+adb shell settings put secure USAGE_METRICS_UPLOAD_ENABLED 0 <nul > nul 2>&1
 echo Done , Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3710,7 +3741,7 @@ adb shell settings delete secure upload_log_pref > nul 2>&1
 adb shell settings delete system profiler.force_disable_ulog > nul 2>&1
 adb shell settings delete system profiler.force_disable_err_rpt > nul 2>&1
 adb shell settings delete secure usage_metrics_marketing_enabled > nul 2>&1
-adb shell settings delete secure USAGE_METRICS_UPLOAD_ENABLED > nul 2>&1
+adb shell settings delete secure USAGE_METRICS_UPLOAD_ENABLED <nul > nul 2>&1
 echo Done , Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3735,7 +3766,7 @@ goto toggleprofilling
 :offprof
 cls
 title Lock Profiling : Off
-adb shell device_config put runtime_native_boot disable_lock_profiling true
+adb shell device_config put runtime_native_boot disable_lock_profiling true <nul
 echo Done , Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3743,7 +3774,7 @@ goto Battery
 :onprof
 cls
 title Lock Profiling : ON
-adb shell device_config put runtime_native_boot disable_lock_profiling false
+adb shell device_config put runtime_native_boot disable_lock_profiling false <nul
 echo Done , Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3887,7 +3918,7 @@ echo    [Y] Apply    [N] Cancel
 choice /c:YN /n >nul
 if errorlevel 2 goto dispscaler
 adb shell wm size %NW%x%NH%
-adb shell wm density %ND%
+adb shell wm density %ND% <nul
 echo.
 echo  Applied. If anything looks off, come back and choose Reset.
 pause >nul
@@ -3996,7 +4027,7 @@ echo.
 echo    [Y] Apply    [N] Cancel
 choice /c:YN /n >nul
 if errorlevel 2 goto dispscaler_dpi
-adb shell wm density %ND%
+adb shell wm density %ND% <nul
 echo.
 echo  Done - density is now %ND% dpi. This persists across reboot.
 pause >nul
@@ -4028,7 +4059,7 @@ title Display Scaler : reset dpi
 call :logo
 echo  Restoring native density (%PD% dpi)...
 adb shell wm density reset
-adb shell settings delete secure display_density_forced > nul 2>&1
+adb shell settings delete secure display_density_forced <nul > nul 2>&1
 echo.
 echo  %y%Heads up:%w% native density can be larger than you like on some
 echo  phones. If the UI is now too big, pick a UI-size preset above
@@ -4048,7 +4079,7 @@ adb shell wm density reset
 :: left behind in the settings DB and survives a reboot. Delete the
 :: backing keys directly so the native size/density really come back.
 adb shell settings delete global display_size_forced > nul 2>&1
-adb shell settings delete secure display_density_forced > nul 2>&1
+adb shell settings delete secure display_density_forced <nul > nul 2>&1
 echo.
 echo  Done - back to native (%PW%x%PH% @ %PD% dpi).
 echo  %y%If the UI still looks the wrong size, reboot once to apply.%w%
@@ -4113,7 +4144,7 @@ goto gpurenderer
 cls
 title GPU Renderer : Skia Vulkan
 adb shell setprop debug.hwui.renderer skiavk
-adb shell setprop debug.renderengine.backend skiavkthreaded
+adb shell setprop debug.renderengine.backend skiavkthreaded <nul
 echo Renderer set to skiavk (Skia + Vulkan).
 echo.
 echo To verify after relaunching an app:
@@ -4129,7 +4160,7 @@ goto gpurenderer
 cls
 title GPU Renderer : Skia GL
 adb shell setprop debug.hwui.renderer skiagl
-adb shell setprop debug.renderengine.backend skiaglthreaded
+adb shell setprop debug.renderengine.backend skiaglthreaded <nul
 echo Renderer set to skiagl (Skia + OpenGL ES, default).
 pause > nul
 goto gpurenderer
@@ -4139,7 +4170,7 @@ cls
 title GPU Renderer : Clear
 :: An empty value makes Android fall back to the framework default
 adb shell setprop debug.hwui.renderer ""
-adb shell setprop debug.renderengine.backend ""
+adb shell setprop debug.renderengine.backend "" <nul
 echo Renderer override cleared. Framework default in effect after reboot.
 pause > nul
 goto gpurenderer
@@ -4203,7 +4234,7 @@ echo    [Y] Enable ANGLE now
 echo    [N] Cancel
 choice /c:YN /n > nul
 if errorlevel 2 goto angleall
-adb shell settings put global angle_gl_driver_all_angle 1
+adb shell settings put global angle_gl_driver_all_angle 1 <nul
 echo.
 echo Done. ANGLE is now enabled for all GLES apps.
 echo If apps start crashing, return here and Disable/Delete.
@@ -4213,7 +4244,7 @@ goto angleall
 :angleall_off
 cls
 title ANGLE for All Apps : OFF
-adb shell settings put global angle_gl_driver_all_angle 0
+adb shell settings put global angle_gl_driver_all_angle 0 <nul
 echo Done. Native GLES driver in use.
 pause > nul
 goto angleall
@@ -4221,7 +4252,7 @@ goto angleall
 :angleall_del
 cls
 title ANGLE for All Apps : Delete (default)
-adb shell settings delete global angle_gl_driver_all_angle
+adb shell settings delete global angle_gl_driver_all_angle <nul
 echo Setting removed. Framework picks per-app default again.
 pause > nul
 goto angleall
@@ -4279,21 +4310,21 @@ echo                                     %g%[%w%5%g%]%w% Back
 set "pm=" & set /p pm="Choose An Option >> "
 if "!pm!"=="1" (
     adb shell settings put global preferred_network_mode 9
-    adb shell settings put global preferred_network_mode1 9
+    adb shell settings put global preferred_network_mode1 9 <nul
     echo Set to LTE preferred.
     pause > nul
     goto netboost_prefmode
 )
 if "!pm!"=="2" (
     adb shell settings put global preferred_network_mode 12
-    adb shell settings put global preferred_network_mode1 12
+    adb shell settings put global preferred_network_mode1 12 <nul
     echo Set to LTE only. WARNING: voice calls only work if VoLTE is active.
     pause > nul
     goto netboost_prefmode
 )
 if "!pm!"=="3" (
     adb shell settings put global preferred_network_mode 20
-    adb shell settings put global preferred_network_mode1 20
+    adb shell settings put global preferred_network_mode1 20 <nul
     echo Set to 5G preferred.
     pause > nul
     goto netboost_prefmode
@@ -4323,7 +4354,7 @@ echo.
 ::
 :: What remains is the one genuinely safe, real key: the initial TCP
 :: receive window. Effect is modest; it does not touch the Wi-Fi stack.
-adb shell "settings put global tcp_default_init_rwnd 60" > nul 2>&1
+adb shell "settings put global tcp_default_init_rwnd 60" <nul > nul 2>&1
 echo Done - set tcp_default_init_rwnd (initial TCP receive window).
 echo.
 echo This change is safe and does not alter Wi-Fi behaviour.
@@ -4337,7 +4368,7 @@ cls
 title Network Boost : DNS
 echo Setting private DNS to Cloudflare (1.1.1.1 / one.one.one.one)...
 adb shell settings put global private_dns_mode hostname
-adb shell settings put global private_dns_specifier one.one.one.one
+adb shell settings put global private_dns_specifier one.one.one.one <nul
 echo.
 echo  To use Google DNS instead, run manually:
 echo    settings put global private_dns_specifier dns.google
@@ -4362,7 +4393,7 @@ adb shell settings delete global wifi_sleep_policy > nul 2>&1
 adb shell settings put global private_dns_mode opportunistic > nul 2>&1
 adb shell settings delete global private_dns_specifier > nul 2>&1
 adb shell settings delete global preferred_network_mode > nul 2>&1
-adb shell settings delete global preferred_network_mode1 > nul 2>&1
+adb shell settings delete global preferred_network_mode1 <nul > nul 2>&1
 echo All Network Boost settings reverted.
 pause > nul
 goto netboost
@@ -4420,7 +4451,7 @@ adb shell cmd appops set com.google.android.gms WAKE_LOCK ignore
 adb shell cmd appops set com.google.android.gms START_FOREGROUND ignore
 adb shell cmd appops set com.google.android.gms INSTANT_APP_START_FOREGROUND ignore
 adb shell am set-inactive --user 0 com.google.android.gms true
-adb shell am set-standby-bucket --user 0 com.google.android.gms never
+adb shell am set-standby-bucket --user 0 com.google.android.gms never <nul
 echo Press Any Button To Go Back
 pause > nul
 goto Gaming
@@ -4436,7 +4467,7 @@ adb shell cmd appops set com.google.android.gms WAKE_LOCK allow
 adb shell cmd appops set com.google.android.gms START_FOREGROUND allow
 adb shell cmd appops set com.google.android.gms INSTANT_APP_START_FOREGROUND allow
 adb shell am set-inactive --user 0 com.google.android.gms false
-adb shell am set-standby-bucket --user 0 com.google.android.gms active
+adb shell am set-standby-bucket --user 0 com.google.android.gms active <nul
 title GMS : On
 echo Press Any Button To Go Back
 pause > nul
@@ -4482,7 +4513,7 @@ if "%valid%"=="0" (
     goto thermal
 )
 cls
-adb shell cmd thermalservice override-status %kb%
+adb shell cmd thermalservice override-status %kb% <nul
 echo Press Any Button To Go Back.
 pause > nul
 goto Gaming
@@ -4509,7 +4540,7 @@ goto package
 @echo off
 cls
 title Package Verifier : Off
-adb shell settings put global package_verifier_enable 0
+adb shell settings put global package_verifier_enable 0 <nul
 echo Press Any Button To Go Back
 pause > nul
 goto Gaming
@@ -4518,7 +4549,7 @@ goto Gaming
 @echo off
 cls
 title Package Verifier : On
-adb shell settings put global package_verifier_enable 1
+adb shell settings put global package_verifier_enable 1 <nul
 echo Press Any Button To Go Back
 pause > nul
 goto Gaming
@@ -4547,7 +4578,7 @@ title Remove Settings
 set "package=" & set /p package="Put Your Package Name Here >> "
 if "!package!"=="" goto Gaming
 adb shell device_config delete game_overlay %package% > nul
-adb shell cmd game reset --user 0 %package%
+adb shell cmd game reset --user 0 %package% <nul
 cls
 echo.
 echo.
@@ -4565,7 +4596,7 @@ title Low Settings
 set "package=" & set /p package="Put Your Package Name Here >> "
 if "!package!"=="" goto Gaming
 adb shell device_config put game_overlay %package% mode=1
-adb shell cmd game downscale 0.55 %package%
+adb shell cmd game downscale 0.55 %package% <nul
 cls
 echo.
 echo.
@@ -4584,7 +4615,7 @@ set "package=" & set /p package="Put Your Package Name Here >> "
 if "!package!"=="" goto Gaming
 adb shell device_config put game_overlay %package% mode=1
 adb shell device_config get game_overlay %package%
-adb shell cmd game downscale 0.75 %package%
+adb shell cmd game downscale 0.75 %package% <nul
 cls
 echo.
 echo.
@@ -4866,7 +4897,7 @@ if errorlevel 1 (
     pause >nul
     goto appmgr_restrict
 )
-adb shell cmd appops set %pkg% RUN_IN_BACKGROUND deny
+adb shell cmd appops set %pkg% RUN_IN_BACKGROUND deny <nul
 echo.
 echo Done - %pkg% is now denied background execution.
 pause >nul
@@ -4886,7 +4917,7 @@ if errorlevel 1 (
     pause >nul
     goto appmgr_allow
 )
-adb shell cmd appops set %pkg% RUN_IN_BACKGROUND allow
+adb shell cmd appops set %pkg% RUN_IN_BACKGROUND allow <nul
 echo.
 echo Done - %pkg% may run in the background again.
 pause >nul
@@ -4928,7 +4959,7 @@ echo  About to remove: %pkg%
 echo    [Y] Remove    [N] Cancel
 choice /c:YN /n >nul
 if errorlevel 2 goto appmgr
-adb shell pm uninstall -k --user 0 %pkg%
+adb shell pm uninstall -k --user 0 %pkg% <nul
 echo.
 echo Done. To bring it back: App Manager -^> Restore (or a factory reset).
 pause >nul
@@ -4943,7 +4974,7 @@ echo  Works as long as it was removed with -k and not fully wiped.
 echo.
 set "pkg=" & set /p pkg="Package name to restore (blank = cancel) >> "
 if "!pkg!"=="" goto appmgr
-adb shell cmd package install-existing %pkg%
+adb shell cmd package install-existing %pkg% <nul
 echo.
 echo If it was present, %pkg% is restored for the current user.
 pause >nul
@@ -5074,6 +5105,7 @@ pause >nul
 goto appmgr_suggest
 
 :logo
+chcp 65001 >nul
 echo.
 echo.
 echo                                     %m%██████╗  ██████╗██╗  ██╗
