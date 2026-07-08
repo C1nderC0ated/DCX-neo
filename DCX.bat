@@ -2175,20 +2175,20 @@ if "!wl!"=="2" (
     pause > nul
     goto wakelockaudit_menu
 )
-if "!wl!"=="3" (
+if not "!wl!"=="3" goto _skwl3
     cls
     echo Currently held wake locks:
     echo.
-    adb shell dumpsys power 2^>nul ^| findstr /C:"PARTIAL_WAKE_LOCK"
+    adb shell dumpsys power ^<nul 2^>nul ^| findstr /C:"PARTIAL_WAKE_LOCK"
     echo.
     echo Doze state:
-    adb shell dumpsys deviceidle 2^>nul ^| findstr /C:"mState=" /C:"mScreenOn"
+    adb shell dumpsys deviceidle ^<nul 2^>nul ^| findstr /C:"mState=" /C:"mScreenOn"
     echo.
     echo Full report at: %WLREPORT%
     echo.
     pause > nul
     goto wakelockaudit_menu
-)
+:_skwl3
 if "!wl!"=="4" goto nextpage
 goto wakelockaudit_menu
 :: ===================================================================
@@ -2243,13 +2243,13 @@ if "!rl!"=="4" (
     pause > nul
     goto refreshlock
 )
-if "!rl!"=="5" (
-    adb shell settings delete system min_refresh_rate
-    adb shell settings delete system peak_refresh_rate
+if not "!rl!"=="5" goto _skrl5
+    adb shell settings delete system min_refresh_rate <nul
+    adb shell settings delete system peak_refresh_rate <nul
     echo Defaults restored.
     pause > nul
     goto refreshlock
-)
+:_skrl5
 if "!rl!"=="6" goto nextpage
 goto refreshlock
 :: ===================================================================
@@ -2271,18 +2271,18 @@ echo                                     %g%[%w%2%g%]%w% Unforce (return to norm
 echo                                     %g%[%w%3%g%]%w% Show current state
 echo                                     %g%[%w%4%g%]%w% Back
 set "fd=" & set /p fd="Choose An Option >> "
-if "!fd!"=="1" (
-    adb shell dumpsys deviceidle force-idle
+if not "!fd!"=="1" goto _skfd1
+    adb shell dumpsys deviceidle force-idle <nul
     echo Doze forced.
     pause > nul
     goto forcedoze
-)
-if "!fd!"=="2" (
-    adb shell dumpsys deviceidle unforce
+:_skfd1
+if not "!fd!"=="2" goto _skfd2
+    adb shell dumpsys deviceidle unforce <nul
     echo Returned to normal scheduling.
     pause > nul
     goto forcedoze
-)
+:_skfd2
 if "!fd!"=="3" (
     cls
     for /f "delims=" %%i in ('adb shell dumpsys deviceidle ^<nul ^| findstr /C:"mState=" /C:"mLightState="') do echo   %%i
@@ -4329,13 +4329,13 @@ if "!pm!"=="3" (
     pause > nul
     goto netboost_prefmode
 )
-if "!pm!"=="4" (
-    adb shell settings delete global preferred_network_mode
-    adb shell settings delete global preferred_network_mode1
+if not "!pm!"=="4" goto _skpm4
+    adb shell settings delete global preferred_network_mode <nul
+    adb shell settings delete global preferred_network_mode1 <nul
     echo Default restored.
     pause > nul
     goto netboost_prefmode
-)
+:_skpm4
 if "!pm!"=="5" goto netboost
 goto netboost_prefmode
 
