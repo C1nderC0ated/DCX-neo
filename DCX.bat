@@ -140,6 +140,7 @@ echo.
 echo                                        %gold%Wireless ADB%w%
 echo                                            [13]
 echo.
+
 :menu_ask
 :: FIX (press-twice): re-prompt WITHOUT redrawing on empty/invalid input so a
 :: phantom empty line handed to set /p right after the uptime/cpuinfo probes is
@@ -1989,6 +1990,7 @@ echo.
 echo Press Any Button To Go Back
 pause > nul
 goto Optimize
+
 :cache_wipe_root_ok
 echo Wiping all app cache folders...
 :: FIX: was `rm -rf \$p/*` - the backslash makes the inner su-shell treat $p as
@@ -2188,6 +2190,7 @@ if not "!wl!"=="3" goto _skwl3
     echo.
     pause > nul
     goto wakelockaudit_menu
+	
 :_skwl3
 if "!wl!"=="4" goto nextpage
 goto wakelockaudit_menu
@@ -2249,6 +2252,7 @@ if not "!rl!"=="5" goto _skrl5
     echo Defaults restored.
     pause > nul
     goto refreshlock
+	
 :_skrl5
 if "!rl!"=="6" goto nextpage
 goto refreshlock
@@ -2276,12 +2280,14 @@ if not "!fd!"=="1" goto _skfd1
     echo Doze forced.
     pause > nul
     goto forcedoze
+	
 :_skfd1
 if not "!fd!"=="2" goto _skfd2
     adb shell dumpsys deviceidle unforce <nul
     echo Returned to normal scheduling.
     pause > nul
     goto forcedoze
+	
 :_skfd2
 if "!fd!"=="3" (
     cls
@@ -4335,6 +4341,7 @@ if not "!pm!"=="4" goto _skpm4
     echo Default restored.
     pause > nul
     goto netboost_prefmode
+	
 :_skpm4
 if "!pm!"=="5" goto netboost
 goto netboost_prefmode
