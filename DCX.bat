@@ -1176,8 +1176,20 @@ goto animspeed
 
 :animspeed_custom
 echo Enter a decimal value between 0 and 2 (e.g. 0.5):
-set "asv=" & set /p asv="Value >> "
+set "asv=" & set /p asv="Value (blank = cancel) >> "
+if "!asv!"=="" goto animspeed
+:: FIX: the value used to go into three "settings put" completely unchecked -
+:: empty/garbage/quote input broke the commands or stored junk scales. Accept
+:: a comma decimal (1,5 -> 1.5), then gate to the documented 0-2 range
+:: (accepts 0, 1, 2, 0.75, .5, 2.0 and the like).
+set "asv=!asv:,=.!"
+echo !asv!| findstr /r /x /c:"[0-2]" /c:"[01]\.[0-9][0-9]*" /c:"2\.0*" /c:"\.[0-9][0-9]*" >nul || goto animspeed_custom_bad
 goto animspeed_apply
+
+:animspeed_custom_bad
+echo [%r%^^!%w%] Invalid value. Use a number between 0 and 2, e.g. 0.5, 0.75, 1.
+timeout /t 2 /nobreak >nul
+goto animspeed_custom
 
 :animspeed_apply
 adb shell settings put global window_animation_scale %asv%
@@ -2574,8 +2586,18 @@ title Removing system apps from Doze whitelist...
 :: DCX may be launched from a read-only or shared location. Read it back with
 :: `type` so the quoted %TEMP% path is honored (for /f in ("path") would treat a
 :: quoted path as a literal string, not a filename).
-adb shell dumpsys deviceidle sys-whitelist | findstr /R "^[ ]*[a-zA-Z0-9_.]*,[0-9]*$" > "%TEMP%\dcx_idle_whitelist.txt"
-for /f "tokens=1 delims=," %%A in ('type "%TEMP%\dcx_idle_whitelist.txt"') do (
+:: FIX (parser): the old Windows-side filter `findstr /R "...,[0-9]*$"` had
+:: two ways to match NOTHING and finish "Done" without removing anything:
+:: (1) findstr's $ anchor only matches right before a CR, and adb output
+:: piped on Windows can arrive LF-only; (2) builds whose dump prints bare
+:: package names without the ",uid" suffix never matched at all. Filter on
+:: the DEVICE instead, where line endings and tools are deterministic:
+:: grep keeps real package lines (with or without ",uid"), sed strips the
+:: uid. toybox grep/sed ship on every Android 6+ build DCX targets; if one
+:: is somehow missing the file comes back empty and the loop is a no-op -
+:: the same fail-safe as before, never a wrong removal.
+adb shell "dumpsys deviceidle sys-whitelist | grep -E '^[[:blank:]]*[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z0-9_]+)+(,[0-9]+)?[[:blank:]]*$' | sed 's/[[:blank:]]//g; s/,.*//'" > "%TEMP%\dcx_idle_whitelist.txt"
+for /f "delims=" %%A in ('type "%TEMP%\dcx_idle_whitelist.txt"') do (
     echo %%A | findstr /I "gms gsf shell ims downloads providers settings systemui inputmethod telecom telephony bluetooth dialer mms phone alarm calendar fused" > nul
     if errorlevel 1 (
         adb shell cmd deviceidle sys-whitelist -%%A
@@ -3588,10 +3610,13 @@ goto Battery
 @echo off
 cls
 title Motion : On
-adb shell settings remove system master_motion > nul 2>&1
-adb shell settings remove system motion_engine > nul 2>&1
-adb shell settings remove system air_motion_engine > nul 2>&1
-adb shell settings remove system air_motion_wake_up <nul > nul 2>&1
+:: FIX: "settings remove" is not a real verb (stock verbs: get/put/delete/
+:: reset/list), so Motion "On" silently reverted nothing - the error was
+:: hidden by >nul 2>&1. "delete" restores the OEM default as intended.
+adb shell settings delete system master_motion > nul 2>&1
+adb shell settings delete system motion_engine > nul 2>&1
+adb shell settings delete system air_motion_engine > nul 2>&1
+adb shell settings delete system air_motion_wake_up <nul > nul 2>&1
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3685,7 +3710,10 @@ goto Battery
 @echo off
 cls
 title Extreme Power Saver : On
-adb shell cmd battery reset
+:: FIX: this ran BOTH "cmd battery reset" and "dumpsys battery reset" -
+:: two interfaces to the same operation (clears any fake-battery state so
+:: the saver reads the real battery). One call is enough; dumpsys is kept
+:: because it exists on older builds where the "cmd" service shell may not.
 adb shell dumpsys battery reset
 adb shell device_config put activity_manager bg_current_drain_auto_restrict_abusive_apps_enabled true
 adb shell device_config put activity_manager bg_auto_restrict_abusive_apps 1
@@ -4300,6 +4328,12 @@ goto netboost
 ::   20 = LTE / NR / WCDMA       (5G preferred, fall back to LTE/3G)
 ::   1  = GSM only (2G)
 :: Note: some operators / SIM cards override this on the radio side.
+:: Both `preferred_network_mode` (legacy/default) and `..._mode1` are
+:: written ON PURPOSE: the suffixed key is per-SUBSCRIPTION and subIds
+:: are 1-based, so mode1 is the FIRST SIM's usual subId - not a second
+:: slot. On devices where the active subId isn't 1 (SIM swaps bump it)
+:: the extra key is inert, and "Restore default" deletes both keys, so
+:: this stays fully reversible either way.
 :: -----------------------------------------------------------------
 :netboost_prefmode
 cls
