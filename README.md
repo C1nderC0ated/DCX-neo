@@ -161,7 +161,7 @@ for spotting the app draining your battery.
 | 6 | **Run Tweak SurfaceFlinger** | Refresh-rate-specific SF timing tweaks (below). |
 | 7 | **Run Clear Last Used** | Reset app usage stats. |
 | 8 | **Compile All Apps** | Recompile **every** app (modes below). |
-| 9 | **Animation Speed** | Set all three animation scales (0 / 0.5 / 0.75 / 1.0 / custom). |
+| 9 | **Animation Speed** | Set all three animation scales (0 / 0.5 / 0.75 / 1.0 / custom). Custom input is validated to the documented 0–2 range (comma decimals like `1,5` accepted). |
 | 0 | **Back** | — |
 
 **Compile All Apps — modes:** `everything-profile` (**recommended** — heavy
