@@ -339,7 +339,7 @@ set "_bkok=0"
 if exist "%BAKFILE%" findstr /b /c:"call :dcx_do" "%BAKFILE%" >nul 2>&1 && set "_bkok=1"
 if "%_bkok%"=="0" (
     echo  %r%Backup FAILED%w% - no usable restore file was written.
-    echo    Tried: %BAKFILE%
+    echo    Tried: !BAKFILE!
     echo.
     echo  That folder is often blocked by antivirus or Controlled Folder Access.
     echo  Allow it, or run DCX from another location, then try again.
@@ -382,10 +382,20 @@ set "_out=%~3"
 set "_val="
 for /f "delims=" %%v in ('adb shell settings get %_ns% %_key% 2^>nul ^<nul') do set "_val=%%v"
 if "!_val!"=="" set "_val=null"
+:: FIX (found by the new [FAIL] report, on a real restore): adb strips ONE level of
+:: quoting. cmd removes the quotes around the value when building adb's argv, adb
+:: re-joins argv with spaces, and the ANDROID shell then sees the value BARE - so a
+:: value holding ( ) ; & | breaks there, not here. The real case is sysui_qs_tiles,
+:: whose value contains custom(com.huawei.calculator/.quicksetting.QuickSettingService):
+:: restoring it always failed silently, and the old flat "Done." never said so.
+:: Fix: pass the whole remote command as ONE double-quoted argument (cmd hands adb a
+:: single string) and single-quote the value inside it (the device shell keeps it
+:: whole). Any literal quote in the value is escaped POSIX-style as '\''.
+set "_sv=!_val:'='\''!"
 if /i "!_val!"=="null" (
-    >>"%_out%" echo call :dcx_do settings delete %_ns% %_key%
+    >>"%_out%" echo call :dcx_do "settings delete %_ns% %_key%"
 ) else (
-    >>"%_out%" echo call :dcx_do settings put %_ns% %_key% "!_val!"
+    >>"%_out%" echo call :dcx_do "settings put %_ns% %_key% '!_sv!'"
 )
 endlocal
 exit /b
@@ -399,10 +409,12 @@ set "_out=%~3"
 set "_val="
 for /f "delims=" %%v in ('adb shell device_config get %_ns% %_key% 2^>nul ^<nul') do set "_val=%%v"
 if "!_val!"=="" set "_val=null"
+:: single-quote for the device shell - see the note in :_bk_settings.
+set "_sv=!_val:'='\''!"
 if /i "!_val!"=="null" (
     >>"%_out%" echo :: %_ns%/%_key% was unset at backup time
 ) else (
-    >>"%_out%" echo call :dcx_do device_config put %_ns% %_key% "!_val!"
+    >>"%_out%" echo call :dcx_do "device_config put %_ns% %_key% '!_sv!'"
 )
 endlocal
 exit /b
@@ -417,10 +429,12 @@ set "_key=%~1"
 set "_out=%~2"
 set "_val="
 for /f "delims=" %%v in ('adb shell getprop %_key% 2^>nul ^<nul') do set "_val=%%v"
+:: single-quote for the device shell - see the note in :_bk_settings.
+set "_sv=!_val:'='\''!"
 if "!_val!"=="" (
     >>"%_out%" echo :: prop %_key% was unset at backup time - not restoring
 ) else (
-    >>"%_out%" echo call :dcx_do setprop %_key% "!_val!"
+    >>"%_out%" echo call :dcx_do "setprop %_key% '!_sv!'"
 )
 endlocal
 exit /b
@@ -7063,7 +7077,7 @@ if not "%_dx_fail%"=="0" (
     echo.
     echo   Note: a few failures are normal - some system packages can't
     echo   be re-compiled. The full log is at:
-    echo     %TEMP%\dcx_bgdex.txt
+    echo     !TEMP!\dcx_bgdex.txt
     echo   ^(leaving it in place so you can inspect it^)
 ) else (
     echo   No failures. All good.
