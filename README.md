@@ -4,7 +4,10 @@
 
 DCX neo is a Windows batch (`.bat`) front-end for **ADB**. Instead of typing
 dozens of `adb shell` commands by hand, you pick options from a text menu and
-DCX neo runs the right performance, battery and diagnostic tweaks for you.
+DCX neo runs the right performance, battery and diagnostic tweaks for you. It
+also covers the SystemUI-Tuner and SetEdit ground without root: status bar,
+quick-settings tiles, the volume cap, and a settings explorer with
+snapshot/diff and profiles.
 
 > **Developed by AnOrmaluser12 · Updated by S1nt3r**
 
@@ -24,7 +27,7 @@ DCX neo is a community tool, not affiliated with Google or any manufacturer.
 ## Table of contents
 
 - [Requirements](#requirements) · [Setup](#setup) · [First run](#first-run)
-- [Menu reference](#menu-reference): [Main](#main-menu) · [Gaming](#gaming) · [Battery](#battery) · [Optimize](#optimize-android) · [Auto](#auto-setup) · [CheckSetting](#checksetting-diagnostics) · [Backup & Restore](#backup--restore) · [Benchmark](#benchmark) · [App Manager](#app-manager) · [Wireless ADB](#wireless-adb)
+- [Menu reference](#menu-reference): [Main](#main-menu) · [Gaming](#gaming) · [Battery](#battery) · [Optimize](#optimize-android) · [Auto](#auto-setup) · [CheckSetting](#checksetting-diagnostics) · [Tweaks](#tweaks) · [Backup & Restore](#backup--restore) · [Benchmark](#benchmark) · [App Manager](#app-manager) · [Wireless ADB](#wireless-adb) · [Settings Tools](#settings-tools)
 - [What actually works](#what-actually-works-vs-placebo) · [Persistence & root](#persistence--root) · [Troubleshooting](#troubleshooting) · [Credits](#credits)
 
 ---
@@ -75,13 +78,15 @@ Gaming, Battery and Optimize screens show a live header with **uptime** and
 | 3 | **Optimize Android** | One-shot maintenance (dexopt, fstrim, cache, compile…). |
 | 4 | **Auto** | Applies a batch of safe optimisations in one go. |
 | 5 | **CheckSetting** | Full device diagnostic report. |
-| 6 | **App Mgr** | Background restriction + debloat (remove/restore apps). |
+| 6 | **Tweaks** | Status bar, quick-settings tiles, volume cap, font scale, night modes and more — the SystemUI-Tuner-style toggles. |
 | 7 | **Reboot** | Reboots the device. |
 | 8 | **Exit** | Closes DCX neo (stops the ADB server when appropriate). |
 | 9 | **Shell** | Interactive `adb shell`. |
 | 10 | **Benchmark** | Quick CPU + storage micro-benchmark. |
 | 11 / 12 | **Backup / Restore** | Save / re-apply toggleable settings. |
 | 13 | **Wireless ADB** | Pair (Android 11+), connect by IP, enable via USB (`adb tcpip`) with auto-IP, disconnect. |
+| 14 | **App Mgr** | Background restriction + debloat (remove/restore apps). |
+| 15 | **Settings Tools** | Explorer, snapshot & diff, profiles — these work on *any* settings key, not just the curated ones. |
 
 ---
 
@@ -206,10 +211,56 @@ consumers. Open it in Notepad, paginate with `MORE`, or show an inline summary.
 
 ---
 
+### Tweaks
+
+SystemUI Tuner and SetEdit territory, with no root and no companion app — the
+`adb shell` user already holds `WRITE_SECURE_SETTINGS`, which is exactly the
+permission those apps ask you to grant them.
+
+**Every write here is undo-protected**: the previous value is captured to
+`%USERPROFILE%\dcx_backups\dcx_explorer_undo_<timestamp>.bat` before anything
+changes, and all of these keys are also covered by
+[Backup](#backup--restore).
+
+| # | Option | What it does |
+|---|---|---|
+| 1 | **Clock — show seconds** | `secure clock_seconds`. Applies live — SystemUI watches the key. Heavily skinned clocks (some OneUI) ignore it. |
+| 2 | **Battery percent** | `system status_bar_show_battery_percent`. Live on AOSP-based status bars. |
+| 3 | **Icon blacklist** | `secure icon_blacklist` — hide status bar icons (rotate, alarm, bluetooth, DND, VPN…). 15-slot picker plus free text; icons that answer to two names write both. Re-hiding an icon can't pile up duplicates. |
+| 4 | **Demo mode** | Freezes the status bar into a clean fixed state — full signal, no clutter, 12:00 — for screenshots. Purely cosmetic; ends on exit or reboot. |
+| 5 | **QS tile editor** | `secure sysui_qs_tiles`. Add the tiles Android ships but doesn't show: `dream`, `font_scaling`, `qr_code_scanner`, `onehanded`, `reverse`, `hearing_devices`, `notes`, `reduce_brightness`… Add at the end or the front, remove, reset. Applies live. |
+| 6 | **Volume cap** | The **software** safe-media-volume cap. ⚠️ see below. |
+| 7 | **Heads-up notifications** | `global heads_up_notifications_enabled` — pop-ups on/off for every app at once. |
+| 8 | **Font scale** | `system font_scale`, clamped 0.5–2.0 (outside that, layouts clip and dialogs lose buttons). Comma decimals accepted: `1,15` → `1.15`. |
+| 9 | **Long-press timeout** | `secure long_press_timeout`. ⚠️ Battery → Animation → **Off** also pins this key to 250 and **On** deletes it — whichever you run last wins. |
+| 10 | **Stay awake while charging** | `global stay_on_while_plugged_in`, a bitmask: AC=1, USB=2, wireless=4, dock=8 (add them; 0 = off). Rough on an OLED panel over time. |
+| 11 | **Night** | Two different features share the name: **dark theme** (`cmd uimode night`) and **night light**, the warm blue-light filter (`night_display_*`). Both live here, labelled apart. |
+| 12 | **More device tweaks** | Camera gestures (double-tap power, twist to flip), charging sounds/vibration, storage low-space warning, battery-saver auto-trigger, freeform windows (needs a reboot), default install location. |
+| 13 | **Back** | — |
+
+> **⚠️ Volume cap — what it is, and what it isn't.** It lifts the **software**
+> cap and the *"raise above safe level?"* nag (the EU hearing-safety rule) by
+> writing `global audio_safe_volume_state`. It does **not** raise the hardware
+> amplifier ceiling — that lives in vendor gain tables (the engineering menu)
+> and needs root. Android reads the key **once at boot** and re-writes it back
+> to *active* after every boot on a capped device, so this is a **per-boot**
+> switch: set it, reboot, and that session runs uncapped. To re-arm it after
+> each reboot without walking the menus, keep a
+> [Profile](#settings-tools). On Android 14+ a *sound dose* regime replaces the
+> old cap entirely; the screen offers its live levers instead.
+
+> **Dark theme won't budge?** Some ROMs lock night mode, and the uimode service
+> then refuses the change **silently**. DCX prints the mode the device reports
+> back rather than claiming success — if the readout doesn't move, that's the
+> honest answer, not a bug.
+
+---
+
 ### Backup & Restore
 
 **Backup** reads every Settings.Global/System key, `device_config` flag and
-property DCX neo can toggle, and writes a **stand-alone restore `.bat`** to
+property DCX neo can toggle — **47 targets**, including every
+[Tweaks](#tweaks) key — and writes a **stand-alone restore `.bat`** to
 `%USERPROFILE%\dcx_backups\dcx_backup_<timestamp>.bat`:
 
 ```bat
@@ -245,8 +296,8 @@ devices that lack `seq`.
 
 ### App Manager
 
-App-level controls (background restriction + debloat). **Everything here is
-reversible.**
+App-level controls (background restriction + debloat), main menu **14**.
+**Everything here is reversible.**
 
 | # | Option | What it does |
 |---|---|---|
@@ -302,6 +353,21 @@ The old standalone `wirelessadb.bat` is **removed** — this menu replaces it
 
 ---
 
+### Settings Tools
+
+The generic half. These work on **any** key in the settings provider, including
+every key DCX has no menu row for — the [Tweaks](#tweaks) list is curated, this
+one isn't. Reachable from the main menu (**15**).
+
+| # | Option | What it does |
+|---|---|---|
+| 1 | **Settings explorer** | `list` / `get` / `put` / `delete` across `system`, `secure` and `global`. Every write echoes the exact command, asks to confirm, shows a read-back, and saves the old value to an undo script first. Keys and values are whitelist-validated — anything with spaces or shell metacharacters is declined toward **Shell** rather than mangled. |
+| 2 | **Snapshot & diff** | Dump all three tables to `%USERPROFILE%\dcx_snapshots\`, flip a toggle in the device's own UI, dump again, diff. This tells you **exactly which key that toggle writes** — the fastest way to find OEM-specific settings DCX doesn't know about. |
+| 3 | **Profiles** | A plain text file in `%USERPROFILE%\dcx_profiles\`, one key per line: `namespace`\|`key`\|`value`, or `DELETE` as the value to remove a key. Save the current tweak keys, then apply the profile to re-write them all in one pass — this is the answer to the volume cap's per-boot re-arm. Lines starting with `#` are ignored, and every line is re-validated on the way in, so a hand-edited typo is skipped with a reason rather than executed. |
+| 4 | **Back** | — |
+
+---
+
 ## What actually works vs. placebo
 
 Android only reads a specific set of settings, properties and `device_config`
@@ -325,6 +391,12 @@ reads** — they're stored but do nothing. DCX neo focuses on commands with a
   `persist.log.tag "*:S"`** — real battery/log switches.
 - **`cmd appops … RUN_IN_BACKGROUND deny`, `pm uninstall -k --user 0`** —
   background restriction and (reversible) debloat (App Manager).
+- **`clock_seconds`, `icon_blacklist`, `sysui_qs_tiles`** — real SystemUI
+  tunables. SystemUI *observes* these keys, so they apply live with no restart:
+  the tile list still reads from `sysui_qs_tiles` on current AOSP, content
+  observer and all.
+- **`audio_safe_volume_state`** — real, but honestly **per-boot**; Android
+  re-arms it at every boot (see [Tweaks](#tweaks)).
 
 > **Not every toggle is effective.** The **Account Sync** switch writes
 > `master_sync_status`, which is a **placebo on modern Android** — nothing
@@ -333,9 +405,19 @@ reads** — they're stored but do nothing. DCX neo focuses on commands with a
 > without root (on Android 17, writing `master_sync_status 0` left *Auto sync:
 > true* unchanged). It's kept only so Backup/Restore round-trips the value.
 
+> **Some famous tweaks are dead, and DCX won't ship them as decoration.**
+> `policy_control` (the old immersive-mode key) — the framework class that
+> implemented it is **gone from AOSP**, so it stores fine and does nothing on
+> Android 11+. `sysui_qqs_count` — modern SystemUI no longer reads it.
+> Tethering flags sit behind carrier entitlement checks that `settings` can't
+> touch. All three would look like features and be placebo, so they aren't in
+> the menus. If you want them anyway, **Settings Tools → Explorer** will write
+> any key you like — declining a menu row isn't blocking you.
+
 > CPU/GPU frequency and governor changes are **not** possible via `setprop` —
-> they live in kernel sysfs and need **root**. DCX neo doesn't pretend
-> otherwise.
+> they live in kernel sysfs and need **root**. Neither is the **speaker
+> amplifier ceiling**: the engineering-menu "max volume" sliders edit vendor
+> gain tables, root only. DCX neo doesn't pretend otherwise.
 
 ---
 
@@ -348,6 +430,11 @@ reads** — they're stored but do nothing. DCX neo focuses on commands with a
 - **Android 14+** routes dexopt through **ART Service**; DCX neo detects this
   at startup and adjusts the compile/dexopt commands automatically (details in
   [Optimize Android](#optimize-android)).
+- Two keys are **deliberately not permanent**, because Android won't let them
+  be: the **volume cap** is re-armed at every boot, and **freeform windows**
+  need a reboot to take effect at all. For the first, keep a **Profile**
+  ([Settings Tools](#settings-tools) → 3) and apply it after a reboot — that's
+  the no-root, no-daemon equivalent of SetEdit's on-device boot queue.
 
 ---
 
@@ -371,7 +458,13 @@ reads** — they're stored but do nothing. DCX neo focuses on commands with a
 | **ART Service printed a wall of text** | Not errors — older versions dumped a line per package. Current builds show a summary (optimised/failed) and only real failures; a few failures are normal. |
 | **"Unknown option: --compile-layouts" / "Unknown command"** | Expected on Android 12+ (removed; gone on 14+ under ART Service). DCX neo skips it automatically and continues. |
 | **Bootloop / something broke after debloat** | Boot to recovery and **factory reset** restores every removed app (they're never deleted from `/system`). To revert a single app, use **App Mgr → Restore**. |
-| **Want to undo everything** | **Restore** a backup, or reboot for non-persistent changes. |
+| **Volume cap is back after a reboot** | By design, not a bug — Android re-writes `audio_safe_volume_state` to *active* at boot on a capped device. Re-apply it, or keep a **Profile** (Settings Tools → 3) and apply that after each reboot. |
+| **Dark theme won't switch** | Some ROMs lock night mode and the service ignores the request **silently**. The readout on the Night screen is the device's own answer — if it doesn't move, the ROM refused. |
+| **A quick-settings tile I added never appeared** | The spec was wrong. SystemUI drops unknown tile specs instead of breaking the panel, so a typo costs you the tile quietly. Use the names listed on the Tile editor screen. |
+| **Clock seconds / battery percent did nothing** | Heavily skinned status bars (some OneUI, EMUI) don't read the AOSP keys. The key is set; the skin ignores it. Nothing to fix. |
+| **Freeform windows did nothing** | It needs a **reboot** — it's a developer-options key. The screen offers one. |
+| **A profile line was skipped when I applied it** | Deliberate. Profiles are hand-editable, so every line is re-validated: a bad namespace, key or value prints `skip - …` and the rest of the profile still runs. |
+| **Want to undo everything** | **Restore** a backup, or run the undo script a Tweaks/Explorer write left in `dcx_backups\`, or reboot for non-persistent changes. |
 | **Colours / alignment look wrong** | Use Windows Terminal or a recent `cmd.exe`; very old consoles don't render ANSI colours or box characters. |
 
 ---
