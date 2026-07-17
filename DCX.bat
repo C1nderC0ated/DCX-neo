@@ -126,7 +126,7 @@ echo.
 echo                           %r%Gaming%w%         %gold%Battery%w%   %g%Optimize Android%w%
 echo                             [1]            [2]            [3]                                        
 echo.
-echo                            %d%Auto%w%       %d%CheckSetting%w%      %d%App Mgr%w%
+echo                            %d%Auto%w%       %d%CheckSetting%w%      %d%Tweaks%w%
 echo                             [4]            [5]            [6]
 echo.
 echo.
@@ -137,8 +137,8 @@ echo.
 echo                          %m%Benchmark%w%        %m%Backup%w%         %b%Restore%w%
 echo                             [10]           [11]           [12]
 echo.
-echo                                        %gold%Wireless ADB%w%
-echo                                            [13]
+echo                         %gold%Wireless ADB%w%     %gold%App Mgr%w%     %gold%Settings Tools%w%
+echo                             [13]           [14]           [15]
 echo.
 
 :menu_ask
@@ -153,7 +153,7 @@ if "!kb!"=="2" goto Battery
 if "!kb!"=="3" goto Optimize
 if "!kb!"=="4" goto Auto
 if "!kb!"=="5" goto Check
-if "!kb!"=="6" goto appmgr
+if "!kb!"=="6" goto tweaks
 if "!kb!"=="7" goto reboot
 if "!kb!"=="8" goto exitscript
 if "!kb!"=="9" goto shell
@@ -161,6 +161,8 @@ if "!kb!"=="10" goto benchmark
 if "!kb!"=="11" goto backup
 if "!kb!"=="12" goto restore
 if "!kb!"=="13" goto wirelessadb
+if "!kb!"=="14" goto appmgr
+if "!kb!"=="15" goto settools
 goto menu_ask
 :: ===================================================================
 :: NEW: Backup / Restore of toggleable settings
@@ -231,6 +233,32 @@ call :_bk_settings global tcp_default_init_rwnd      "%BAKFILE%"
 call :_bk_settings global wifi_idle_ms               "%BAKFILE%"
 call :_bk_settings global wifi_sleep_policy          "%BAKFILE%"
 call :_bk_settings global low_power                  "%BAKFILE%"
+call :_bk_settings secure clock_seconds              "%BAKFILE%"
+call :_bk_settings system status_bar_show_battery_percent "%BAKFILE%"
+call :_bk_settings global audio_safe_volume_state    "%BAKFILE%"
+call :_bk_settings secure audio_safe_csd_as_a_feature_enabled "%BAKFILE%"
+call :_bk_settings secure icon_blacklist             "%BAKFILE%"
+call :_bk_settings global heads_up_notifications_enabled "%BAKFILE%"
+call :_bk_settings system font_scale                 "%BAKFILE%"
+call :_bk_settings secure long_press_timeout         "%BAKFILE%"
+call :_bk_settings global stay_on_while_plugged_in   "%BAKFILE%"
+call :_bk_settings secure ui_night_mode              "%BAKFILE%"
+call :_bk_settings secure night_display_activated    "%BAKFILE%"
+call :_bk_settings secure night_display_auto_mode    "%BAKFILE%"
+call :_bk_settings secure night_display_color_temperature "%BAKFILE%"
+call :_bk_settings global sysui_demo_allowed         "%BAKFILE%"
+call :_bk_settings secure sysui_qs_tiles             "%BAKFILE%"
+call :_bk_settings secure camera_gesture_disabled    "%BAKFILE%"
+call :_bk_settings secure camera_double_tap_power_gesture_disabled "%BAKFILE%"
+call :_bk_settings secure camera_double_twist_to_flip_enabled "%BAKFILE%"
+call :_bk_settings global charging_sounds_enabled    "%BAKFILE%"
+call :_bk_settings global charging_vibration_enabled "%BAKFILE%"
+call :_bk_settings global sys_storage_threshold_percentage "%BAKFILE%"
+call :_bk_settings global sys_storage_threshold_max_bytes "%BAKFILE%"
+call :_bk_settings global low_power_trigger_level    "%BAKFILE%"
+call :_bk_settings global default_install_location   "%BAKFILE%"
+call :_bk_settings global enable_freeform_support    "%BAKFILE%"
+call :_bk_settings global force_resizable_activities "%BAKFILE%"
 call :_bk_devcfg   app_hibernation app_hibernation_enabled "%BAKFILE%"
 call :_bk_prop     debug.hwui.renderer        "%BAKFILE%"
 call :_bk_prop     debug.renderengine.backend "%BAKFILE%"
@@ -5144,6 +5172,1603 @@ echo.
 echo Done.
 pause >nul
 goto appmgr_suggest
+:: ===================================================================
+:: NEW: Tweaks and Settings  (main menu 14)
+::
+:: Feature parity targets: zacharee/Tweaker (SystemUI Tuner) and
+:: MuntashirAkon/SetEdit. Mechanics verified against AOSP main
+:: (SoundDoseHelper.java, Clock.java, AudioManagerShellCommand.java);
+:: details in CHANGES-tweaks-tier1.md. All adb calls carry <nul so
+:: they never eat the next set /p (house press-twice guard).
+:: ===================================================================
+:tweaks
+cls
+title Tweaks and Settings
+call :logo
+echo.
+echo                              %m%Tweaks and Settings%w%
+echo.
+echo   %d%Status bar%w%
+echo    %g%[%w%1%g%]%w% Clock - show seconds
+echo    %g%[%w%2%g%]%w% Battery percent
+echo    %g%[%w%3%g%]%w% Icon blacklist - hide status bar icons
+echo    %g%[%w%4%g%]%w% Demo mode - clean bar for screenshots
+echo.
+echo   %d%Quick settings%w%
+echo    %g%[%w%5%g%]%w% Tile editor - add the tiles Android hides
+echo.
+echo   %d%System%w%
+echo    %g%[%w%6%g%]%w% Volume cap (safe media volume)
+echo    %g%[%w%7%g%]%w% Heads-up notifications
+echo    %g%[%w%8%g%]%w% Font scale
+echo    %g%[%w%9%g%]%w% Long-press timeout
+echo    %g%[%w%10%g%]%w% Stay awake while charging
+echo    %g%[%w%11%g%]%w% Night - dark theme / night light
+echo    %g%[%w%12%g%]%w% More device tweaks
+echo.
+echo    %g%[%w%13%g%]%w% Back to main menu
+set "tw=" & set /p tw="Choose An Option >> "
+if not defined tw goto tweaks
+if "!tw!"=="1" goto tw_clock
+if "!tw!"=="2" goto tw_batpct
+if "!tw!"=="3" goto tw_icons
+if "!tw!"=="4" goto tw_demo
+if "!tw!"=="5" goto tw_qs
+if "!tw!"=="6" goto tw_safevol
+if "!tw!"=="7" goto tw_headsup
+if "!tw!"=="8" goto tw_font
+if "!tw!"=="9" goto tw_lpt
+if "!tw!"=="10" goto tw_stay
+if "!tw!"=="11" goto tw_night
+if "!tw!"=="12" goto tw_more
+if "!tw!"=="13" goto menu
+goto tweaks
+
+:tw_clock
+cls
+title Clock Seconds
+call :logo
+echo.
+:: SystemUI registers secure/clock_seconds as a live TunerService tunable
+:: (AOSP Clock.java) - changes apply instantly, no restart needed. Values
+:: are read back from the device, so display them quote-wrapped after
+:: stripping quotes (same metachar fix class as :_bk_settings).
+set "cs="
+for /f "delims=" %%i in ('adb shell settings get secure clock_seconds 2^>nul ^<nul') do set "cs=%%i"
+if "!cs!"=="" set "cs=null"
+set "cs=!cs:"=!"
+echo  clock_seconds (secure) = "!cs!"   (1 = seconds shown, 0/null = device default)
+echo  Applies live. Skinned OEM clocks (some OneUI) may ignore this key.
+echo.
+echo    %g%[%w%1%g%]%w% Show seconds
+echo    %g%[%w%2%g%]%w% Hide seconds
+echo    %g%[%w%3%g%]%w% Reset to device default (delete key)
+echo    %g%[%w%4%g%]%w% Back
+set "tc=" & set /p tc="Choose An Option >> "
+if not defined tc goto tw_clock
+if "!tc!"=="1" (adb shell settings put secure clock_seconds 1 <nul & goto tw_clock)
+if "!tc!"=="2" (adb shell settings put secure clock_seconds 0 <nul & goto tw_clock)
+if "!tc!"=="3" (adb shell settings delete secure clock_seconds >nul 2>&1 <nul & goto tw_clock)
+if "!tc!"=="4" goto tweaks
+goto tw_clock
+
+:tw_batpct
+cls
+title Battery Percent
+call :logo
+echo.
+set "bp="
+for /f "delims=" %%i in ('adb shell settings get system status_bar_show_battery_percent 2^>nul ^<nul') do set "bp=%%i"
+if "!bp!"=="" set "bp=null"
+set "bp=!bp:"=!"
+echo  status_bar_show_battery_percent (system) = "!bp!"   (1 = shown, 0/null = default)
+echo  Applies live on AOSP-based status bars; heavy OEM skins may override.
+echo.
+echo    %g%[%w%1%g%]%w% Show percent
+echo    %g%[%w%2%g%]%w% Hide percent
+echo    %g%[%w%3%g%]%w% Reset to device default (delete key)
+echo    %g%[%w%4%g%]%w% Back
+set "tb=" & set /p tb="Choose An Option >> "
+if not defined tb goto tw_batpct
+if "!tb!"=="1" (adb shell settings put system status_bar_show_battery_percent 1 <nul & goto tw_batpct)
+if "!tb!"=="2" (adb shell settings put system status_bar_show_battery_percent 0 <nul & goto tw_batpct)
+if "!tb!"=="3" (adb shell settings delete system status_bar_show_battery_percent >nul 2>&1 <nul & goto tw_batpct)
+if "!tb!"=="4" goto tweaks
+goto tw_batpct
+
+:tw_safevol
+cls
+title Volume Cap
+call :logo
+echo.
+echo  Controls the SOFTWARE safe-media-volume cap/warning (EU hearing rule).
+echo  It does NOT raise the hardware amplifier limit - that lives in vendor
+echo  gain tables (engineering menu) and needs root.
+echo.
+set "svs="
+for /f "delims=" %%i in ('adb shell settings get global audio_safe_volume_state 2^>nul ^<nul') do set "svs=%%i"
+if "!svs!"=="" set "svs=null"
+set "svs=!svs:"=!"
+set "svtxt=unknown value"
+if /i "!svs!"=="null" set "svtxt=not configured - system decides at boot"
+if "!svs!"=="0" set "svtxt=not configured - system decides at boot"
+if "!svs!"=="1" set "svtxt=disabled - no cap on this device/region"
+if "!svs!"=="2" set "svtxt=inactive - cap off for the boot that reads this"
+if "!svs!"=="3" set "svtxt=active - cap enforced"
+echo  audio_safe_volume_state (global) = "!svs!"
+echo    !svtxt!
+if %SDK% GEQ 34 (
+    echo.
+    echo  Sound dose - the Android 14+ regime that replaces the cap where enabled:
+    for /f "delims=" %%i in ('adb shell cmd audio get-sound-dose-value 2^>nul ^<nul') do echo    %%i
+)
+echo.
+echo  The state key is read ONCE at boot, and Android re-writes it to 3
+echo  after every boot on capped devices - plus after ~20h of music - so
+echo  option 1 is a per-boot switch, not a permanent one.
+echo.
+echo    %g%[%w%1%g%]%w% Disable cap for next boot   (set state 2, then reboot)
+echo    %g%[%w%2%g%]%w% Re-enable cap               (set state 3)
+echo    %g%[%w%3%g%]%w% Reset to system default     (delete key)
+echo    %g%[%w%4%g%]%w% Reset accumulated sound dose        - Android 14+
+echo    %g%[%w%5%g%]%w% Sound-dose "CSD as a feature" off   - Android 14+
+echo    %g%[%w%6%g%]%w% Back
+set "sv=" & set /p sv="Choose An Option >> "
+if not defined sv goto tw_safevol
+if "!sv!"=="1" goto tw_safevol_off
+if "!sv!"=="2" (adb shell settings put global audio_safe_volume_state 3 <nul & goto tw_safevol)
+if "!sv!"=="3" (adb shell settings delete global audio_safe_volume_state >nul 2>&1 <nul & goto tw_safevol)
+if "!sv!"=="4" goto tw_safevol_dose
+if "!sv!"=="5" goto tw_safevol_csdoff
+if "!sv!"=="6" goto tweaks
+goto tw_safevol
+
+:tw_safevol_off
+adb shell settings put global audio_safe_volume_state 2 <nul
+echo.
+echo  Done - state set to 2 (inactive). Takes effect at the NEXT boot.
+echo  Re-run this after each reboot if you want the cap to stay off.
+set "rb=" & set /p rb="Reboot device now? (y = yes, anything else = back) >> "
+if /i "!rb!"=="y" adb reboot <nul
+goto tw_safevol
+
+:tw_safevol_dose
+if %SDK% LSS 34 (
+    echo [%r%^^!%w%] Needs Android 14 or newer - this device reports API %SDK%.
+    timeout /t 2 /nobreak >nul
+    goto tw_safevol
+)
+adb shell cmd audio set-sound-dose-value 0.0 <nul
+echo  Accumulated sound dose reset to 0. Applies live.
+timeout /t 2 /nobreak >nul
+goto tw_safevol
+
+:tw_safevol_csdoff
+if %SDK% LSS 34 (
+    echo [%r%^^!%w%] Needs Android 14 or newer - this device reports API %SDK%.
+    timeout /t 2 /nobreak >nul
+    goto tw_safevol
+)
+:: Only matters where CSD is available-but-not-enforced; harmless elsewhere.
+adb shell settings put secure audio_safe_csd_as_a_feature_enabled 0 <nul
+echo  audio_safe_csd_as_a_feature_enabled (secure) set to 0.
+timeout /t 2 /nobreak >nul
+goto tw_safevol
+
+:tw_explorer
+cls
+title Settings Explorer
+call :logo
+echo.
+echo  Namespaces: system / secure / global.  Values are limited to the
+echo  charset  A-Z a-z 0-9 _ . , : / = + -  (no spaces or shell chars);
+echo  anything fancier: use the Shell option in the main menu.
+echo.
+echo    %g%[%w%1%g%]%w% List keys (optional substring filter)
+echo    %g%[%w%2%g%]%w% Get a key
+echo    %g%[%w%3%g%]%w% Put a key    (previous value saved to an undo script)
+echo    %g%[%w%4%g%]%w% Delete a key (same undo protection)
+echo    %g%[%w%5%g%]%w% Back
+set "tx=" & set /p tx="Choose An Option >> "
+if not defined tx goto tw_explorer
+if "!tx!"=="1" goto tw_exp_list
+if "!tx!"=="2" goto tw_exp_get
+if "!tx!"=="3" goto tw_exp_put
+if "!tx!"=="4" goto tw_exp_del
+if "!tx!"=="5" goto settools
+goto tw_explorer
+
+:tw_exp_list
+call :_tw_askns
+if not defined EXP_NS goto tw_explorer
+set "EXP_FLT=" & set /p EXP_FLT="Filter substring (blank = list all) >> "
+if not defined EXP_FLT goto tw_exp_list_go
+set "EXP_FLT=!EXP_FLT:"=!"
+if not defined EXP_FLT goto tw_exp_list_go
+call :_tw_safechk EXP_FLT || goto tw_exp_bad
+echo(!EXP_FLT!| findstr /r /x /c:"[a-zA-Z0-9_.-][a-zA-Z0-9_.-]*" >nul || goto tw_exp_bad
+:tw_exp_list_go
+echo  ---- %EXP_NS% ----
+if defined EXP_FLT (
+    adb shell settings list %EXP_NS% <nul 2>nul | findstr /i /c:"%EXP_FLT%" | more
+) else (
+    adb shell settings list %EXP_NS% <nul 2>nul | more
+)
+echo  ---- end of %EXP_NS% ----
+echo  Press any key . . .
+pause >nul
+goto tw_explorer
+
+:tw_exp_get
+call :_tw_askns
+if not defined EXP_NS goto tw_explorer
+call :_tw_askkey
+if not defined EXP_KEY goto tw_explorer
+set "EXP_OLD="
+for /f "delims=" %%v in ('adb shell settings get %EXP_NS% %EXP_KEY% 2^>nul ^<nul') do set "EXP_OLD=%%v"
+if "!EXP_OLD!"=="" set "EXP_OLD=null"
+:: Value comes from the device and can contain cmd metacharacters - strip
+:: quotes, then keep it inside quotes when echoing (:_bk_settings fix class).
+set "EXP_OLD=!EXP_OLD:"=!"
+echo.
+echo  %EXP_NS% %EXP_KEY% = "!EXP_OLD!"
+echo  Press any key . . .
+pause >nul
+goto tw_explorer
+
+:tw_exp_put
+call :_tw_askns
+if not defined EXP_NS goto tw_explorer
+call :_tw_askkey
+if not defined EXP_KEY goto tw_explorer
+set "EXP_OLD="
+for /f "delims=" %%v in ('adb shell settings get %EXP_NS% %EXP_KEY% 2^>nul ^<nul') do set "EXP_OLD=%%v"
+if "!EXP_OLD!"=="" set "EXP_OLD=null"
+set "EXP_OLD=!EXP_OLD:"=!"
+echo  Current value: "!EXP_OLD!"
+set "EXP_VAL=" & set /p EXP_VAL="New value (blank = cancel) >> "
+if not defined EXP_VAL goto tw_explorer
+set "EXP_VAL=!EXP_VAL:"=!"
+if not defined EXP_VAL goto tw_explorer
+call :_tw_safechk EXP_VAL || goto tw_exp_bad
+echo(!EXP_VAL!| findstr /r /x /c:"[a-zA-Z0-9_.,:/=+-][a-zA-Z0-9_.,:/=+-]*" >nul || goto tw_exp_bad
+echo.
+echo  Command: adb shell settings put %EXP_NS% %EXP_KEY% !EXP_VAL!
+set "ok=" & set /p ok="Run it? (y = yes, anything else = cancel) >> "
+if /i not "!ok!"=="y" goto tw_explorer
+call :_tw_undo_add %EXP_NS% %EXP_KEY%
+adb shell settings put %EXP_NS% %EXP_KEY% !EXP_VAL! <nul
+set "EXP_NEW="
+for /f "delims=" %%v in ('adb shell settings get %EXP_NS% %EXP_KEY% 2^>nul ^<nul') do set "EXP_NEW=%%v"
+if "!EXP_NEW!"=="" set "EXP_NEW=null"
+set "EXP_NEW=!EXP_NEW:"=!"
+echo  Read-back: %EXP_NS% %EXP_KEY% = "!EXP_NEW!"
+echo  Undo script: %EXP_UNDO%
+echo  Press any key . . .
+pause >nul
+goto tw_explorer
+
+:tw_exp_del
+call :_tw_askns
+if not defined EXP_NS goto tw_explorer
+call :_tw_askkey
+if not defined EXP_KEY goto tw_explorer
+set "EXP_OLD="
+for /f "delims=" %%v in ('adb shell settings get %EXP_NS% %EXP_KEY% 2^>nul ^<nul') do set "EXP_OLD=%%v"
+if "!EXP_OLD!"=="" set "EXP_OLD=null"
+set "EXP_OLD=!EXP_OLD:"=!"
+echo  Current value: "!EXP_OLD!"
+echo.
+echo  Command: adb shell settings delete %EXP_NS% %EXP_KEY%
+set "ok=" & set /p ok="Run it? (y = yes, anything else = cancel) >> "
+if /i not "!ok!"=="y" goto tw_explorer
+call :_tw_undo_add %EXP_NS% %EXP_KEY%
+for /f "delims=" %%i in ('adb shell settings delete %EXP_NS% %EXP_KEY% 2^>nul ^<nul') do echo  %%i
+echo  Undo script: %EXP_UNDO%
+echo  Press any key . . .
+pause >nul
+goto tw_explorer
+
+:tw_exp_bad
+echo [%r%^^!%w%] Not allowed - stick to letters, digits and _ . , : / = + -
+timeout /t 2 /nobreak >nul
+goto tw_explorer
+:: -------------------------------------------------------------------
+:: Explorer helpers
+::
+:: _tw_askns / _tw_askkey  ask for a namespace / whitelist-checked key;
+:: an empty EXP_NS / EXP_KEY on return means cancelled or invalid.
+:: -------------------------------------------------------------------
+:_tw_askns
+set "EXP_NS="
+set "tn=" & set /p tn="Namespace (1=system 2=secure 3=global, blank=cancel) >> "
+if "!tn!"=="1" set "EXP_NS=system"
+if "!tn!"=="2" set "EXP_NS=secure"
+if "!tn!"=="3" set "EXP_NS=global"
+exit /b
+
+:_tw_askkey
+set "EXP_KEY="
+set "tk=" & set /p tk="Key name (blank = cancel) >> "
+if not defined tk exit /b
+set "tk=!tk:"=!"
+if not defined tk exit /b
+call :_tw_safechk tk || exit /b
+echo(!tk!| findstr /r /x /c:"[a-zA-Z0-9_.-][a-zA-Z0-9_.-]*" >nul || exit /b
+set "EXP_KEY=!tk!"
+exit /b
+
+:_tw_safechk
+:: %1 = NAME of a variable (callers strip double quotes first). Fails with
+:: errorlevel 1 if the value holds a cmd metachar that would make the
+:: `echo(!var!| findstr` whitelist probe itself unsafe. Each check runs
+:: inside a quoted comparison, so the hostile char never sits in command
+:: position. A caret needs no check: it self-escapes identically in the
+:: probe and in the final adb line, and `^&`-style combos are caught by
+:: the checks below before the caret matters.
+if not defined %~1 exit /b 1
+if not "!%~1:&=_!"=="!%~1!" exit /b 1
+if not "!%~1:|=_!"=="!%~1!" exit /b 1
+if not "!%~1:<=_!"=="!%~1!" exit /b 1
+if not "!%~1:>=_!"=="!%~1!" exit /b 1
+exit /b 0
+
+:_tw_undo_add
+:: Capture the current value of %1/%2 into a runnable undo script BEFORE an
+:: explorer write. Reuses :_bk_settings (null value -> delete line), so the
+:: undo file uses the same format as the main Backup feature. One undo file
+:: per DCX session, created lazily on the first write.
+if defined EXP_UNDO goto _tw_undo_append
+set "BACKUPDIR=%USERPROFILE%\dcx_backups"
+if not exist "%BACKUPDIR%" mkdir "%BACKUPDIR%"
+set "TS=%date%_%time%"
+set "TS=%TS::=-%"
+set "TS=%TS:/=-%"
+set "TS=%TS:\=-%"
+set "TS=%TS:.=-%"
+set "TS=%TS:,=-%"
+set "TS=%TS: =_%"
+set "EXP_UNDO=%BACKUPDIR%\dcx_explorer_undo_%TS%.bat"
+> "%EXP_UNDO%" echo @echo off
+>>"%EXP_UNDO%" echo :: DCX Settings-Explorer undo - restores values captured before writes.
+>>"%EXP_UNDO%" echo adb start-server ^>nul 2^>^&1
+
+:_tw_undo_append
+call :_bk_settings %~1 %~2 "%EXP_UNDO%"
+exit /b
+
+:tw_snapshot
+cls
+title Settings Snapshot
+call :logo
+set "SNAPDIR=%USERPROFILE%\dcx_snapshots"
+if not exist "%SNAPDIR%" mkdir "%SNAPDIR%"
+echo.
+echo  Dump all three settings tables, poke something in the device UI,
+echo  dump again, diff - and you know exactly which key that toggle writes.
+echo  Folder: %SNAPDIR%
+echo.
+echo    %g%[%w%1%g%]%w% Take a snapshot now (system + secure + global)
+echo    %g%[%w%2%g%]%w% Diff the two most recent snapshots
+echo    %g%[%w%3%g%]%w% Open snapshots folder
+echo    %g%[%w%4%g%]%w% Back
+set "sn=" & set /p sn="Choose An Option >> "
+if not defined sn goto tw_snapshot
+if "!sn!"=="1" goto tw_snap_take
+if "!sn!"=="2" goto tw_snap_diff
+if "!sn!"=="3" (start "" "%SNAPDIR%" & goto tw_snapshot)
+if "!sn!"=="4" goto settools
+goto tw_snapshot
+
+:tw_snap_take
+set "TS=%date%_%time%"
+set "TS=%TS::=-%"
+set "TS=%TS:/=-%"
+set "TS=%TS:\=-%"
+set "TS=%TS:.=-%"
+set "TS=%TS:,=-%"
+set "TS=%TS: =_%"
+echo  Dumping...
+:: `find /v ""` re-terminates adb's LF-only lines as CRLF (documented DCX
+:: failure mode) so fc behaves later; `sort` gives a stable key order.
+for %%n in (system secure global) do (
+    adb shell settings list %%n <nul 2>nul | find /v "" | sort > "%SNAPDIR%\%%n_%TS%.txt"
+)
+echo  Done:
+dir /b "%SNAPDIR%\*_%TS%.txt"
+echo  Press any key . . .
+pause >nul
+goto tw_snapshot
+
+:tw_snap_diff
+set "SNP1="
+set "SNP2="
+for /f "delims=" %%f in ('dir /b /o-d /a-d "%SNAPDIR%\global_*.txt" 2^>nul') do (
+    if not defined SNP1 (set "SNP1=%%f") else if not defined SNP2 set "SNP2=%%f"
+)
+if not defined SNP2 (
+    echo [%r%^^!%w%] Need at least two snapshots first.
+    timeout /t 2 /nobreak >nul
+    goto tw_snapshot
+)
+set "TSNEW=!SNP1:~7,-4!"
+set "TSOLD=!SNP2:~7,-4!"
+set "TS=%date%_%time%"
+set "TS=%TS::=-%"
+set "TS=%TS:/=-%"
+set "TS=%TS:\=-%"
+set "TS=%TS:.=-%"
+set "TS=%TS:,=-%"
+set "TS=%TS: =_%"
+set "DIFFOUT=%SNAPDIR%\diff_%TS%.txt"
+> "%DIFFOUT%" echo DCX settings diff:  %TSOLD%  -^>  %TSNEW%
+for %%n in (system secure global) do (
+    >>"%DIFFOUT%" echo.
+    >>"%DIFFOUT%" echo ===== %%n =====
+    fc /l "%SNAPDIR%\%%n_%TSOLD%.txt" "%SNAPDIR%\%%n_%TSNEW%.txt" >>"%DIFFOUT%" 2>&1
+)
+cls
+call :logo
+echo  Comparing %TSOLD%  (older)
+echo         to %TSNEW%  (newer)
+echo.
+more < "%DIFFOUT%"
+echo.
+echo  Saved to: %DIFFOUT%
+echo    %g%[%w%1%g%]%w% Open in Notepad
+echo    %g%[%w%2%g%]%w% Back
+set "sd=" & set /p sd="Choose An Option >> "
+if "!sd!"=="1" (start "" notepad "%DIFFOUT%" & goto tw_snapshot)
+if "!sd!"=="2" goto tw_snapshot
+goto tw_snapshot
+:: ===================================================================
+:: NEW (Tier 2): icon blacklist, demo mode, heads-up, font scale,
+:: long-press timeout, stay-awake, night modes, profiles.
+::
+:: Keys verified against AOSP main and zacharee/Tweaker @ 0053893:
+::   secure icon_blacklist            BlacklistPersistenceHandler.kt:9
+::   global heads_up_notifications_enabled   Settings.java:17467
+::   system font_scale                Settings.java:5135 (default 1.0)
+::   secure long_press_timeout        Settings.java:9273
+::   global stay_on_while_plugged_in  Settings.java:13420; bits from
+::                                    BatteryManager: AC=1 USB=2
+::                                    WIRELESS=4 DOCK=8
+::   cmd uimode night [yes^|no^|auto]   UiModeManagerService.java:2150
+::   secure night_display_*           Settings.java:11493-11507
+::   global sysui_demo_allowed + broadcast com.android.systemui.demo
+::                                    DemoController.kt:41-51
+:: Animation scales are NOT here - Optimize > Animation Speed already
+:: owns those three keys.
+:: ===================================================================
+:tw_icons
+cls
+title Icon Blacklist
+call :logo
+echo.
+set "IBCUR="
+for /f "delims=" %%i in ('adb shell settings get secure icon_blacklist 2^>nul ^<nul') do set "IBCUR=%%i"
+if "!IBCUR!"=="" set "IBCUR=null"
+set "IBCUR=!IBCUR:"=!"
+echo  icon_blacklist (secure) = "!IBCUR!"
+echo  A comma-separated list of status bar slots to hide. Applies live on
+echo  AOSP-based status bars. Slot names are OEM-dependent - an unknown
+echo  name is simply ignored by SystemUI, it does not break anything.
+echo.
+echo    %g%[%w%1%g%]%w% Hide an icon
+echo    %g%[%w%2%g%]%w% Show an icon again
+echo    %g%[%w%3%g%]%w% Clear the list (delete key - every icon returns)
+echo    %g%[%w%4%g%]%w% Back
+set "ic=" & set /p ic="Choose An Option >> "
+if not defined ic goto tw_icons
+if "!ic!"=="1" goto tw_ib_add
+if "!ic!"=="2" goto tw_ib_del
+if "!ic!"=="3" goto tw_ib_clear
+if "!ic!"=="4" goto tweaks
+goto tw_icons
+
+:tw_ib_add
+cls
+title Icon Blacklist : hide
+call :logo
+echo.
+:: Slot vocabulary = Tweaker's AOSP-general category (IconBlacklistFragment
+:: .kt:167-225). Some icons answer to two names across versions, so those
+:: entries write both.
+echo  Pick a slot to hide:
+echo    %g%[%w%1%g%]%w% rotate           (auto-rotate lock)
+echo    %g%[%w%2%g%]%w% alarm            (alarm + alarm_clock)
+echo    %g%[%w%3%g%]%w% bluetooth
+echo    %g%[%w%4%g%]%w% volume
+echo    %g%[%w%5%g%]%w% headset
+echo    %g%[%w%6%g%]%w% cast
+echo    %g%[%w%7%g%]%w% hotspot
+echo    %g%[%w%8%g%]%w% location
+echo    %g%[%w%9%g%]%w% managed_profile  (work profile badge)
+echo    %g%[%w%10%g%]%w% vpn
+echo    %g%[%w%11%g%]%w% nfc             (nfc + nfc_on)
+echo    %g%[%w%12%g%]%w% dnd             (zen + dnd + do_not_disturb)
+echo    %g%[%w%13%g%]%w% data_saver
+echo    %g%[%w%14%g%]%w% ime             (keyboard switcher)
+echo    %g%[%w%15%g%]%w% mute
+echo    %g%[%w%16%g%]%w% Type a slot name myself
+echo    %g%[%w%17%g%]%w% Back
+set "IBSEL=" & set /p IBSEL="Choose An Option >> "
+if not defined IBSEL goto tw_ib_add
+set "IBTOK="
+if "!IBSEL!"=="1" set "IBTOK=rotate"
+if "!IBSEL!"=="2" set "IBTOK=alarm,alarm_clock"
+if "!IBSEL!"=="3" set "IBTOK=bluetooth"
+if "!IBSEL!"=="4" set "IBTOK=volume"
+if "!IBSEL!"=="5" set "IBTOK=headset"
+if "!IBSEL!"=="6" set "IBTOK=cast"
+if "!IBSEL!"=="7" set "IBTOK=hotspot"
+if "!IBSEL!"=="8" set "IBTOK=location"
+if "!IBSEL!"=="9" set "IBTOK=managed_profile"
+if "!IBSEL!"=="10" set "IBTOK=vpn"
+if "!IBSEL!"=="11" set "IBTOK=nfc,nfc_on"
+if "!IBSEL!"=="12" set "IBTOK=zen,dnd,do_not_disturb"
+if "!IBSEL!"=="13" set "IBTOK=data_saver"
+if "!IBSEL!"=="14" set "IBTOK=ime"
+if "!IBSEL!"=="15" set "IBTOK=mute"
+if "!IBSEL!"=="16" goto tw_ib_custom
+if "!IBSEL!"=="17" goto tw_icons
+if not defined IBTOK goto tw_ib_add
+goto tw_ib_addgo
+
+:tw_ib_custom
+echo.
+echo  Slot names are lowercase letters, digits and _ (comma-separate a few).
+set "IBTOK=" & set /p IBTOK="Slot name (blank = cancel) >> "
+if not defined IBTOK goto tw_ib_add
+set "IBTOK=!IBTOK:"=!"
+if not defined IBTOK goto tw_ib_add
+call :_tw_safechk IBTOK || goto tw_ib_bad
+echo(!IBTOK!| findstr /r /x /c:"[a-z0-9_,][a-z0-9_,]*" >nul || goto tw_ib_bad
+goto tw_ib_addgo
+
+:tw_ib_addgo
+call :_tw_undo_add secure icon_blacklist
+:: Rebuild rather than blind-append: drop any token we are about to add, so
+:: re-hiding an icon cannot pile up duplicates. IBTOK may carry several
+:: names (nfc,nfc_on), hence the inner loop; `if defined` reads runtime
+:: state, so it stays correct inside a parenthesized block.
+set "IBNEW="
+if "!IBCUR!"=="null" goto _tw_ib_addput
+for %%t in (!IBCUR!) do (
+    set "IBHIT="
+    for %%u in (!IBTOK!) do if /i "%%t"=="%%u" set "IBHIT=1"
+    if not defined IBHIT set "IBNEW=!IBNEW!,%%t"
+)
+
+:_tw_ib_addput
+set "IBNEW=!IBNEW!,!IBTOK!"
+set "IBNEW=!IBNEW:~1!"
+adb shell settings put secure icon_blacklist !IBNEW! <nul
+goto tw_icons
+
+:tw_ib_del
+cls
+title Icon Blacklist : restore
+call :logo
+echo.
+if "!IBCUR!"=="null" goto tw_ib_empty
+:: Clear any stale IBT_n from an earlier, longer list before renumbering.
+for /f "delims==" %%v in ('set IBT_ 2^>nul') do set "%%v="
+set "IBN=0"
+echo  Currently hidden:
+for %%t in (!IBCUR!) do (
+    set /a IBN+=1
+    set "IBT_!IBN!=%%t"
+    echo     %g%[%w%!IBN!%g%]%w% %%t
+)
+echo     %g%[%w%0%g%]%w% Back
+set "IBPICK=" & set /p IBPICK="Restore which? >> "
+if not defined IBPICK goto tw_ib_del
+if "!IBPICK!"=="0" goto tw_icons
+echo(!IBPICK!| findstr /r /x /c:"[0-9][0-9]*" >nul || goto tw_ib_del
+set "IBTOK="
+if defined IBT_!IBPICK! for /f "delims=" %%v in ("!IBPICK!") do set "IBTOK=!IBT_%%v!"
+if not defined IBTOK goto tw_ib_del
+call :_tw_undo_add secure icon_blacklist
+set "IBNEW="
+for %%t in (!IBCUR!) do if not "%%t"=="!IBTOK!" set "IBNEW=!IBNEW!,%%t"
+if not defined IBNEW goto tw_ib_clear
+set "IBNEW=!IBNEW:~1!"
+adb shell settings put secure icon_blacklist !IBNEW! <nul
+goto tw_icons
+
+:tw_ib_empty
+echo  The blacklist is empty - nothing to restore.
+timeout /t 2 /nobreak >nul
+goto tw_icons
+
+:tw_ib_clear
+call :_tw_undo_add secure icon_blacklist
+adb shell settings delete secure icon_blacklist >nul 2>&1 <nul
+goto tw_icons
+
+:tw_ib_bad
+echo [%r%^^!%w%] Not allowed - lowercase letters, digits, _ and commas only.
+timeout /t 2 /nobreak >nul
+goto tw_ib_add
+
+:tw_headsup
+cls
+title Heads-up Notifications
+call :logo
+echo.
+set "HUV="
+for /f "delims=" %%i in ('adb shell settings get global heads_up_notifications_enabled 2^>nul ^<nul') do set "HUV=%%i"
+if "!HUV!"=="" set "HUV=null"
+set "HUV=!HUV:"=!"
+echo  heads_up_notifications_enabled (global) = "!HUV!"
+echo    (1/null = pop-ups shown, 0 = notifications go straight to the shade)
+echo  Applies to every app at once. Per-app control lives in the device's
+echo  own notification settings, not here.
+echo.
+echo    %g%[%w%1%g%]%w% Enable pop-ups
+echo    %g%[%w%2%g%]%w% Disable pop-ups
+echo    %g%[%w%3%g%]%w% Reset to device default (delete key)
+echo    %g%[%w%4%g%]%w% Back
+set "hu=" & set /p hu="Choose An Option >> "
+if not defined hu goto tw_headsup
+if "!hu!"=="1" (call :_tw_undo_add global heads_up_notifications_enabled & adb shell settings put global heads_up_notifications_enabled 1 <nul & goto tw_headsup)
+if "!hu!"=="2" (call :_tw_undo_add global heads_up_notifications_enabled & adb shell settings put global heads_up_notifications_enabled 0 <nul & goto tw_headsup)
+if "!hu!"=="3" (call :_tw_undo_add global heads_up_notifications_enabled & adb shell settings delete global heads_up_notifications_enabled >nul 2>&1 <nul & goto tw_headsup)
+if "!hu!"=="4" goto tweaks
+goto tw_headsup
+
+:tw_font
+cls
+title Font Scale
+call :logo
+echo.
+set "FSV="
+for /f "delims=" %%i in ('adb shell settings get system font_scale 2^>nul ^<nul') do set "FSV=%%i"
+if "!FSV!"=="" set "FSV=null"
+set "FSV=!FSV:"=!"
+echo  font_scale (system) = "!FSV!"   (1.0 = platform default)
+echo  Applies live. DCX accepts 0.5 - 2.0 only: outside that range app
+echo  layouts start clipping and some dialogs lose their buttons.
+echo.
+echo    %g%[%w%1%g%]%w% 0.85  (small)
+echo    %g%[%w%2%g%]%w% 1.0   (default)
+echo    %g%[%w%3%g%]%w% 1.15  (large)
+echo    %g%[%w%4%g%]%w% 1.30  (larger)
+echo    %g%[%w%5%g%]%w% Custom (0.5 - 2.0)
+echo    %g%[%w%6%g%]%w% Reset to device default (delete key)
+echo    %g%[%w%7%g%]%w% Back
+set "fs=" & set /p fs="Choose An Option >> "
+if not defined fs goto tw_font
+if "!fs!"=="1" (set "FSNEW=0.85" & goto tw_font_apply)
+if "!fs!"=="2" (set "FSNEW=1.0" & goto tw_font_apply)
+if "!fs!"=="3" (set "FSNEW=1.15" & goto tw_font_apply)
+if "!fs!"=="4" (set "FSNEW=1.30" & goto tw_font_apply)
+if "!fs!"=="5" goto tw_font_custom
+if "!fs!"=="6" (call :_tw_undo_add system font_scale & adb shell settings delete system font_scale >nul 2>&1 <nul & goto tw_font)
+if "!fs!"=="7" goto tweaks
+goto tw_font
+
+:tw_font_custom
+echo.
+echo  Enter a scale between 0.5 and 2.0 (e.g. 1.15).
+set "FSNEW=" & set /p FSNEW="Value (blank = cancel) >> "
+if not defined FSNEW goto tw_font
+set "FSNEW=!FSNEW:"=!"
+if not defined FSNEW goto tw_font
+:: Russian-locale comma decimal (1,15) normalizes to a dot before it can
+:: reach adb - same guard as Optimize > Animation Speed.
+set "FSNEW=!FSNEW:,=.!"
+echo(!FSNEW!| findstr /r /x /c:"0\.[5-9][0-9]*" /c:"\.[5-9][0-9]*" /c:"1" /c:"1\.[0-9][0-9]*" /c:"2" /c:"2\.0*" >nul || goto tw_font_bad
+goto tw_font_apply
+
+:tw_font_bad
+echo [%r%^^!%w%] Invalid value. Use 0.5 to 2.0, e.g. 0.85, 1.0, 1.15.
+timeout /t 2 /nobreak >nul
+goto tw_font_custom
+
+:tw_font_apply
+call :_tw_undo_add system font_scale
+adb shell settings put system font_scale !FSNEW! <nul
+goto tw_font
+
+:tw_lpt
+cls
+title Long-press Timeout
+call :logo
+echo.
+set "LPTV="
+for /f "delims=" %%i in ('adb shell settings get secure long_press_timeout 2^>nul ^<nul') do set "LPTV=%%i"
+if "!LPTV!"=="" set "LPTV=null"
+set "LPTV=!LPTV:"=!"
+echo  long_press_timeout (secure) = "!LPTV!" ms   (platform default 400)
+echo  How long a touch must be held before it counts as a long-press.
+echo.
+echo  Worth knowing: Battery ^> Animation ^> Off also pins this key to 250,
+echo  and Animation ^> On deletes it. Whichever you run last wins.
+echo.
+echo    %g%[%w%1%g%]%w% 250   (fast - what Animation Off uses)
+echo    %g%[%w%2%g%]%w% 400   (platform default)
+echo    %g%[%w%3%g%]%w% 1000  (slow)
+echo    %g%[%w%4%g%]%w% 1500  (slowest - accessibility)
+echo    %g%[%w%5%g%]%w% Custom (10 - 9999 ms)
+echo    %g%[%w%6%g%]%w% Reset to device default (delete key)
+echo    %g%[%w%7%g%]%w% Back
+set "lpt=" & set /p lpt="Choose An Option >> "
+if not defined lpt goto tw_lpt
+if "!lpt!"=="1" (set "LPTNEW=250" & goto tw_lpt_apply)
+if "!lpt!"=="2" (set "LPTNEW=400" & goto tw_lpt_apply)
+if "!lpt!"=="3" (set "LPTNEW=1000" & goto tw_lpt_apply)
+if "!lpt!"=="4" (set "LPTNEW=1500" & goto tw_lpt_apply)
+if "!lpt!"=="5" goto tw_lpt_custom
+if "!lpt!"=="6" (call :_tw_undo_add secure long_press_timeout & adb shell settings delete secure long_press_timeout >nul 2>&1 <nul & goto tw_lpt)
+if "!lpt!"=="7" goto tweaks
+goto tw_lpt
+
+:tw_lpt_custom
+echo.
+set "LPTNEW=" & set /p LPTNEW="Milliseconds (blank = cancel) >> "
+if not defined LPTNEW goto tw_lpt
+set "LPTNEW=!LPTNEW:"=!"
+if not defined LPTNEW goto tw_lpt
+echo(!LPTNEW!| findstr /r /x /c:"[1-9][0-9]" /c:"[1-9][0-9][0-9]" /c:"[1-9][0-9][0-9][0-9]" >nul || goto tw_lpt_bad
+goto tw_lpt_apply
+
+:tw_lpt_bad
+echo [%r%^^!%w%] Invalid value. Whole milliseconds, 10 to 9999.
+timeout /t 2 /nobreak >nul
+goto tw_lpt_custom
+
+:tw_lpt_apply
+call :_tw_undo_add secure long_press_timeout
+adb shell settings put secure long_press_timeout !LPTNEW! <nul
+goto tw_lpt
+
+:tw_stay
+cls
+title Stay Awake While Charging
+call :logo
+echo.
+set "SAWV="
+for /f "delims=" %%i in ('adb shell settings get global stay_on_while_plugged_in 2^>nul ^<nul') do set "SAWV=%%i"
+if "!SAWV!"=="" set "SAWV=null"
+set "SAWV=!SAWV:"=!"
+echo  stay_on_while_plugged_in (global) = "!SAWV!"
+echo  Bitmask, add the sources you want:  AC=1  USB=2  wireless=4  dock=8
+echo  (0 = off). The screen then never sleeps while charging that way -
+echo  handy on a desk, rough on an OLED panel over time.
+echo.
+echo    %g%[%w%1%g%]%w% Off (0)
+echo    %g%[%w%2%g%]%w% AC only (1)
+echo    %g%[%w%3%g%]%w% USB only (2)
+echo    %g%[%w%4%g%]%w% AC + USB (3)
+echo    %g%[%w%5%g%]%w% AC + USB + wireless (7)
+echo    %g%[%w%6%g%]%w% Everything incl. dock (15)
+echo    %g%[%w%7%g%]%w% Custom (0 - 15)
+echo    %g%[%w%8%g%]%w% Reset to device default (delete key)
+echo    %g%[%w%9%g%]%w% Back
+set "saw=" & set /p saw="Choose An Option >> "
+if not defined saw goto tw_stay
+if "!saw!"=="1" (set "SAWNEW=0" & goto tw_stay_apply)
+if "!saw!"=="2" (set "SAWNEW=1" & goto tw_stay_apply)
+if "!saw!"=="3" (set "SAWNEW=2" & goto tw_stay_apply)
+if "!saw!"=="4" (set "SAWNEW=3" & goto tw_stay_apply)
+if "!saw!"=="5" (set "SAWNEW=7" & goto tw_stay_apply)
+if "!saw!"=="6" (set "SAWNEW=15" & goto tw_stay_apply)
+if "!saw!"=="7" goto tw_stay_custom
+if "!saw!"=="8" (call :_tw_undo_add global stay_on_while_plugged_in & adb shell settings delete global stay_on_while_plugged_in >nul 2>&1 <nul & goto tw_stay)
+if "!saw!"=="9" goto tweaks
+goto tw_stay
+
+:tw_stay_custom
+echo.
+set "SAWNEW=" & set /p SAWNEW="Bitmask 0 - 15 (blank = cancel) >> "
+if not defined SAWNEW goto tw_stay
+set "SAWNEW=!SAWNEW:"=!"
+if not defined SAWNEW goto tw_stay
+echo(!SAWNEW!| findstr /r /x /c:"[0-9]" /c:"1[0-5]" >nul || goto tw_stay_bad
+goto tw_stay_apply
+
+:tw_stay_bad
+echo [%r%^^!%w%] Invalid value. A whole number from 0 to 15.
+timeout /t 2 /nobreak >nul
+goto tw_stay_custom
+
+:tw_stay_apply
+call :_tw_undo_add global stay_on_while_plugged_in
+adb shell settings put global stay_on_while_plugged_in !SAWNEW! <nul
+goto tw_stay
+
+:tw_night
+cls
+title Night
+call :logo
+echo.
+echo  Two different features share the name "night mode":
+echo    Dark theme  - the system-wide dark UI    (cmd uimode night)
+echo    Night light - the warm blue-light filter (night_display_*)
+echo.
+echo  Dark theme, as the device reports it:
+for /f "delims=" %%i in ('adb shell cmd uimode night 2^>nul ^<nul') do echo    %%i
+set "NDA="
+for /f "delims=" %%i in ('adb shell settings get secure night_display_activated 2^>nul ^<nul') do set "NDA=%%i"
+if "!NDA!"=="" set "NDA=null"
+set "NDA=!NDA:"=!"
+echo  night_display_activated (secure) = "!NDA!"   (1 = filter on)
+echo.
+:: setNightModeInternal only demands MODIFY_DAY_NIGHT_MODE when the ROM
+:: locks night mode (UiModeManagerService.java) - it then returns quietly.
+:: The command prints the resulting mode, so the line above is the honest
+:: read-back rather than a claim of success.
+echo  Dark theme is set through the uimode service, which prints the mode it
+echo  ended up in - if a ROM locks it, the readout above simply will not move.
+echo.
+echo    %g%[%w%1%g%]%w% Dark theme on
+echo    %g%[%w%2%g%]%w% Dark theme off
+echo    %g%[%w%3%g%]%w% Dark theme auto (follow sunset/schedule)
+echo    %g%[%w%4%g%]%w% Night light on
+echo    %g%[%w%5%g%]%w% Night light off
+echo    %g%[%w%6%g%]%w% Night light colour temperature
+echo    %g%[%w%7%g%]%w% Back
+set "nm=" & set /p nm="Choose An Option >> "
+if not defined nm goto tw_night
+if "!nm!"=="1" (adb shell cmd uimode night yes <nul & timeout /t 1 /nobreak >nul & goto tw_night)
+if "!nm!"=="2" (adb shell cmd uimode night no <nul & timeout /t 1 /nobreak >nul & goto tw_night)
+if "!nm!"=="3" (adb shell cmd uimode night auto <nul & timeout /t 1 /nobreak >nul & goto tw_night)
+if "!nm!"=="4" (call :_tw_undo_add secure night_display_activated & adb shell settings put secure night_display_activated 1 <nul & goto tw_night)
+if "!nm!"=="5" (call :_tw_undo_add secure night_display_activated & adb shell settings put secure night_display_activated 0 <nul & goto tw_night)
+if "!nm!"=="6" goto tw_night_temp
+if "!nm!"=="7" goto tweaks
+goto tw_night
+
+:tw_night_temp
+echo.
+set "NDT="
+for /f "delims=" %%i in ('adb shell settings get secure night_display_color_temperature 2^>nul ^<nul') do set "NDT=%%i"
+if "!NDT!"=="" set "NDT=null"
+set "NDT=!NDT:"=!"
+echo  Current: "!NDT!" K. Lower = warmer/more orange. Typical 2850 - 4800.
+set "NDT=" & set /p NDT="Kelvin (blank = cancel) >> "
+if not defined NDT goto tw_night
+set "NDT=!NDT:"=!"
+if not defined NDT goto tw_night
+echo(!NDT!| findstr /r /x /c:"[1-9][0-9][0-9][0-9]" >nul || goto tw_night_bad
+call :_tw_undo_add secure night_display_color_temperature
+adb shell settings put secure night_display_color_temperature !NDT! <nul
+goto tw_night
+
+:tw_night_bad
+echo [%r%^^!%w%] Invalid value. Four digits, e.g. 2850 or 4800.
+timeout /t 2 /nobreak >nul
+goto tw_night_temp
+
+:tw_demo
+cls
+title Demo Mode
+call :logo
+echo.
+echo  SystemUI demo mode freezes the status bar into a clean, fixed state -
+echo  full signal, no clutter, a set clock - for screenshots. It is purely
+echo  cosmetic, changes nothing real, and ends on exit or reboot.
+echo.
+set "DMA="
+for /f "delims=" %%i in ('adb shell settings get global sysui_demo_allowed 2^>nul ^<nul') do set "DMA=%%i"
+if "!DMA!"=="" set "DMA=null"
+set "DMA=!DMA:"=!"
+echo  sysui_demo_allowed (global) = "!DMA!"   (must be 1 for demo mode)
+echo  There is no way to read back whether demo mode is currently ON - the
+echo  state lives in SystemUI, not in a setting. Look at the device.
+echo.
+echo    %g%[%w%1%g%]%w% Enter demo mode (clean bar, 12:00, full signal)
+echo    %g%[%w%2%g%]%w% Exit demo mode
+echo    %g%[%w%3%g%]%w% Set the demo clock
+echo    %g%[%w%4%g%]%w% Back
+set "dm=" & set /p dm="Choose An Option >> "
+if not defined dm goto tw_demo
+if "!dm!"=="1" goto tw_demo_enter
+if "!dm!"=="2" goto tw_demo_exit
+if "!dm!"=="3" goto tw_demo_clock
+if "!dm!"=="4" goto tweaks
+goto tw_demo
+
+:tw_demo_enter
+:: Command set verified from DemoController.kt:44-51 - enter/exit/status/
+:: network/clock/battery/bars are the only ones we send.
+call :_tw_undo_add global sysui_demo_allowed
+adb shell settings put global sysui_demo_allowed 1 <nul
+adb shell am broadcast -a com.android.systemui.demo -e command enter <nul >nul 2>&1
+adb shell am broadcast -a com.android.systemui.demo -e command clock -e hhmm 1200 <nul >nul 2>&1
+adb shell am broadcast -a com.android.systemui.demo -e command battery -e level 100 -e plugged false <nul >nul 2>&1
+adb shell am broadcast -a com.android.systemui.demo -e command network -e wifi show -e level 4 -e fully true <nul >nul 2>&1
+adb shell am broadcast -a com.android.systemui.demo -e command network -e mobile show -e datatype lte -e level 4 -e fully true <nul >nul 2>&1
+adb shell am broadcast -a com.android.systemui.demo -e command status -e volume hide -e bluetooth hide -e location hide -e alarm hide -e sync hide -e tty hide -e eri hide -e mute hide -e speakerphone hide <nul >nul 2>&1
+adb shell am broadcast -a com.android.systemui.demo -e command bars -e mode opaque <nul >nul 2>&1
+echo  Demo mode requested. Check the device's status bar.
+timeout /t 2 /nobreak >nul
+goto tw_demo
+
+:tw_demo_exit
+adb shell am broadcast -a com.android.systemui.demo -e command exit <nul >nul 2>&1
+echo  Exit sent - the real status bar should be back.
+timeout /t 2 /nobreak >nul
+goto tw_demo
+
+:tw_demo_clock
+echo.
+set "DMH=" & set /p DMH="Clock as HHMM, e.g. 0930 (blank = cancel) >> "
+if not defined DMH goto tw_demo
+set "DMH=!DMH:"=!"
+if not defined DMH goto tw_demo
+echo(!DMH!| findstr /r /x /c:"[01][0-9][0-5][0-9]" /c:"2[0-3][0-5][0-9]" >nul || goto tw_demo_bad
+adb shell am broadcast -a com.android.systemui.demo -e command clock -e hhmm !DMH! <nul >nul 2>&1
+echo  Clock set to !DMH! (demo mode must already be on).
+timeout /t 2 /nobreak >nul
+goto tw_demo
+
+:tw_demo_bad
+echo [%r%^^!%w%] Invalid time. Four digits, HHMM, e.g. 0930 or 1200.
+timeout /t 2 /nobreak >nul
+goto tw_demo_clock
+:: -------------------------------------------------------------------
+:: Profiles - the Windows-side answer to SetEdit's on-device boot queue
+:: (setedit/boot/BootUtils.java). A profile is a plain text file, so it
+:: is editable, diffable and shareable without DCX being involved.
+:: -------------------------------------------------------------------
+:tw_profile
+cls
+title Profiles
+call :logo
+set "PROFDIR=%USERPROFILE%\dcx_profiles"
+if not exist "%PROFDIR%" mkdir "%PROFDIR%"
+echo.
+echo  A profile is a plain text file, one key per line:
+echo      namespace^|key^|value      e.g.  global^|audio_safe_volume_state^|2
+echo      namespace^|key^|DELETE     removes the key
+echo  Lines starting with # are ignored, so you can annotate freely.
+echo.
+echo  Applying re-writes every listed key in one pass. That is how you
+echo  re-arm a per-boot tweak - the volume cap being the obvious one -
+echo  after a reboot, without walking the menus again.
+echo  Folder: %PROFDIR%
+echo.
+echo    %g%[%w%1%g%]%w% Save the current tweak keys as a profile
+echo    %g%[%w%2%g%]%w% Apply a profile
+echo    %g%[%w%3%g%]%w% Open the profiles folder
+echo    %g%[%w%4%g%]%w% Back
+set "pr=" & set /p pr="Choose An Option >> "
+if not defined pr goto tw_profile
+if "!pr!"=="1" goto tw_prof_save
+if "!pr!"=="2" goto tw_prof_apply
+if "!pr!"=="3" (start "" "%PROFDIR%" & goto tw_profile)
+if "!pr!"=="4" goto settools
+goto tw_profile
+
+:tw_prof_save
+set "TS=%date%_%time%"
+set "TS=%TS::=-%"
+set "TS=%TS:/=-%"
+set "TS=%TS:\=-%"
+set "TS=%TS:.=-%"
+set "TS=%TS:,=-%"
+set "TS=%TS: =_%"
+set "PROFF=%PROFDIR%\profile_%TS%.txt"
+> "%PROFF%" echo # DCX profile saved %date% %time%
+>>"%PROFF%" echo # format: namespace^|key^|value   (value DELETE removes the key)
+call :_tw_prof_add secure clock_seconds "%PROFF%"
+call :_tw_prof_add system status_bar_show_battery_percent "%PROFF%"
+call :_tw_prof_add global audio_safe_volume_state "%PROFF%"
+call :_tw_prof_add secure audio_safe_csd_as_a_feature_enabled "%PROFF%"
+call :_tw_prof_add secure icon_blacklist "%PROFF%"
+call :_tw_prof_add global heads_up_notifications_enabled "%PROFF%"
+call :_tw_prof_add system font_scale "%PROFF%"
+call :_tw_prof_add secure long_press_timeout "%PROFF%"
+call :_tw_prof_add global stay_on_while_plugged_in "%PROFF%"
+call :_tw_prof_add secure night_display_activated "%PROFF%"
+call :_tw_prof_add secure night_display_color_temperature "%PROFF%"
+call :_tw_prof_add global sysui_demo_allowed "%PROFF%"
+call :_tw_prof_add secure sysui_qs_tiles "%PROFF%"
+call :_tw_prof_add secure camera_double_tap_power_gesture_disabled "%PROFF%"
+call :_tw_prof_add global charging_sounds_enabled "%PROFF%"
+call :_tw_prof_add global sys_storage_threshold_percentage "%PROFF%"
+call :_tw_prof_add global low_power_trigger_level "%PROFF%"
+call :_tw_prof_add global enable_freeform_support "%PROFF%"
+echo.
+echo  Saved: %PROFF%
+echo  Edit it in Notepad to trim it down to just the keys you care about.
+echo  Press any key . . .
+pause >nul
+goto tw_profile
+
+:_tw_prof_add
+:: %1 ns  %2 key  %3 profile file. Unset keys are recorded as DELETE so a
+:: profile round-trips "this key was not set" instead of losing it.
+set "PVAL="
+for /f "delims=" %%v in ('adb shell settings get %~1 %~2 2^>nul ^<nul') do set "PVAL=%%v"
+if "!PVAL!"=="" set "PVAL=null"
+set "PVAL=!PVAL:"=!"
+if /i "!PVAL!"=="null" goto _tw_prof_del
+call :_tw_safechk PVAL || goto _tw_prof_skip
+>>"%~3" echo %~1^|%~2^|!PVAL!
+exit /b
+
+:_tw_prof_del
+>>"%~3" echo %~1^|%~2^|DELETE
+exit /b
+
+:_tw_prof_skip
+>>"%~3" echo # %~1^|%~2 skipped - value holds a character DCX will not round-trip
+exit /b
+
+:tw_prof_apply
+cls
+title Profiles : apply
+call :logo
+echo.
+for /f "delims==" %%v in ('set PROF_ 2^>nul') do set "%%v="
+set "PROFN=0"
+for /f "delims=" %%f in ('dir /b /o-d /a-d "%PROFDIR%\*.txt" 2^>nul') do (
+    set /a PROFN+=1
+    set "PROF_!PROFN!=%%f"
+    echo     %g%[%w%!PROFN!%g%]%w% %%f
+)
+if "!PROFN!"=="0" goto tw_prof_none
+echo     %g%[%w%0%g%]%w% Back
+set "PROFSEL=" & set /p PROFSEL="Apply which? >> "
+if not defined PROFSEL goto tw_prof_apply
+if "!PROFSEL!"=="0" goto tw_profile
+echo(!PROFSEL!| findstr /r /x /c:"[0-9][0-9]*" >nul || goto tw_prof_apply
+set "PROFF="
+if defined PROF_!PROFSEL! for /f "delims=" %%v in ("!PROFSEL!") do set "PROFF=%PROFDIR%\!PROF_%%v!"
+if not defined PROFF goto tw_prof_apply
+echo.
+echo  About to apply: !PROFF!
+set "ok=" & set /p ok="Run it? (y = yes, anything else = cancel) >> "
+if /i not "!ok!"=="y" goto tw_profile
+echo.
+:: eol=# drops comment lines; each line is re-validated on the way in,
+:: because a profile is a file the user can hand-edit.
+for /f "usebackq eol=# tokens=1-3 delims=|" %%a in ("!PROFF!") do call :_tw_prof_apply1 "%%a" "%%b" "%%c"
+echo.
+echo  Done. Undo script: %EXP_UNDO%
+echo  Press any key . . .
+pause >nul
+goto tw_profile
+
+:tw_prof_none
+echo  No profiles yet - save one first, or drop a .txt into
+echo  %PROFDIR%
+timeout /t 3 /nobreak >nul
+goto tw_profile
+
+:_tw_prof_apply1
+set "PNS=%~1"
+set "PKEY=%~2"
+set "PVAL=%~3"
+if not defined PNS exit /b
+if not defined PKEY exit /b
+if /i "!PNS!"=="system" goto _tw_pa_ns_ok
+if /i "!PNS!"=="secure" goto _tw_pa_ns_ok
+if /i "!PNS!"=="global" goto _tw_pa_ns_ok
+echo    skip - unknown namespace: !PNS!
+exit /b
+
+:_tw_pa_ns_ok
+echo(!PKEY!| findstr /r /x /c:"[a-zA-Z0-9_.-][a-zA-Z0-9_.-]*" >nul || goto _tw_pa_badkey
+if /i "!PVAL!"=="DELETE" goto _tw_pa_del
+if not defined PVAL goto _tw_pa_badval
+call :_tw_safechk PVAL || goto _tw_pa_badval
+echo(!PVAL!| findstr /r /x /c:"[a-zA-Z0-9_.,:/=+-][a-zA-Z0-9_.,:/=+-]*" >nul || goto _tw_pa_badval
+call :_tw_undo_add !PNS! !PKEY!
+adb shell settings put !PNS! !PKEY! !PVAL! <nul >nul
+echo    put    !PNS! !PKEY! = !PVAL!
+exit /b
+
+:_tw_pa_del
+call :_tw_undo_add !PNS! !PKEY!
+adb shell settings delete !PNS! !PKEY! >nul 2>&1 <nul
+echo    delete !PNS! !PKEY!
+exit /b
+
+:_tw_pa_badkey
+echo    skip - bad key name: !PKEY!
+exit /b
+
+:_tw_pa_badval
+echo    skip - bad or unsafe value for !PKEY!
+exit /b
+:: ===================================================================
+:: NEW (Tier 3): QS tile editor + assorted device tweaks.
+::
+:: Verified against AOSP main this pass:
+::   secure sysui_qs_tiles          Settings.java:11710 (Secure.QS_TILES).
+::     Still the source of truth on main: UserTileSpecRepository.kt:229
+::     SETTING = Settings.Secure.QS_TILES, and it registers a content
+::     observer on it (L101) -> edits apply live. Invalid specs are
+::     dropped, never stored empty (TileSpecRepository.kt doc), so a typo
+::     degrades instead of wrecking the panel.
+::   secure camera_gesture_disabled / camera_double_tap_power_gesture_
+::     disabled / camera_double_twist_to_flip_enabled  Settings.java
+::     :11012, :11070, :11080
+::   global charging_sounds_enabled / charging_vibration_enabled
+::     Settings.java:8880, :8887
+::   global sys_storage_threshold_percentage / _max_bytes  :15353
+::   global low_power_trigger_level  Settings.java:16861 - note the KEY is
+::     low_power_trigger_level even though the constant is called
+::     LOW_POWER_MODE_TRIGGER_LEVEL.
+::   global default_install_location  Settings.java:15582
+::   global enable_freeform_support / force_resizable_activities  :13667,
+::     :13659
+:: ===================================================================
+:tw_qs
+cls
+title Quick Settings Tiles
+call :logo
+echo.
+set "QSCUR="
+for /f "delims=" %%i in ('adb shell settings get secure sysui_qs_tiles 2^>nul ^<nul') do set "QSCUR=%%i"
+if "!QSCUR!"=="" set "QSCUR=null"
+set "QSCUR=!QSCUR:"=!"
+echo  sysui_qs_tiles (secure) = "!QSCUR!"
+if "!QSCUR!"=="null" echo    (null = the device is using its built-in default list)
+echo.
+echo  The order here is the order they appear. Android ships more tiles than
+echo  it shows - this is how you reach them. Unknown names are dropped by
+echo  SystemUI rather than breaking the panel, and the list is never stored
+echo  empty, so a typo costs you a tile, not your quick settings.
+echo.
+echo    %g%[%w%1%g%]%w% Add a tile (at the end)
+echo    %g%[%w%2%g%]%w% Add a tile (at the front)
+echo    %g%[%w%3%g%]%w% Remove a tile
+echo    %g%[%w%4%g%]%w% Reset to the device default (delete key)
+echo    %g%[%w%5%g%]%w% Back
+set "qs=" & set /p qs="Choose An Option >> "
+if not defined qs goto tw_qs
+if "!qs!"=="1" (set "QSPOS=end" & goto tw_qs_pick)
+if "!qs!"=="2" (set "QSPOS=front" & goto tw_qs_pick)
+if "!qs!"=="3" goto tw_qs_del
+if "!qs!"=="4" goto tw_qs_reset
+if "!qs!"=="5" goto tweaks
+goto tw_qs
+
+:tw_qs_pick
+cls
+title Quick Settings Tiles : add
+call :logo
+echo.
+:: These are the specs present in SystemUI's quick_settings_tiles_stock but
+:: absent from quick_settings_tiles_default (AOSP main config.xml) - i.e.
+:: exactly the tiles the device has but does not show.
+echo  Tiles Android knows about but does not show by default:
+echo    %g%[%w%1%g%]%w% location            %g%[%w%9%g%]%w% onehanded
+echo    %g%[%w%2%g%]%w% hotspot             %g%[%w%10%g%]%w% qr_code_scanner
+echo    %g%[%w%3%g%]%w% saver               %g%[%w%11%g%]%w% dream          (screensaver)
+echo    %g%[%w%4%g%]%w% dark                %g%[%w%12%g%]%w% font_scaling
+echo    %g%[%w%5%g%]%w% night               %g%[%w%13%g%]%w% hearing_devices
+echo    %g%[%w%6%g%]%w% inversion           %g%[%w%14%g%]%w% notes
+echo    %g%[%w%7%g%]%w% color_correction    %g%[%w%15%g%]%w% reverse        (reverse charging)
+echo    %g%[%w%8%g%]%w% reduce_brightness   %g%[%w%16%g%]%w% work           (work profile)
+echo.
+echo    %g%[%w%17%g%]%w% Type a spec myself
+echo    %g%[%w%18%g%]%w% Back
+set "QSSEL=" & set /p QSSEL="Choose An Option >> "
+if not defined QSSEL goto tw_qs_pick
+set "QSTOK="
+if "!QSSEL!"=="1" set "QSTOK=location"
+if "!QSSEL!"=="2" set "QSTOK=hotspot"
+if "!QSSEL!"=="3" set "QSTOK=saver"
+if "!QSSEL!"=="4" set "QSTOK=dark"
+if "!QSSEL!"=="5" set "QSTOK=night"
+if "!QSSEL!"=="6" set "QSTOK=inversion"
+if "!QSSEL!"=="7" set "QSTOK=color_correction"
+if "!QSSEL!"=="8" set "QSTOK=reduce_brightness"
+if "!QSSEL!"=="9" set "QSTOK=onehanded"
+if "!QSSEL!"=="10" set "QSTOK=qr_code_scanner"
+if "!QSSEL!"=="11" set "QSTOK=dream"
+if "!QSSEL!"=="12" set "QSTOK=font_scaling"
+if "!QSSEL!"=="13" set "QSTOK=hearing_devices"
+if "!QSSEL!"=="14" set "QSTOK=notes"
+if "!QSSEL!"=="15" set "QSTOK=reverse"
+if "!QSSEL!"=="16" set "QSTOK=work"
+if "!QSSEL!"=="17" goto tw_qs_custom
+if "!QSSEL!"=="18" goto tw_qs
+if not defined QSTOK goto tw_qs_pick
+goto tw_qs_addgo
+
+:tw_qs_custom
+echo.
+echo  Lowercase letters, digits and _ only. DCX will not take the
+echo  custom(package/class) form - that needs brackets and a slash, which
+echo  batch will not carry safely; use the Shell option for those.
+set "QSTOK=" & set /p QSTOK="Tile spec (blank = cancel) >> "
+if not defined QSTOK goto tw_qs_pick
+set "QSTOK=!QSTOK:"=!"
+if not defined QSTOK goto tw_qs_pick
+call :_tw_safechk QSTOK || goto tw_qs_bad
+echo(!QSTOK!| findstr /r /x /c:"[a-z0-9_][a-z0-9_]*" >nul || goto tw_qs_bad
+goto tw_qs_addgo
+
+:tw_qs_addgo
+call :_tw_undo_add secure sysui_qs_tiles
+:: Same rebuild-not-append shape as the icon blacklist: drop the spec first
+:: so adding an existing tile moves it rather than duplicating it.
+set "QSNEW="
+if "!QSCUR!"=="null" goto _tw_qs_addput
+for %%t in (!QSCUR!) do (
+    set "QSHIT="
+    for %%u in (!QSTOK!) do if /i "%%t"=="%%u" set "QSHIT=1"
+    if not defined QSHIT set "QSNEW=!QSNEW!,%%t"
+)
+
+:_tw_qs_addput
+if /i "!QSPOS!"=="front" (set "QSNEW=,!QSTOK!!QSNEW!") else (set "QSNEW=!QSNEW!,!QSTOK!")
+set "QSNEW=!QSNEW:~1!"
+adb shell settings put secure sysui_qs_tiles !QSNEW! <nul
+goto tw_qs
+
+:tw_qs_del
+cls
+title Quick Settings Tiles : remove
+call :logo
+echo.
+if "!QSCUR!"=="null" goto tw_qs_empty
+for /f "delims==" %%v in ('set QST_ 2^>nul') do set "%%v="
+set "QSN=0"
+echo  Current tiles, in display order:
+for %%t in (!QSCUR!) do (
+    set /a QSN+=1
+    set "QST_!QSN!=%%t"
+    echo     %g%[%w%!QSN!%g%]%w% %%t
+)
+echo     %g%[%w%0%g%]%w% Back
+set "QSPICK=" & set /p QSPICK="Remove which? >> "
+if not defined QSPICK goto tw_qs_del
+if "!QSPICK!"=="0" goto tw_qs
+echo(!QSPICK!| findstr /r /x /c:"[0-9][0-9]*" >nul || goto tw_qs_del
+set "QSTOK="
+if defined QST_!QSPICK! for /f "delims=" %%v in ("!QSPICK!") do set "QSTOK=!QST_%%v!"
+if not defined QSTOK goto tw_qs_del
+call :_tw_undo_add secure sysui_qs_tiles
+set "QSNEW="
+for %%t in (!QSCUR!) do if not "%%t"=="!QSTOK!" set "QSNEW=!QSNEW!,%%t"
+:: An empty list is not a valid value - SystemUI would fall back anyway, so
+:: removing the last tile is expressed honestly as a reset.
+if not defined QSNEW goto tw_qs_reset
+set "QSNEW=!QSNEW:~1!"
+adb shell settings put secure sysui_qs_tiles !QSNEW! <nul
+goto tw_qs
+
+:tw_qs_empty
+echo  The device is on its default list - nothing to remove yet.
+echo  Add a tile first, which writes the full list out.
+timeout /t 3 /nobreak >nul
+goto tw_qs
+
+:tw_qs_reset
+call :_tw_undo_add secure sysui_qs_tiles
+adb shell settings delete secure sysui_qs_tiles >nul 2>&1 <nul
+goto tw_qs
+
+:tw_qs_bad
+echo [%r%^^!%w%] Not allowed - lowercase letters, digits and _ only.
+timeout /t 2 /nobreak >nul
+goto tw_qs_pick
+
+:tw_more
+cls
+title More Device Tweaks
+call :logo
+echo.
+echo                              %m%More Device Tweaks%w%
+echo.
+echo    %g%[%w%1%g%]%w% Camera gestures (double-tap power, twist to flip)
+echo    %g%[%w%2%g%]%w% Charging sounds and vibration
+echo    %g%[%w%3%g%]%w% Storage low-space warning
+echo    %g%[%w%4%g%]%w% Battery saver auto-trigger level
+echo    %g%[%w%5%g%]%w% Freeform windows (needs a reboot)
+echo    %g%[%w%6%g%]%w% Default install location
+echo    %g%[%w%7%g%]%w% Back
+set "mo=" & set /p mo="Choose An Option >> "
+if not defined mo goto tw_more
+if "!mo!"=="1" goto tw_cam
+if "!mo!"=="2" goto tw_chg
+if "!mo!"=="3" goto tw_stor
+if "!mo!"=="4" goto tw_bsav
+if "!mo!"=="5" goto tw_free
+if "!mo!"=="6" goto tw_inst
+if "!mo!"=="7" goto tweaks
+goto tw_more
+
+:tw_cam
+cls
+title Camera Gestures
+call :logo
+echo.
+set "CG1="
+set "CG2="
+set "CG3="
+for /f "delims=" %%i in ('adb shell settings get secure camera_double_tap_power_gesture_disabled 2^>nul ^<nul') do set "CG1=%%i"
+for /f "delims=" %%i in ('adb shell settings get secure camera_double_twist_to_flip_enabled 2^>nul ^<nul') do set "CG2=%%i"
+for /f "delims=" %%i in ('adb shell settings get secure camera_gesture_disabled 2^>nul ^<nul') do set "CG3=%%i"
+if "!CG1!"=="" set "CG1=null"
+if "!CG2!"=="" set "CG2=null"
+if "!CG3!"=="" set "CG3=null"
+set "CG1=!CG1:"=!"
+set "CG2=!CG2:"=!"
+set "CG3=!CG3:"=!"
+echo  camera_double_tap_power_gesture_disabled = "!CG1!"   (1 = gesture off)
+echo  camera_double_twist_to_flip_enabled      = "!CG2!"   (1 = twist flips camera)
+echo  camera_gesture_disabled                  = "!CG3!"   (1 = lift-to-launch off)
+echo.
+echo  Note the naming: two of these are _disabled, one is _enabled, so 1
+echo  means opposite things. The menu below says what it does, not the value.
+echo.
+echo    %g%[%w%1%g%]%w% Double-tap power for camera: OFF
+echo    %g%[%w%2%g%]%w% Double-tap power for camera: ON
+echo    %g%[%w%3%g%]%w% Twist to flip camera: ON
+echo    %g%[%w%4%g%]%w% Twist to flip camera: OFF
+echo    %g%[%w%5%g%]%w% Reset all three to device default
+echo    %g%[%w%6%g%]%w% Back
+set "cg=" & set /p cg="Choose An Option >> "
+if not defined cg goto tw_cam
+if "!cg!"=="1" (call :_tw_undo_add secure camera_double_tap_power_gesture_disabled & adb shell settings put secure camera_double_tap_power_gesture_disabled 1 <nul & goto tw_cam)
+if "!cg!"=="2" (call :_tw_undo_add secure camera_double_tap_power_gesture_disabled & adb shell settings put secure camera_double_tap_power_gesture_disabled 0 <nul & goto tw_cam)
+if "!cg!"=="3" (call :_tw_undo_add secure camera_double_twist_to_flip_enabled & adb shell settings put secure camera_double_twist_to_flip_enabled 1 <nul & goto tw_cam)
+if "!cg!"=="4" (call :_tw_undo_add secure camera_double_twist_to_flip_enabled & adb shell settings put secure camera_double_twist_to_flip_enabled 0 <nul & goto tw_cam)
+if "!cg!"=="5" goto tw_cam_reset
+if "!cg!"=="6" goto tw_more
+goto tw_cam
+
+:tw_cam_reset
+call :_tw_undo_add secure camera_double_tap_power_gesture_disabled
+call :_tw_undo_add secure camera_double_twist_to_flip_enabled
+call :_tw_undo_add secure camera_gesture_disabled
+adb shell settings delete secure camera_double_tap_power_gesture_disabled >nul 2>&1 <nul
+adb shell settings delete secure camera_double_twist_to_flip_enabled >nul 2>&1 <nul
+adb shell settings delete secure camera_gesture_disabled >nul 2>&1 <nul
+goto tw_cam
+
+:tw_chg
+cls
+title Charging Sounds
+call :logo
+echo.
+set "CH1="
+set "CH2="
+for /f "delims=" %%i in ('adb shell settings get global charging_sounds_enabled 2^>nul ^<nul') do set "CH1=%%i"
+for /f "delims=" %%i in ('adb shell settings get global charging_vibration_enabled 2^>nul ^<nul') do set "CH2=%%i"
+if "!CH1!"=="" set "CH1=null"
+if "!CH2!"=="" set "CH2=null"
+set "CH1=!CH1:"=!"
+set "CH2=!CH2:"=!"
+echo  charging_sounds_enabled    (global) = "!CH1!"
+echo  charging_vibration_enabled (global) = "!CH2!"
+echo  The chirp and buzz when you plug in. 1 = on, 0 = off.
+echo.
+echo    %g%[%w%1%g%]%w% Sound off
+echo    %g%[%w%2%g%]%w% Sound on
+echo    %g%[%w%3%g%]%w% Vibration off
+echo    %g%[%w%4%g%]%w% Vibration on
+echo    %g%[%w%5%g%]%w% Reset both to device default
+echo    %g%[%w%6%g%]%w% Back
+set "ch=" & set /p ch="Choose An Option >> "
+if not defined ch goto tw_chg
+if "!ch!"=="1" (call :_tw_undo_add global charging_sounds_enabled & adb shell settings put global charging_sounds_enabled 0 <nul & goto tw_chg)
+if "!ch!"=="2" (call :_tw_undo_add global charging_sounds_enabled & adb shell settings put global charging_sounds_enabled 1 <nul & goto tw_chg)
+if "!ch!"=="3" (call :_tw_undo_add global charging_vibration_enabled & adb shell settings put global charging_vibration_enabled 0 <nul & goto tw_chg)
+if "!ch!"=="4" (call :_tw_undo_add global charging_vibration_enabled & adb shell settings put global charging_vibration_enabled 1 <nul & goto tw_chg)
+if "!ch!"=="5" goto tw_chg_reset
+if "!ch!"=="6" goto tw_more
+goto tw_chg
+
+:tw_chg_reset
+call :_tw_undo_add global charging_sounds_enabled
+call :_tw_undo_add global charging_vibration_enabled
+adb shell settings delete global charging_sounds_enabled >nul 2>&1 <nul
+adb shell settings delete global charging_vibration_enabled >nul 2>&1 <nul
+goto tw_chg
+
+:tw_stor
+cls
+title Storage Warning
+call :logo
+echo.
+set "STP="
+set "STB="
+for /f "delims=" %%i in ('adb shell settings get global sys_storage_threshold_percentage 2^>nul ^<nul') do set "STP=%%i"
+for /f "delims=" %%i in ('adb shell settings get global sys_storage_threshold_max_bytes 2^>nul ^<nul') do set "STB=%%i"
+if "!STP!"=="" set "STP=null"
+if "!STB!"=="" set "STB=null"
+set "STP=!STP:"=!"
+set "STB=!STB:"=!"
+echo  sys_storage_threshold_percentage (global) = "!STP!"   (default 10)
+echo  sys_storage_threshold_max_bytes  (global) = "!STB!"   (caps the above)
+echo.
+echo  When free space drops below the percentage, Android nags and starts
+echo  refusing installs. On a 512 GB phone the stock 10%% means it panics
+echo  with 50 GB free. The max_bytes cap is the sane fix: whichever is
+echo  smaller wins.
+echo.
+echo    %g%[%w%1%g%]%w% Percentage: 10 (stock)
+echo    %g%[%w%2%g%]%w% Percentage: 5
+echo    %g%[%w%3%g%]%w% Percentage: 2
+echo    %g%[%w%4%g%]%w% Cap the warning at 2 GB free  (max_bytes)
+echo    %g%[%w%5%g%]%w% Cap the warning at 5 GB free  (max_bytes)
+echo    %g%[%w%6%g%]%w% Reset both to device default
+echo    %g%[%w%7%g%]%w% Back
+set "st=" & set /p st="Choose An Option >> "
+if not defined st goto tw_stor
+if "!st!"=="1" (call :_tw_undo_add global sys_storage_threshold_percentage & adb shell settings put global sys_storage_threshold_percentage 10 <nul & goto tw_stor)
+if "!st!"=="2" (call :_tw_undo_add global sys_storage_threshold_percentage & adb shell settings put global sys_storage_threshold_percentage 5 <nul & goto tw_stor)
+if "!st!"=="3" (call :_tw_undo_add global sys_storage_threshold_percentage & adb shell settings put global sys_storage_threshold_percentage 2 <nul & goto tw_stor)
+if "!st!"=="4" (call :_tw_undo_add global sys_storage_threshold_max_bytes & adb shell settings put global sys_storage_threshold_max_bytes 2147483648 <nul & goto tw_stor)
+if "!st!"=="5" (call :_tw_undo_add global sys_storage_threshold_max_bytes & adb shell settings put global sys_storage_threshold_max_bytes 5368709120 <nul & goto tw_stor)
+if "!st!"=="6" goto tw_stor_reset
+if "!st!"=="7" goto tw_more
+goto tw_stor
+
+:tw_stor_reset
+call :_tw_undo_add global sys_storage_threshold_percentage
+call :_tw_undo_add global sys_storage_threshold_max_bytes
+adb shell settings delete global sys_storage_threshold_percentage >nul 2>&1 <nul
+adb shell settings delete global sys_storage_threshold_max_bytes >nul 2>&1 <nul
+goto tw_stor
+
+:tw_bsav
+cls
+title Battery Saver Trigger
+call :logo
+echo.
+set "BSV="
+for /f "delims=" %%i in ('adb shell settings get global low_power_trigger_level 2^>nul ^<nul') do set "BSV=%%i"
+if "!BSV!"=="" set "BSV=null"
+set "BSV=!BSV:"=!"
+echo  low_power_trigger_level (global) = "!BSV!" %%   (0/null = never auto-on)
+echo.
+echo  The battery percentage at which saver switches itself on. This is only
+echo  the trigger - Battery ^> Saver On/Off writes low_power itself, so that
+echo  screen turns saver on now, this one decides when it does so by itself.
+echo.
+echo    %g%[%w%1%g%]%w% Never (0)
+echo    %g%[%w%2%g%]%w% 5%%
+echo    %g%[%w%3%g%]%w% 15%% (common default)
+echo    %g%[%w%4%g%]%w% 30%%
+echo    %g%[%w%5%g%]%w% 50%%
+echo    %g%[%w%6%g%]%w% Custom (0 - 99)
+echo    %g%[%w%7%g%]%w% Reset to device default (delete key)
+echo    %g%[%w%8%g%]%w% Back
+set "bsv=" & set /p bsv="Choose An Option >> "
+if not defined bsv goto tw_bsav
+if "!bsv!"=="1" (set "BSNEW=0" & goto tw_bsav_apply)
+if "!bsv!"=="2" (set "BSNEW=5" & goto tw_bsav_apply)
+if "!bsv!"=="3" (set "BSNEW=15" & goto tw_bsav_apply)
+if "!bsv!"=="4" (set "BSNEW=30" & goto tw_bsav_apply)
+if "!bsv!"=="5" (set "BSNEW=50" & goto tw_bsav_apply)
+if "!bsv!"=="6" goto tw_bsav_custom
+if "!bsv!"=="7" (call :_tw_undo_add global low_power_trigger_level & adb shell settings delete global low_power_trigger_level >nul 2>&1 <nul & goto tw_bsav)
+if "!bsv!"=="8" goto tw_more
+goto tw_bsav
+
+:tw_bsav_custom
+echo.
+set "BSNEW=" & set /p BSNEW="Percentage 0 - 99 (blank = cancel) >> "
+if not defined BSNEW goto tw_bsav
+set "BSNEW=!BSNEW:"=!"
+if not defined BSNEW goto tw_bsav
+echo(!BSNEW!| findstr /r /x /c:"[0-9]" /c:"[1-9][0-9]" >nul || goto tw_bsav_bad
+goto tw_bsav_apply
+
+:tw_bsav_bad
+echo [%r%^^!%w%] Invalid value. A whole number from 0 to 99.
+timeout /t 2 /nobreak >nul
+goto tw_bsav_custom
+
+:tw_bsav_apply
+call :_tw_undo_add global low_power_trigger_level
+adb shell settings put global low_power_trigger_level !BSNEW! <nul
+goto tw_bsav
+
+:tw_free
+cls
+title Freeform Windows
+call :logo
+echo.
+set "FW1="
+set "FW2="
+for /f "delims=" %%i in ('adb shell settings get global enable_freeform_support 2^>nul ^<nul') do set "FW1=%%i"
+for /f "delims=" %%i in ('adb shell settings get global force_resizable_activities 2^>nul ^<nul') do set "FW2=%%i"
+if "!FW1!"=="" set "FW1=null"
+if "!FW2!"=="" set "FW2=null"
+set "FW1=!FW1:"=!"
+set "FW2=!FW2:"=!"
+echo  enable_freeform_support    (global) = "!FW1!"
+echo  force_resizable_activities (global) = "!FW2!"
+echo.
+echo  Desktop-style floating windows. Both are developer-options keys and
+echo  need a REBOOT to take effect - nothing will look different until then.
+echo  Force-resizable makes apps that declare themselves fixed-size resize
+echo  anyway, which some of them handle badly.
+echo.
+echo    %g%[%w%1%g%]%w% Enable freeform support
+echo    %g%[%w%2%g%]%w% Disable freeform support
+echo    %g%[%w%3%g%]%w% Force activities resizable: on
+echo    %g%[%w%4%g%]%w% Force activities resizable: off
+echo    %g%[%w%5%g%]%w% Reset both to device default
+echo    %g%[%w%6%g%]%w% Reboot now
+echo    %g%[%w%7%g%]%w% Back
+set "fw=" & set /p fw="Choose An Option >> "
+if not defined fw goto tw_free
+if "!fw!"=="1" (call :_tw_undo_add global enable_freeform_support & adb shell settings put global enable_freeform_support 1 <nul & goto tw_free)
+if "!fw!"=="2" (call :_tw_undo_add global enable_freeform_support & adb shell settings put global enable_freeform_support 0 <nul & goto tw_free)
+if "!fw!"=="3" (call :_tw_undo_add global force_resizable_activities & adb shell settings put global force_resizable_activities 1 <nul & goto tw_free)
+if "!fw!"=="4" (call :_tw_undo_add global force_resizable_activities & adb shell settings put global force_resizable_activities 0 <nul & goto tw_free)
+if "!fw!"=="5" goto tw_free_reset
+if "!fw!"=="6" (adb reboot <nul & goto tw_free)
+if "!fw!"=="7" goto tw_more
+goto tw_free
+
+:tw_free_reset
+call :_tw_undo_add global enable_freeform_support
+call :_tw_undo_add global force_resizable_activities
+adb shell settings delete global enable_freeform_support >nul 2>&1 <nul
+adb shell settings delete global force_resizable_activities >nul 2>&1 <nul
+goto tw_free
+
+:tw_inst
+cls
+title Install Location
+call :logo
+echo.
+set "ILV="
+for /f "delims=" %%i in ('adb shell settings get global default_install_location 2^>nul ^<nul') do set "ILV=%%i"
+if "!ILV!"=="" set "ILV=null"
+set "ILV=!ILV:"=!"
+echo  default_install_location (global) = "!ILV!"
+echo    0/null = let the system decide, 1 = internal, 2 = external
+echo  Only bites on devices with adoptable/removable storage, and an app can
+echo  still override it in its manifest - so this is a preference, not a rule.
+echo.
+echo    %g%[%w%1%g%]%w% System decides (0)
+echo    %g%[%w%2%g%]%w% Prefer internal (1)
+echo    %g%[%w%3%g%]%w% Prefer external (2)
+echo    %g%[%w%4%g%]%w% Reset to device default (delete key)
+echo    %g%[%w%5%g%]%w% Back
+set "il=" & set /p il="Choose An Option >> "
+if not defined il goto tw_inst
+if "!il!"=="1" (call :_tw_undo_add global default_install_location & adb shell settings put global default_install_location 0 <nul & goto tw_inst)
+if "!il!"=="2" (call :_tw_undo_add global default_install_location & adb shell settings put global default_install_location 1 <nul & goto tw_inst)
+if "!il!"=="3" (call :_tw_undo_add global default_install_location & adb shell settings put global default_install_location 2 <nul & goto tw_inst)
+if "!il!"=="4" (call :_tw_undo_add global default_install_location & adb shell settings delete global default_install_location >nul 2>&1 <nul & goto tw_inst)
+if "!il!"=="5" goto tw_more
+goto tw_inst
+:: ===================================================================
+:: Settings Tools (main menu 15) - generic tooling over the whole
+:: settings provider, split out of the Tweaks hub. Tweaks is the
+:: curated list; these three work on any key and are the SetEdit
+:: analogue, so they earn their own top-level entry rather than
+:: sitting three levels down.
+:: ===================================================================
+:settools
+cls
+title Settings Tools
+call :logo
+echo.
+echo                               %m%Settings Tools%w%
+echo.
+echo  Tweaks %gold%[6]%w% is the curated list of things worth changing.
+echo  These work on any key in the settings provider, including the ones
+echo  DCX has no menu row for.
+echo.
+echo    %g%[%w%1%g%]%w% Settings explorer - list / get / put / delete
+echo    %g%[%w%2%g%]%w% Settings snapshot and diff
+echo    %g%[%w%3%g%]%w% Profiles - save / re-apply a set of keys
+echo    %g%[%w%4%g%]%w% Back to main menu
+set "sx=" & set /p sx="Choose An Option >> "
+if not defined sx goto settools
+if "!sx!"=="1" goto tw_explorer
+if "!sx!"=="2" goto tw_snapshot
+if "!sx!"=="3" goto tw_profile
+if "!sx!"=="4" goto menu
+goto settools
 
 :logo
 chcp 65001 >nul
