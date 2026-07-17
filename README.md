@@ -266,18 +266,40 @@ property DCX neo can toggle — **47 targets**, including every
 ```bat
 @echo off
 :: DCX neo Settings Backup created ...
-adb shell settings put global window_animation_scale "1.0"
-adb shell settings put system min_refresh_rate "60"
-adb shell settings delete global angle_gl_driver_all_angle >nul 2>&1
-adb shell setprop debug.hwui.renderer "skiagl"
+set "DCX_OK=0" & set "DCX_FAIL=0"
+call :dcx_do settings put global window_animation_scale "1.0"
+call :dcx_do settings put system min_refresh_rate "60"
+call :dcx_do settings delete global angle_gl_driver_all_angle
+call :dcx_do setprop debug.hwui.renderer "skiagl"
 :: prop persist.log.tag was unset at backup time - not restoring
 ...
-pause
+:: -> [OK] Restored n settings, none failed.
+::    or [WARN] n restored, m FAILED - listed above.
 ```
 
 Captured values are quoted; any key unset at backup time becomes a `delete`
 (or, for a property, a comment) — so a restore returns you to the exact prior
-state and never pins a property to an empty string. Because it's a normal batch
+state and never pins a property to an empty string.
+
+**Backup refuses to run without the device attached, on purpose.** Reading a key
+that the device doesn't answer for looks *identical* to a key that's genuinely
+unset — both come back empty — and unset is recorded as *"delete this on
+restore"*. A backup taken with the cable out would therefore be a file that
+**erases** your settings instead of restoring them, so DCX checks the device is
+there first and declines rather than write that.
+
+**And it only says `Backup complete.` once it has checked the file is really
+there** with real content in it. `%USERPROFILE%\dcx_backups` is exactly the sort
+of folder antivirus and Controlled Folder Access guard; if the writes are
+blocked, you get a clear failure and how to fix it — not a backup you *think*
+you have and find out about later. **Restore reports what actually happened.** It's a long run of ADB writes — if
+the cable is pulled, wireless ADB drops or authorisation expires part-way, the
+rest silently do nothing. Newer backup files count every write and end with
+`[OK] n restored` or `[WARN] n restored, m FAILED` naming the failures; DCX also
+re-checks the device is still connected afterwards, which covers backup files
+made before this existed. Restoring twice is harmless.
+
+Because it's a normal batch
 file you can run it directly without DCX neo, edit out lines you don't want, or
 share it to reproduce settings elsewhere. **Restore** lists backups (newest
 first), confirms, then applies the chosen one. Both can open the backups folder
@@ -453,6 +475,8 @@ reads** — they're stored but do nothing. DCX neo focuses on commands with a
 | **First apply in a menu jumps back without pausing (second time is fine)** | Fixed — an `adb shell` forwards stdin, so `pause` ate a keystroke; every `adb shell` before a pause now reads stdin from `nul` (`<nul`). |
 | **Clear Caches said "complete" but nothing was wiped** | Fixed — on a non-rooted device `su` did nothing silently; it now probes for root first and says *Root is not available — nothing was wiped*. |
 | **Clear Last Used printed a wall of `No shell command implementation`** | Fixed — that `usagestats` subcommand is missing on many builds; the per-package error is now suppressed Android-side. |
+| **A restore said it worked when it didn't** | Fixed — restore is a long run of ADB writes, and if the cable is pulled, wireless ADB drops or authorisation expires part-way, the rest silently no-op. It used to print *Restore complete.* regardless, leaving a half-restored device you believed was fine. Backup files now count what actually landed and report `[OK] n restored` or `[WARN] n restored, m FAILED` with the failures listed; DCX also re-checks the device is still connected afterwards, which catches the disconnect case for backup files made before this change. Restoring twice is harmless. |
+| **Clear Last Used / Log for user apps took ~30 seconds** | Fixed — those three actions ran one `adb shell` per package, and on a 269-package device that's ~27 s of pure USB round-trip for work the phone finishes in milliseconds. They now run the loop inside a single device shell session: same packages, same per-package progress lines, without the transport cost. |
 | **Most apps crash after enabling ANGLE** | Common on non-Pixel GPUs; **a reboot won't help** (it persists). Gaming → Force ANGLE → **Disable**/**Delete**. |
 | **Wi-Fi died after Network Boost** | Gaming → Network Boost → **Revert** (clears any old Wi-Fi keys). |
 | **ART Service printed a wall of text** | Not errors — older versions dumped a line per package. Current builds show a summary (optimised/failed) and only real failures; a few failures are normal. |
@@ -487,4 +511,3 @@ Exception: the image file [4152900.jpg] is excluded from the GPL-3.0 license.
 It is owned by its respective creator and is included strictly for personal,
 non-commercial display. If you fork or reuse this project, you must remove or
 replace this image.
-
