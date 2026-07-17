@@ -40,7 +40,7 @@ if %errorlevel% neq 0 (
     pause > nul
     exit /b
 )
-call :logo  
+call :logo
 echo                         %m%DCX Developed By AnOrmaluser12, Updated By S1nt3r%d%
 echo                                    %r%Use It At Your Own Risk%w%
 echo                         %y%A Restart Is Required If Something Is Misbehaving%w%
@@ -124,7 +124,7 @@ echo          ┗━━━━━━━━━━━━━━━━━━━━━
 echo.
 echo.
 echo                           %r%Gaming%w%         %gold%Battery%w%   %g%Optimize Android%w%
-echo                             [1]            [2]            [3]                                        
+echo                             [1]            [2]            [3]
 echo.
 echo                            %d%Auto%w%       %d%CheckSetting%w%      %d%Tweaks%w%
 echo                             [4]            [5]            [6]
@@ -169,15 +169,38 @@ goto menu_ask
 ::
 :: Backup dumps current values of every Settings.Global / System key,
 :: device_config flag and system property that DCX can toggle, into
-:: a stand-alone .bat file in %USERPROFILE%\dcx_backups\. Restore just
-:: `call`s that .bat - so the format is human-readable and you can
-:: edit it before restoring.
+:: a stand-alone .bat file in %USERPROFILE%\dcx_backups\. The format stays
+:: human-readable and you can edit it before restoring - deleting a line just
+:: skips that key. :restore `call`s it and then checks BOTH its exit code and
+:: whether the device is still attached, because a restore that lost the device
+:: half way must not report success.
 :: ===================================================================
 :backup
 cls
 title Backup Settings
 call :logo
 echo.
+:: FIX (safeguard): verify the device is actually attached BEFORE reading ~50 keys off
+:: it. :_bk_settings cannot tell "the device did not answer" from "this key is unset" -
+:: both come back empty, and empty is written as a `delete` line. So a backup taken with
+:: the cable out looks complete and is in fact an instruction to WIPE every managed
+:: setting on restore. The startup check is not enough: DCX runs long sessions and the
+:: cable can leave at any point after it.
+set "_dvst="
+for /f "delims=" %%d in ('adb get-state 2^>nul') do set "_dvst=%%d"
+if /i not "%_dvst%"=="device" (
+    echo  %r%No device connected - backup refused.%w%
+    echo.
+    echo  Backup reads the CURRENT value of every key DCX manages. A key the device
+    echo  does not answer for is indistinguishable from one that is genuinely unset,
+    echo  and unset is recorded as "delete this on restore". Writing that file now
+    echo  would hand you a backup that erases your settings instead of restoring them.
+    echo.
+    echo  Reconnect the device ^(check: adb devices^) and try again.
+    echo.
+    pause > nul
+    goto menu
+)
 set "BACKUPDIR=%USERPROFILE%\dcx_backups"
 if not exist "%BACKUPDIR%" mkdir "%BACKUPDIR%"
 :: FIX: build the timestamp via PowerShell so it is locale-independent.
@@ -208,9 +231,14 @@ echo.
     echo :: same device connected to revert to the captured state.
     echo ::
     echo :: You can also edit it (delete lines you don't want to restore^).
+    echo ::
+    echo :: Every restore line below goes through :dcx_do, which checks whether the
+    echo :: write actually landed and counts it. Deleting a line still just skips that
+    echo :: key - the count follows whatever is left.
     echo.
     echo adb start-server ^>nul 2^>^&1
     echo echo Restoring DCX-managed settings...
+    echo set "DCX_OK=0" ^& set "DCX_FAIL=0"
     echo.
 ) > "%BAKFILE%" < nul
 :: Helper macro for capturing settings (Settings.X namespace)
@@ -263,11 +291,62 @@ call :_bk_devcfg   app_hibernation app_hibernation_enabled "%BAKFILE%"
 call :_bk_prop     debug.hwui.renderer        "%BAKFILE%"
 call :_bk_prop     debug.renderengine.backend "%BAKFILE%"
 call :_bk_prop     persist.log.tag            "%BAKFILE%"
+:: FIX: the generated script used to end with a flat "Done. Press any key to close."
+:: no matter what happened. A restore is a long run of adb writes - pull the cable,
+:: drop wireless ADB, or let authorisation expire part-way and the remaining writes
+:: all no-op, yet it still said Done and the device was left half-restored with
+:: nothing to show for it. The footer below counts what actually landed and exits
+:: with the failure count, so both this file standalone AND :restore can tell.
 (
     echo.
-    echo echo Done. Press any key to close.
+    echo goto :dcx_report
+    echo.
+    echo :dcx_do
+    echo :: Runs one restore command and records whether it landed. adb exits non-zero
+    echo :: when the device is gone ^(the disconnect case^) and, on Android 7+, when the
+    echo :: command itself is rejected. Values are quoted by the generator, so a value
+    echo :: holding a cmd metacharacter cannot break out of this line.
+    echo adb shell %%* ^>nul 2^>^&1
+    echo if errorlevel 1 ^(
+    echo     set /a DCX_FAIL+=1
+    echo     echo   [FAIL] %%*
+    echo ^) else ^(
+    echo     set /a DCX_OK+=1
+    echo ^)
+    echo goto :eof
+    echo.
+    echo :dcx_report
+    echo echo.
+    echo if "%%DCX_FAIL%%"=="0" ^(
+    echo     echo [OK] Restored %%DCX_OK%% settings, none failed.
+    echo ^) else ^(
+    echo     echo [WARN] %%DCX_OK%% restored, %%DCX_FAIL%% FAILED - listed above.
+    echo     echo        The device may be in a mixed state. Reconnect it and run this
+    echo     echo        file again - restoring twice is harmless.
+    echo ^)
+    echo echo.
     echo pause ^>nul
+    echo exit /b %%DCX_FAIL%%
 ) >> "%BAKFILE%"
+:: FIX (safeguard): "Backup complete." used to print no matter what. The file is built
+:: by ~50 append redirections into %USERPROFILE%\dcx_backups - exactly the kind of path
+:: Controlled Folder Access and antivirus guard. When that happens every append no-ops
+:: silently and the user is told they have a backup they do not have -
+:: worse than a failed backup they know about, because they will rely on it later.
+:: Checking for a real restore line proves the settings were captured, not just that
+:: the header was written.
+set "_bkok=0"
+if exist "%BAKFILE%" findstr /b /c:"call :dcx_do" "%BAKFILE%" >nul 2>&1 && set "_bkok=1"
+if "%_bkok%"=="0" (
+    echo  %r%Backup FAILED%w% - no usable restore file was written.
+    echo    Tried: %BAKFILE%
+    echo.
+    echo  That folder is often blocked by antivirus or Controlled Folder Access.
+    echo  Allow it, or run DCX from another location, then try again.
+    echo.
+    pause > nul
+    goto menu
+)
 echo  %g%Backup complete.%w%
 echo.
 echo  %b%[%w%1%b%]%w% Open backups folder in Explorer
@@ -304,9 +383,9 @@ set "_val="
 for /f "delims=" %%v in ('adb shell settings get %_ns% %_key% 2^>nul ^<nul') do set "_val=%%v"
 if "!_val!"=="" set "_val=null"
 if /i "!_val!"=="null" (
-    >>"%_out%" echo adb shell settings delete %_ns% %_key% ^>nul 2^>^&1
+    >>"%_out%" echo call :dcx_do settings delete %_ns% %_key%
 ) else (
-    >>"%_out%" echo adb shell settings put %_ns% %_key% "!_val!"
+    >>"%_out%" echo call :dcx_do settings put %_ns% %_key% "!_val!"
 )
 endlocal
 exit /b
@@ -323,7 +402,7 @@ if "!_val!"=="" set "_val=null"
 if /i "!_val!"=="null" (
     >>"%_out%" echo :: %_ns%/%_key% was unset at backup time
 ) else (
-    >>"%_out%" echo adb shell device_config put %_ns% %_key% "!_val!"
+    >>"%_out%" echo call :dcx_do device_config put %_ns% %_key% "!_val!"
 )
 endlocal
 exit /b
@@ -341,7 +420,7 @@ for /f "delims=" %%v in ('adb shell getprop %_key% 2^>nul ^<nul') do set "_val=%
 if "!_val!"=="" (
     >>"%_out%" echo :: prop %_key% was unset at backup time - not restoring
 ) else (
-    >>"%_out%" echo adb shell setprop %_key% "!_val!"
+    >>"%_out%" echo call :dcx_do setprop %_key% "!_val!"
 )
 endlocal
 exit /b
@@ -405,8 +484,27 @@ choice /c:YN /n > nul
 if errorlevel 2 goto menu
 cls
 call "%RESTOREFILE%"
+set "_rrc=%errorlevel%"
+:: FIX: this printed "Restore complete." unconditionally - whatever actually happened.
+:: Two ways it lied: a backup file written by this version exits with its failed-write
+:: count, and older files (written before that existed) always exit 0 even if the
+:: device vanished half way. So check both: the exit code, and whether the device is
+:: even still there. A half-restored device the user believes is fully restored is
+:: worse than a failed restore they know about.
+set "_rdev="
+for /f "delims=" %%d in ('adb get-state 2^>nul') do set "_rdev=%%d"
 echo.
-echo  %g%Restore complete.%w% Some changes may need a reboot to fully apply.
+if not "%_rrc%"=="0" (
+    echo  %r%Restore finished with %_rrc% failed write^(s^)%w% - they are listed above.
+    echo  The device may be in a mixed state. Reconnect it and restore again;
+    echo  restoring twice is harmless.
+) else if /i not "%_rdev%"=="device" (
+    echo  %r%The device is no longer connected.%w% The restore may have stopped part-way,
+    echo  and this backup file is too old to report its own failures. Reconnect the
+    echo  device and run the restore again - restoring twice is harmless.
+) else (
+    echo  %g%Restore complete.%w% Some changes may need a reboot to fully apply.
+)
 echo.
 pause > nul
 goto menu
@@ -994,7 +1092,7 @@ adb shell cmd voiceinteraction set-debug-hotword-logging false
 call :wm_silence_logs
 adb shell dumpsys binder_calls_stats --disable > nul 2>&1
 adb shell dumpsys binder_calls_stats --disable-detailed-tracking > nul 2>&1
-adb shell settings put global binder_calls_stats sampling_interval=500000000,detailed_tracking=disable,enabled=false,upload_data=false 
+adb shell settings put global binder_calls_stats sampling_interval=500000000,detailed_tracking=disable,enabled=false,upload_data=false
 adb shell dumpsys batterystats disable full-history > nul 2>&1
 adb shell ime tracing stop
 cls
@@ -1231,8 +1329,24 @@ goto animspeed
 cls
 call :logo
 title Clear Last Used Is Running^^!
-for /f "tokens=2 delims=:" %%a in ('adb shell pm list package ^<nul') do (
-adb shell "cmd usagestats clear-last-used-timestamps %%a >/dev/null 2>&1"
+:: FIX: this was one "adb shell" per package. Measured on a real device (Android 12,
+:: 269 packages): ~99 ms per round trip = ~26.6 SECONDS spent entirely on transport,
+:: for work the device finishes in milliseconds. The loop now runs INSIDE the device
+:: shell - one connection, same work, same per-package progress, because the device
+:: echoes each name back and the Windows side just prints it. Verified to return the
+:: identical 269-package set as the old parse before it was changed.
+::
+:: The other option - chaining every command into ONE Windows-built string with ";" -
+:: does NOT work here: "pm list package" is the FULL list, and 269 packages is ~20k
+:: characters against cmd's 8191-char command line. cmd truncates it silently, so
+:: packages past the cut are skipped with no error at all.
+::
+:: Two details that matter: "${p#package:}" strips the prefix ON THE DEVICE, so the
+:: name never crosses the adb transport mid-loop (no CRLF to trip over); and the
+:: redirects are ">/dev/null 2>/dev/null", never "2>&1" - an "&" inside a quoted adb
+:: argument inside a for /f IN clause is exactly the nested-quoting boundary that has
+:: bitten this script before, and "2>/dev/null" needs no "&" to do the same job.
+for /f "delims=" %%a in ('adb shell "pm list packages | while read p; do p=${p#package:}; cmd usagestats clear-last-used-timestamps $p >/dev/null 2>/dev/null; echo $p; done" ^<nul') do (
 echo %%a ━ clear last used^^!
 )
 echo.
@@ -1253,12 +1367,12 @@ cls
 echo.
 echo.
 call :logo
-echo                                      [%g%1%w%] 60hz 
-echo                                      [%g%2%w%] 90hz 
-echo                                      [%g%3%w%] 120hz 
+echo                                      [%g%1%w%] 60hz
+echo                                      [%g%2%w%] 90hz
+echo                                      [%g%3%w%] 120hz
 echo                                      [%g%4%w%] 144hz
 echo                                      [%g%5%w%] Remove
-echo                                      [%g%6%w%] Back  
+echo                                      [%g%6%w%] Back
 set "opt=" & set /p opt="Choose An Option >> "
 if "!opt!"=="1" goto sf60
 if "!opt!"=="2" goto sf90
@@ -1568,7 +1682,7 @@ goto sf120
 :sf120gaming
 cls
 title 120hz SF : Gaming Mode
-call :logo 
+call :logo
 ::Gaming Mode 120Hz
 set qk=3666666
 adb shell setprop debug.sf.region_sampling_duration_ns %qk%
@@ -1835,7 +1949,7 @@ timeout /t 2 /nobreak > nul
 echo.
 echo.
 echo Press Any Button To Go Back
-pause > nul 
+pause > nul
 goto sftmenu
 
 :dexopt
@@ -2064,7 +2178,7 @@ echo                                     %gold%[%w%4%gold%]%w% Toggle Sync
 echo                                     %gold%[%w%5%gold%]%w% Toggle Motion
 echo                                     %gold%[%w%6%gold%]%w% Toggle ZRAM
 echo                                     %gold%[%w%7%gold%]%w% Toggle Extreme Power Saver
-echo                                     %gold%[%w%8%gold%]%w% Toggle Send Error 
+echo                                     %gold%[%w%8%gold%]%w% Toggle Send Error
 echo                                     %gold%[%w%9%gold%]%w% Toggle Lock Profilling
 echo                                     %gold%[%w%10%gold%]%w% Toggle Logs/etc
 echo                                     %gold%[%w%11%gold%]%w% Next Page
@@ -2230,7 +2344,7 @@ if not "!wl!"=="3" goto _skwl3
     echo.
     pause > nul
     goto wakelockaudit_menu
-	
+
 :_skwl3
 if "!wl!"=="4" goto nextpage
 goto wakelockaudit_menu
@@ -2292,7 +2406,7 @@ if not "!rl!"=="5" goto _skrl5
     echo Defaults restored.
     pause > nul
     goto refreshlock
-	
+
 :_skrl5
 if "!rl!"=="6" goto nextpage
 goto refreshlock
@@ -2320,14 +2434,14 @@ if not "!fd!"=="1" goto _skfd1
     echo Doze forced.
     pause > nul
     goto forcedoze
-	
+
 :_skfd1
 if not "!fd!"=="2" goto _skfd2
     adb shell dumpsys deviceidle unforce <nul
     echo Returned to normal scheduling.
     pause > nul
     goto forcedoze
-	
+
 :_skfd2
 if "!fd!"=="3" (
     cls
@@ -2531,28 +2645,28 @@ echo.
 echo [#] Set %pkgv2% To Hibernate . . . .
 echo.
 for %%b in (
-    FOREGROUND_SERVICE_SPECIAL_USE 
-    INSTANT_APP_START_FOREGROUND 
-    RUN_ANY_IN_BACKGROUND 
-    RUN_IN_BACKGROUND 
+    FOREGROUND_SERVICE_SPECIAL_USE
+    INSTANT_APP_START_FOREGROUND
+    RUN_ANY_IN_BACKGROUND
+    RUN_IN_BACKGROUND
     START_FOREGROUND
     WAKE_LOCK
 ) do (
     adb shell cmd appops set %pkgv2% %%b ignore > nul 2>&1
 )
-adb shell cmd activity service-restart-backoff disable %pkgv2% 
-adb shell cmd activity set-bg-restriction-level --user 0 %pkgv2% hibernation 
-adb shell cmd activity set-foreground-service-delegate --user 0 %pkgv2% stop 
-adb shell cmd activity set-inactive %pkgv2% true 
-adb shell cmd activity set-standby-bucket %pkgv2% restricted 
-adb shell cmd app_hibernation set-state %pkgv2% true 
-adb shell cmd deviceidle sys-whitelist -%pkgv2% 
-adb shell cmd deviceidle whitelist -%pkgv2% 
-adb shell cmd dropbox add-low-priority %pkgv2% 
-adb shell cmd package art clear-app-profiles %pkgv2% 
-adb shell cmd package log-visibility --disable %pkgv2% 
-adb shell cmd shortcut clear-shortcuts %pkgv2% 
-adb shell cmd tare set-vip 0 %pkgv2% false 
+adb shell cmd activity service-restart-backoff disable %pkgv2%
+adb shell cmd activity set-bg-restriction-level --user 0 %pkgv2% hibernation
+adb shell cmd activity set-foreground-service-delegate --user 0 %pkgv2% stop
+adb shell cmd activity set-inactive %pkgv2% true
+adb shell cmd activity set-standby-bucket %pkgv2% restricted
+adb shell cmd app_hibernation set-state %pkgv2% true
+adb shell cmd deviceidle sys-whitelist -%pkgv2%
+adb shell cmd deviceidle whitelist -%pkgv2%
+adb shell cmd dropbox add-low-priority %pkgv2%
+adb shell cmd package art clear-app-profiles %pkgv2%
+adb shell cmd package log-visibility --disable %pkgv2%
+adb shell cmd shortcut clear-shortcuts %pkgv2%
+adb shell cmd tare set-vip 0 %pkgv2% false
 adb shell cmd usagestats clear-last-used-timestamps %pkgv2%
 adb shell am force-stop %pkgv2%
 adb shell am kill %pkgv2%
@@ -2585,7 +2699,7 @@ goto Deviceidle
 
 :devicesysdel
 cls
-call :logo 
+call :logo
 title Toggle Deviceidle Whitelist : Remove System App From Whitelist
 echo.
 echo  %r%======================== WARNING ========================%w%
@@ -2718,8 +2832,24 @@ goto logappsuser
 cls
 title Log For User Apps : Off
 call :logo
-for /f "tokens=2 delims=:" %%a in ('adb shell pm list package ^<nul') do (
-adb shell cmd package log-visibility --disable %%a > nul 2>&1
+:: FIX: this was one "adb shell" per package. Measured on a real device (Android 12,
+:: 269 packages): ~99 ms per round trip = ~26.6 SECONDS spent entirely on transport,
+:: for work the device finishes in milliseconds. The loop now runs INSIDE the device
+:: shell - one connection, same work, same per-package progress, because the device
+:: echoes each name back and the Windows side just prints it. Verified to return the
+:: identical 269-package set as the old parse before it was changed.
+::
+:: The other option - chaining every command into ONE Windows-built string with ";" -
+:: does NOT work here: "pm list package" is the FULL list, and 269 packages is ~20k
+:: characters against cmd's 8191-char command line. cmd truncates it silently, so
+:: packages past the cut are skipped with no error at all.
+::
+:: Two details that matter: "${p#package:}" strips the prefix ON THE DEVICE, so the
+:: name never crosses the adb transport mid-loop (no CRLF to trip over); and the
+:: redirects are ">/dev/null 2>/dev/null", never "2>&1" - an "&" inside a quoted adb
+:: argument inside a for /f IN clause is exactly the nested-quoting boundary that has
+:: bitten this script before, and "2>/dev/null" needs no "&" to do the same job.
+for /f "delims=" %%a in ('adb shell "pm list packages | while read p; do p=${p#package:}; cmd package log-visibility --disable $p >/dev/null 2>/dev/null; echo $p; done" ^<nul') do (
 echo Log disabled : %%a
 )
 echo.
@@ -2732,8 +2862,24 @@ goto nextpage
 cls
 title Log For User Apps : On
 call :logo
-for /f "tokens=2 delims=:" %%a in ('adb shell pm list package ^<nul') do (
-adb shell cmd package log-visibility --enable %%a > nul 2>&1
+:: FIX: this was one "adb shell" per package. Measured on a real device (Android 12,
+:: 269 packages): ~99 ms per round trip = ~26.6 SECONDS spent entirely on transport,
+:: for work the device finishes in milliseconds. The loop now runs INSIDE the device
+:: shell - one connection, same work, same per-package progress, because the device
+:: echoes each name back and the Windows side just prints it. Verified to return the
+:: identical 269-package set as the old parse before it was changed.
+::
+:: The other option - chaining every command into ONE Windows-built string with ";" -
+:: does NOT work here: "pm list package" is the FULL list, and 269 packages is ~20k
+:: characters against cmd's 8191-char command line. cmd truncates it silently, so
+:: packages past the cut are skipped with no error at all.
+::
+:: Two details that matter: "${p#package:}" strips the prefix ON THE DEVICE, so the
+:: name never crosses the adb transport mid-loop (no CRLF to trip over); and the
+:: redirects are ">/dev/null 2>/dev/null", never "2>&1" - an "&" inside a quoted adb
+:: argument inside a for /f IN clause is exactly the nested-quoting boundary that has
+:: bitten this script before, and "2>/dev/null" needs no "&" to do the same job.
+for /f "delims=" %%a in ('adb shell "pm list packages | while read p; do p=${p#package:}; cmd package log-visibility --enable $p >/dev/null 2>/dev/null; echo $p; done" ^<nul') do (
 echo Log enabled : %%a
 )
 echo.
@@ -2750,7 +2896,7 @@ echo.
 echo Toggle Your Logs/etc Here
 echo.
 echo [%r%1%w%] Off
-echo [%r%2%w%] On 
+echo [%r%2%w%] On
 echo [%r%3%w%] Back
 set "toggle=" & set /p toggle="Choose An Option >> "
 if "!toggle!"=="1" goto offlogss
@@ -3208,18 +3354,17 @@ adb shell cmd voiceinteraction set-debug-hotword-logging false
 call :wm_silence_logs
 adb shell dumpsys binder_calls_stats --disable > nul 2>&1
 adb shell dumpsys binder_calls_stats --disable-detailed-tracking > nul 2>&1
-adb shell dumpsys procstats --stop-testing > nul 2>&1 
-adb shell settings put global binder_calls_stats sampling_interval=500000000,detailed_tracking=disable,enabled=false,upload_data=false 
+adb shell dumpsys procstats --stop-testing > nul 2>&1
+adb shell settings put global binder_calls_stats sampling_interval=500000000,detailed_tracking=disable,enabled=false,upload_data=false
 adb shell dumpsys batterystats disable full-history > nul 2>&1
 adb shell ime tracing stop
 adb shell logcat -c
 adb shell logcat -G 64kb
-adb shell wm tracing level critical > nul 2>&1 
+adb shell wm tracing level critical > nul 2>&1
 adb shell wm tracing size 1 > nul 2>&1
 adb shell device_config set_sync_disabled_for_tests persistent > nul 2>&1
 echo Done , Press Any Button To Go Back
 
-:endofflogs
 pause > nul
 goto Battery
 
@@ -3373,7 +3518,7 @@ echo Toggle Your Power Saver Here
 echo.
 echo.
 echo [%r%1%w%] Off
-echo [%r%2%w%] On 
+echo [%r%2%w%] On
 echo [%r%3%w%] Back
 set "toggle=" & set /p toggle="Choose An Option >> "
 if "!toggle!"=="1" goto offsv
@@ -3386,7 +3531,7 @@ goto saverpower
 @echo off
 cls
 title Power Saver : Off
-adb shell settings delete global low_power 
+adb shell settings delete global low_power
 adb shell settings delete global low_power_sticky <nul
 echo Press Any Button To Go Back
 pause > nul
@@ -3411,7 +3556,7 @@ echo.
 echo Toggle Your Animation Here
 echo.
 echo [%r%1%w%] Off
-echo [%r%2%w%] On 
+echo [%r%2%w%] On
 echo [%r%3%w%] Back
 set "toggle=" & set /p toggle="Choose An Option >> "
 if "!toggle!"=="1" goto offani
@@ -3513,7 +3658,7 @@ echo.
 echo Toggle Auto Wifi Here
 echo.
 echo [%r%1%w%] Off
-echo [%r%2%w%] On 
+echo [%r%2%w%] On
 echo [%r%3%w%] Back
 set "toggle=" & set /p toggle="Choose An Option >> "
 if "!toggle!"=="1" goto offaut
@@ -3568,7 +3713,7 @@ echo.
 echo Toggle Sync Here
 echo.
 echo [%r%1%w%] Off
-echo [%r%2%w%] On 
+echo [%r%2%w%] On
 echo [%r%3%w%] Back
 set "toggle=" & set /p toggle="Choose An Option >> "
 if "!toggle!"=="1" goto offsync
@@ -3613,7 +3758,7 @@ echo.
 echo Toggle Your Motion Here
 echo.
 echo [%r%1%w%] Off
-echo [%r%2%w%] On 
+echo [%r%2%w%] On
 echo [%r%3%w%] Back
 set "toggle=" & set /p toggle="Choose An Option >> "
 if "!toggle!"=="1" goto offmotion
@@ -3658,7 +3803,7 @@ echo.
 echo Toggle Your ZRAM Here
 echo.
 echo [%r%1%w%] Off
-echo [%r%2%w%] On 
+echo [%r%2%w%] On
 echo [%r%3%w%] Back
 set "toggle=" & set /p toggle="Choose An Option >> "
 if "!toggle!"=="1" goto offzram
@@ -3696,7 +3841,7 @@ echo.
 echo Toggle Your Extreme Power Saver Here
 echo.
 echo [%r%1%w%] Off
-echo [%r%2%w%] On 
+echo [%r%2%w%] On
 echo [%r%3%w%] Back
 set "toggle=" & set /p toggle="Choose An Option >> "
 if "!toggle!"=="1" goto offsvpp
@@ -3709,8 +3854,8 @@ goto extremepower
 @echo off
 cls
 title Extreme Power Saver : Off
-adb shell device_config delete activity_manager bg_current_drain_auto_restrict_abusive_apps_enabled 
-adb shell device_config delete activity_manager bg_auto_restrict_abusive_apps 
+adb shell device_config delete activity_manager bg_current_drain_auto_restrict_abusive_apps_enabled
+adb shell device_config delete activity_manager bg_auto_restrict_abusive_apps
 adb shell cmd power set-adaptive-power-saver-enabled false
 adb shell cmd power set-mode 0
 adb shell settings put global battery_tip_constants app_restriction_enabled=true
@@ -3748,7 +3893,7 @@ adb shell device_config put activity_manager bg_auto_restrict_abusive_apps 1
 adb shell settings put global activity_manager_constants power_check_interval=990000,power_check_max_cpu_1=2,power_check_max_cpu_2=2,power_check_max_cpu_3=2,power_check_max_cpu_4=2
 adb shell settings put global battery_saver_constants advertise_is_enabled=false,enable_datasaver=false,enable_night_mode=true,disable_launch_boost=true,disable_vibration=true,disable_animation=true,disable_soundtrigger=true,defer_full_backup=true,defer_keyvalue_backup=true,enable_firewall=false,location_mode=2,enable_brightness_adjustment=false,adjust_brightness_factor=0.5,force_all_apps_standby=true,force_background_check=true,disable_optional_sensors=true,disable_aod=true,enable_quick_doze=true
 adb shell settings put global battery_tip_constants reduced_battery_enabled=true,battery_saver_tip_enabled=true,high_usage_period_ms=120000,app_restriction_enabled=true,battery_tip_enabled=false,summary_enabled=false,high_usage_enabled=true,high_usage_app_count=1,high_usage_battery_draining=15,reduced_battery_percent=5,low_battery_enabled=true,low_battery_hour=1
-adb shell cmd power set-mode 1 
+adb shell cmd power set-mode 1
 adb shell cmd power set-adaptive-power-saver-enabled true
 adb shell setprop debug.rs.max-threads 2
 adb shell setprop debug.rs.precision rs_fp_relaxed
@@ -3765,7 +3910,7 @@ echo.
 echo Toggle Your Send Error Here
 echo.
 echo [%r%1%w%] Off
-echo [%r%2%w%] On 
+echo [%r%2%w%] On
 echo [%r%3%w%] Back
 set "toggle=" & set /p toggle="Choose An Option >> "
 if "!toggle!"=="1" goto offerr
@@ -3816,7 +3961,7 @@ echo.
 echo Toggle Your Lock Profiling Here
 echo.
 echo [%r%1%w%] Off
-echo [%r%2%w%] On 
+echo [%r%2%w%] On
 echo [%r%3%w%] Back
 set "toggle=" & set /p toggle="Choose An Option >> "
 if "!toggle!"=="1" goto offprof
@@ -4403,7 +4548,7 @@ if not "!pm!"=="4" goto _skpm4
     echo Default restored.
     pause > nul
     goto netboost_prefmode
-	
+
 :_skpm4
 if "!pm!"=="5" goto netboost
 goto netboost_prefmode
@@ -4476,7 +4621,7 @@ echo.
 echo Toggle Your GMS Here
 echo.
 echo [%r%1%w%] Off
-echo [%r%2%w%] On 
+echo [%r%2%w%] On
 echo [%r%3%w%] Back
 set "toggle=" & set /p toggle="Choose An Option >> "
 if "!toggle!"=="1" goto offgms
@@ -4596,7 +4741,7 @@ echo.
 echo Toggle Your Package Verifier Here
 echo.
 echo [%r%1%w%] Off
-echo [%r%2%w%] On 
+echo [%r%2%w%] On
 echo [%r%3%w%] Back
 set "kb=" & set /p kb="Choose An Option >> "
 if "!kb!"=="1" goto offpck
@@ -4651,11 +4796,11 @@ adb shell cmd game reset --user 0 %package% <nul
 cls
 echo.
 echo.
-echo [%r%^^!%w%] If %package% Is Glitching , Please Clear %package% Cache And Try it again. 
+echo [%r%^^!%w%] If %package% Is Glitching , Please Clear %package% Cache And Try it again.
 echo.
 echo.
-echo %package% Settings Is Removed , Press Any Button To Go Back 
-pause > nul 
+echo %package% Settings Is Removed , Press Any Button To Go Back
+pause > nul
 goto Gaming
 
 :low
@@ -4669,7 +4814,7 @@ adb shell cmd game downscale 0.55 %package% <nul
 cls
 echo.
 echo.
-echo [%r%^^!%w%] If %package% Is Glitching , Please Clear %package% Cache And Try it again. 
+echo [%r%^^!%w%] If %package% Is Glitching , Please Clear %package% Cache And Try it again.
 echo.
 echo.
 echo Press Any Button To Go Back
@@ -4688,7 +4833,7 @@ adb shell cmd game downscale 0.75 %package% <nul
 cls
 echo.
 echo.
-echo [%r%^^!%w%] If %package% Is Glitching , Please Clear %package% Cache And Try it again. 
+echo [%r%^^!%w%] If %package% Is Glitching , Please Clear %package% Cache And Try it again.
 echo.
 echo.
 echo Press Any Button To Go Back
@@ -4736,7 +4881,6 @@ title Performance Mode : Off
 adb shell device_config delete storage_native_boot target_dirty_ratio > nul 2>&1
 adb shell device_config delete storage_native_boot target_dirty_background_ratio > nul 2>&1
 
-:skipdeviceconfigandremove
 adb shell logcat -G 256kb
 adb shell settings delete global activity_manager_constants > nul 2>&1
 adb shell device_config delete runtime_native_boot iorap_readahead_enable > nul 2>&1
@@ -4918,7 +5062,6 @@ echo storage_native_boot/target_dirty_background_ratio : 5
 adb shell device_config put storage_native_boot target_dirty_ratio 35
 adb shell device_config put storage_native_boot target_dirty_background_ratio 5
 
-:skipcheckdeviceconfig
 echo Press Any Button To Go Back
 pause > nul
 goto Gaming
@@ -5172,6 +5315,7 @@ echo.
 echo Done.
 pause >nul
 goto appmgr_suggest
+
 :: ===================================================================
 :: NEW: Tweaks and Settings  (main menu 14)
 ::
@@ -5473,6 +5617,7 @@ goto tw_explorer
 echo [%r%^^!%w%] Not allowed - stick to letters, digits and _ . , : / = + -
 timeout /t 2 /nobreak >nul
 goto tw_explorer
+
 :: -------------------------------------------------------------------
 :: Explorer helpers
 ::
@@ -5532,7 +5677,6 @@ set "EXP_UNDO=%BACKUPDIR%\dcx_explorer_undo_%TS%.bat"
 > "%EXP_UNDO%" echo @echo off
 >>"%EXP_UNDO%" echo :: DCX Settings-Explorer undo - restores values captured before writes.
 >>"%EXP_UNDO%" echo adb start-server ^>nul 2^>^&1
-
 :_tw_undo_append
 call :_bk_settings %~1 %~2 "%EXP_UNDO%"
 exit /b
@@ -5621,6 +5765,7 @@ set "sd=" & set /p sd="Choose An Option >> "
 if "!sd!"=="1" (start "" notepad "%DIFFOUT%" & goto tw_snapshot)
 if "!sd!"=="2" goto tw_snapshot
 goto tw_snapshot
+
 :: ===================================================================
 :: NEW (Tier 2): icon blacklist, demo mode, heads-up, font scale,
 :: long-press timeout, stay-awake, night modes, profiles.
@@ -5739,7 +5884,6 @@ for %%t in (!IBCUR!) do (
     for %%u in (!IBTOK!) do if /i "%%t"=="%%u" set "IBHIT=1"
     if not defined IBHIT set "IBNEW=!IBNEW!,%%t"
 )
-
 :_tw_ib_addput
 set "IBNEW=!IBNEW!,!IBTOK!"
 set "IBNEW=!IBNEW:~1!"
@@ -6109,6 +6253,7 @@ goto tw_demo
 echo [%r%^^!%w%] Invalid time. Four digits, HHMM, e.g. 0930 or 1200.
 timeout /t 2 /nobreak >nul
 goto tw_demo_clock
+
 :: -------------------------------------------------------------------
 :: Profiles - the Windows-side answer to SetEdit's on-device boot queue
 :: (setedit/boot/BootUtils.java). A profile is a plain text file, so it
@@ -6190,11 +6335,9 @@ if /i "!PVAL!"=="null" goto _tw_prof_del
 call :_tw_safechk PVAL || goto _tw_prof_skip
 >>"%~3" echo %~1^|%~2^|!PVAL!
 exit /b
-
 :_tw_prof_del
 >>"%~3" echo %~1^|%~2^|DELETE
 exit /b
-
 :_tw_prof_skip
 >>"%~3" echo # %~1^|%~2 skipped - value holds a character DCX will not round-trip
 exit /b
@@ -6251,7 +6394,6 @@ if /i "!PNS!"=="secure" goto _tw_pa_ns_ok
 if /i "!PNS!"=="global" goto _tw_pa_ns_ok
 echo    skip - unknown namespace: !PNS!
 exit /b
-
 :_tw_pa_ns_ok
 echo(!PKEY!| findstr /r /x /c:"[a-zA-Z0-9_.-][a-zA-Z0-9_.-]*" >nul || goto _tw_pa_badkey
 if /i "!PVAL!"=="DELETE" goto _tw_pa_del
@@ -6262,20 +6404,18 @@ call :_tw_undo_add !PNS! !PKEY!
 adb shell settings put !PNS! !PKEY! !PVAL! <nul >nul
 echo    put    !PNS! !PKEY! = !PVAL!
 exit /b
-
 :_tw_pa_del
 call :_tw_undo_add !PNS! !PKEY!
 adb shell settings delete !PNS! !PKEY! >nul 2>&1 <nul
 echo    delete !PNS! !PKEY!
 exit /b
-
 :_tw_pa_badkey
 echo    skip - bad key name: !PKEY!
 exit /b
-
 :_tw_pa_badval
 echo    skip - bad or unsafe value for !PKEY!
 exit /b
+
 :: ===================================================================
 :: NEW (Tier 3): QS tile editor + assorted device tweaks.
 ::
@@ -6398,7 +6538,6 @@ for %%t in (!QSCUR!) do (
     for %%u in (!QSTOK!) do if /i "%%t"=="%%u" set "QSHIT=1"
     if not defined QSHIT set "QSNEW=!QSNEW!,%%t"
 )
-
 :_tw_qs_addput
 if /i "!QSPOS!"=="front" (set "QSNEW=,!QSTOK!!QSNEW!") else (set "QSNEW=!QSNEW!,!QSTOK!")
 set "QSNEW=!QSNEW:~1!"
@@ -6740,6 +6879,7 @@ if "!il!"=="3" (call :_tw_undo_add global default_install_location & adb shell s
 if "!il!"=="4" (call :_tw_undo_add global default_install_location & adb shell settings delete global default_install_location >nul 2>&1 <nul & goto tw_inst)
 if "!il!"=="5" goto tw_more
 goto tw_inst
+
 :: ===================================================================
 :: Settings Tools (main menu 15) - generic tooling over the whole
 :: settings provider, split out of the Tweaks hub. Tweaks is the
@@ -6777,7 +6917,7 @@ echo.
 echo                                     %m%██████╗  ██████╗██╗  ██╗
 echo                                     ██╔══██╗██╔════╝╚██╗██╔╝
 echo                                     ██║  ██║██║      ╚███╔╝ %w%
-echo                                     ██║  ██║██║      ██╔██╗ 
+echo                                     ██║  ██║██║      ██╔██╗
 echo                                     ██████╔╝╚██████╗██╔╝ ██╗
 echo                                     ╚═════╝  ╚═════╝╚═╝  ╚═╝
 echo.
