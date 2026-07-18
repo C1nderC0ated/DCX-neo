@@ -1992,7 +1992,14 @@ echo  Free space on /data BEFORE:
 for /f "delims=" %%i in ('adb shell df -h /data 2^>nul ^<nul ^| findstr /v "Filesystem"') do echo    %%i
 echo.
 echo  Running 'sm fstrim'...
-adb shell sm fstrim
+:: FIX (press-once regression): fstrim is the only routine in this menu that run
+:: bare "adb shell sm fstrim" with no stdin redirect before its pause. Every oth
+:: call reached from a menu already ends in <nul for this reason (see :forcedoze
+:: fstrim is the one that regressed. Without the redirect the adb process can le
+:: stray end-of-line in the console buffer, and the following "pause" consumes t
+:: phantom newline instead of waiting - so run #1 returns on its own, run #2 wai
+:: <nul brings fstrim back in line with the rest of the script.
+adb shell sm fstrim <nul
 echo  Trigger sent.
 echo.
 echo  Free space on /data AFTER:
