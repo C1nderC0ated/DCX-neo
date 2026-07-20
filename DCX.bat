@@ -1992,12 +1992,12 @@ echo  Free space on /data BEFORE:
 for /f "delims=" %%i in ('adb shell df -h /data 2^>nul ^<nul ^| findstr /v "Filesystem"') do echo    %%i
 echo.
 echo  Running 'sm fstrim'...
-:: FIX (press-once regression): fstrim is the only routine in this menu that run
-:: bare "adb shell sm fstrim" with no stdin redirect before its pause. Every oth
-:: call reached from a menu already ends in <nul for this reason (see :forcedoze
-:: fstrim is the one that regressed. Without the redirect the adb process can le
-:: stray end-of-line in the console buffer, and the following "pause" consumes t
-:: phantom newline instead of waiting - so run #1 returns on its own, run #2 wai
+:: FIX (press-once regression): fstrim is the only routine in this menu that runs a
+:: bare "adb shell sm fstrim" with no stdin redirect before its pause. Every other adb
+:: call reached from a menu already ends in <nul for this reason (see :forcedoze), and
+:: fstrim is the one that regressed. Without the redirect the adb process can leave a
+:: stray end-of-line in the console buffer, and the following "pause" consumes that
+:: phantom newline instead of waiting - so run #1 returns on its own, run #2 waits. The
 :: <nul brings fstrim back in line with the rest of the script.
 adb shell sm fstrim <nul
 echo  Trigger sent.
@@ -2443,23 +2443,51 @@ title Force Doze Now
 call :logo
 echo.
 echo  Immediately forces the device into deep idle (doze) mode.
+echo  Forcing also marks the battery "unplugged" - doze cannot hold while charging,
+echo  and the adb cable counts as charging. Option 2 undoes both.
 echo  Wakes up normally when you unlock or receive a high-priority push.
 echo.
 echo                                     %g%[%w%1%g%]%w% Force doze now
-echo                                     %g%[%w%2%g%]%w% Unforce (return to normal scheduling)
+echo                                     %g%[%w%2%g%]%w% Unforce (restore scheduling + real battery state)
 echo                                     %g%[%w%3%g%]%w% Show current state
 echo                                     %g%[%w%4%g%]%w% Back
 set "fd=" & set /p fd="Choose An Option >> "
 if not "!fd!"=="1" goto _skfd1
+    :: FIX (audit: doze sequence incomplete): the canonical Android sequence is a PAIR -
+    :: "dumpsys battery unplug" and only then "deviceidle force-idle". Doze cannot hold
+    :: while the device believes it is charging, and the adb cable itself counts as
+    :: charging - so force-idle alone can refuse to enter or exit immediately, which
+    :: reads as "nothing happened". The unplug is a software spoof only; option 2 pairs
+    :: "unforce" with "battery reset" to restore the real state. Every call drains its
+    :: stdin with <nul (the fstrim press-once guard). Do not split either pair.
+    set "_dvst="
+    for /f "delims=" %%d in ('adb get-state 2^>nul') do set "_dvst=%%d"
+    if /i not "%_dvst%"=="device" (
+        echo  %r%No device connected - nothing was sent.%w%  Check: adb devices
+        pause > nul
+        goto forcedoze
+    )
+    adb shell dumpsys battery unplug <nul
     adb shell dumpsys deviceidle force-idle <nul
-    echo Doze forced.
+    echo Doze forced. The device now reports "unplugged" so idle can hold with the
+    echo cable in. Use option 2 when done - until then the battery UI shows the
+    echo spoofed state.
     pause > nul
     goto forcedoze
 
 :_skfd1
 if not "!fd!"=="2" goto _skfd2
+    :: undo BOTH halves: leave forced idle, then restore the real battery/charging state.
+    set "_dvst="
+    for /f "delims=" %%d in ('adb get-state 2^>nul') do set "_dvst=%%d"
+    if /i not "%_dvst%"=="device" (
+        echo  %r%No device connected - nothing was sent.%w%  Check: adb devices
+        pause > nul
+        goto forcedoze
+    )
     adb shell dumpsys deviceidle unforce <nul
-    echo Returned to normal scheduling.
+    adb shell dumpsys battery reset <nul
+    echo Returned to normal scheduling and restored the real battery state.
     pause > nul
     goto forcedoze
 
