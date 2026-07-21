@@ -288,6 +288,7 @@ call :_bk_settings global default_install_location   "%BAKFILE%"
 call :_bk_settings global enable_freeform_support    "%BAKFILE%"
 call :_bk_settings global force_resizable_activities "%BAKFILE%"
 call :_bk_devcfg   app_hibernation app_hibernation_enabled "%BAKFILE%"
+call :_bk_dcfgsync "%BAKFILE%"
 call :_bk_prop     debug.hwui.renderer        "%BAKFILE%"
 call :_bk_prop     debug.renderengine.backend "%BAKFILE%"
 call :_bk_prop     persist.log.tag            "%BAKFILE%"
@@ -450,6 +451,24 @@ if /i "!_val!"=="null" (
 endlocal
 exit /b
 
+:_bk_dcfgsync
+:: Captures device_config get_sync_disabled_for_tests (none/persistent/
+:: until_reboot). Not a settings put key - Tweaks owns this toggle.
+setlocal enabledelayedexpansion
+set "_out=%~1"
+set "_val="
+for /f "delims=" %%v in ('adb shell device_config get_sync_disabled_for_tests 2^>nul ^<nul') do set "_val=%%v"
+if "!_val!"=="" set "_val=none"
+set "_val=!_val:"=!"
+set "_ok="
+if /i "!_val!"=="none" set "_ok=1"
+if /i "!_val!"=="persistent" set "_ok=1"
+if /i "!_val!"=="until_reboot" set "_ok=1"
+if not defined _ok set "_val=none"
+>>"%_out%" echo call :dcx_do "device_config set_sync_disabled_for_tests '!_val!'"
+endlocal
+exit /b
+
 :_bk_prop
 :: FIX (robustness): (1) an UNSET prop makes getprop return empty; the old code
 :: then wrote `setprop key ""`, which on restore SETS the prop to empty instead
@@ -570,13 +589,13 @@ echo.
 echo [%b%1/3%w%] CPU loop test (1M iterations)...
 :: FIX: 'seq' is not on every Android. Use a portable POSIX shell loop.
 :: We also reduce iterations from 8M to 1M for sane wait times.
-adb shell "time sh -c 'i=0; while [ $i -lt 1000000 ]; do i=$((i+1)); done'"
+adb shell "time sh -c 'i=0; while [ $i -lt 1000000 ]; do i=$((i+1)); done'" <nul
 echo.
 echo [%b%2/3%w%] Storage random write (10MB)...
-adb shell "time dd if=/dev/urandom of=/data/local/tmp/_dcx_bench bs=64k count=160 2>&1 | tail -1"
+adb shell "time dd if=/dev/urandom of=/data/local/tmp/_dcx_bench bs=64k count=160 2>&1 | tail -1" <nul
 echo.
 echo [%b%3/3%w%] Storage sequential read (10MB)...
-adb shell "time dd if=/data/local/tmp/_dcx_bench of=/dev/null bs=64k 2>&1 | tail -1"
+adb shell "time dd if=/data/local/tmp/_dcx_bench of=/dev/null bs=64k 2>&1 | tail -1" <nul
 adb shell rm -f /data/local/tmp/_dcx_bench <nul
 echo.
 echo.
@@ -607,7 +626,7 @@ echo                   %d%Thanks For Using My Script, Goodbye And Have A Good Da
 echo.
 echo.
 timeout /t 3 /nobreak > nul
-adb shell cmd notification post -S bigtext -t '⚙DCX⚙' 'Tag' 'Restart = Remove All Settings Applied, Please Use This Script At Least Once A Month To Keep Your Device Smooth, Bye^^!^^!' > nul 2>&1
+adb shell cmd notification post -S bigtext -t '⚙DCX⚙' 'Tag' 'Restart = Remove All Settings Applied, Please Use This Script At Least Once A Month To Keep Your Device Smooth, Bye^^!^^!' <nul > nul 2>&1
 adb kill-server
 exit /b
 
@@ -885,7 +904,7 @@ set "REPORT=%TEMP%\dcx_report_%TS%.txt"
     for /f "tokens=2" %%i in ('adb shell "cat /proc/meminfo 2>/dev/null | grep SwapFree"')     do echo   Swap free           : %%i kB
     echo.
     echo [Storage]
-    adb shell "df -h /data 2>/dev/null"
+    adb shell "df -h /data 2>/dev/null" <nul
     echo.
     echo [State]
     for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul 2^>nul') do echo   Uptime              : %%a %%b %%c
@@ -897,7 +916,7 @@ set "REPORT=%TEMP%\dcx_report_%TS%.txt"
     for /f "delims=" %%i in ('adb shell "dumpsys battery 2>/dev/null | grep 'health:'"')      do echo   Battery health     %%i
     echo.
     echo [Display]
-    for /f "tokens=2 delims==" %%i in ('adb shell "dumpsys SurfaceFlinger 2>/dev/null | grep refresh-rate"') do echo   Display refresh    : %%i Hz
+    for /f "tokens=2 delims=:=" %%i in ('adb shell "dumpsys SurfaceFlinger 2>/dev/null | grep refresh-rate"') do echo   Display refresh    : %%i Hz
     for /f "delims=" %%i in ('adb shell wm size 2^>nul ^<nul')                                              do echo   %%i
     for /f "delims=" %%i in ('adb shell wm density 2^>nul ^<nul')                                           do echo   %%i
     echo.
@@ -915,7 +934,8 @@ set "REPORT=%TEMP%\dcx_report_%TS%.txt"
     for /f "delims=" %%i in ('adb shell settings get system peak_refresh_rate 2^>nul ^<nul')          do echo   peak_refresh_rate ^(Hz^)     : %%i
     echo.
     echo [Battery savers / Sync - current values]
-    for /f "delims=" %%i in ('adb shell settings get global master_sync_status 2^>nul ^<nul')          do echo   master_sync_status         : %%i  ^(1=on, 0=off^)
+    for /f "delims=" %%i in ('adb shell settings get global master_sync_status 2^>nul ^<nul')          do echo   master_sync_status         : %%i  ^(placebo on modern Android; Backup round-trip only^)
+    for /f "delims=" %%i in ('adb shell device_config get_sync_disabled_for_tests 2^>nul ^<nul') do echo   sync_disabled_for_tests   : %%i  ^(none/persistent/until_reboot - DeviceConfig server sync^)
     for /f "delims=" %%i in ('adb shell settings get global hotword_detection_enabled 2^>nul ^<nul')   do echo   hotword_detection_enabled  : %%i  ^(1=on, 0=off^)
     for /f "delims=" %%i in ('adb shell device_config get app_hibernation app_hibernation_enabled 2^>nul ^<nul') do echo   app_hibernation_enabled    : %%i
     echo.
@@ -926,16 +946,16 @@ set "REPORT=%TEMP%\dcx_report_%TS%.txt"
     echo.
     echo [Power state]
     for /f "delims=" %%i in ('adb shell settings get global low_power 2^>nul ^<nul') do echo   Battery saver         : %%i
-    adb shell "cmd power get-mode 2>/dev/null"
+    adb shell "cmd power get-mode 2>/dev/null" <nul
     echo.
     echo [Doze whitelist - first 20 entries]
-    adb shell "dumpsys deviceidle whitelist 2>/dev/null"
+    adb shell "dumpsys deviceidle whitelist 2>/dev/null" <nul
     echo.
     echo [Top 10 RAM consumers]
-    adb shell "dumpsys meminfo --oom 2>/dev/null | head -40"
+    adb shell "dumpsys meminfo --oom 2>/dev/null | head -40" <nul
     echo.
     echo [Currently focused app]
-    adb shell "dumpsys activity activities 2>/dev/null | grep mResumedActivity"
+    adb shell "dumpsys activity activities 2>/dev/null | grep ResumedActivity" <nul
     echo.
     echo ===========================================================
     echo  End of report
@@ -1018,24 +1038,30 @@ echo.
 echo [%g%+%w%] Check Refresh Rate
 timeout /t 1 /nobreak > nul
 set "refresh_rate="
-for /f "tokens=3 delims= " %%i in ('adb shell dumpsys SurfaceFlinger ^<nul ^| findstr "refresh-rate"') do (
-    set refresh_rate=%%i
+:: FIX: match CheckSetting - SurfaceFlinger prints refresh-rate=<n>, so take
+:: tokens=2 delims==. The old tokens=3 delims=space often grabbed "Hz".
+for /f "tokens=2 delims=:=" %%i in ('adb shell "dumpsys SurfaceFlinger 2>/dev/null | grep refresh-rate"') do (
+    set "refresh_rate=%%i"
 )
-if defined refresh_rate set "refresh_rate=%refresh_rate: =%"
-if "%refresh_rate%"=="" (
+if defined refresh_rate set "refresh_rate=!refresh_rate: Hz=!"
+if defined refresh_rate set "refresh_rate=!refresh_rate:Hz=!"
+if defined refresh_rate set "refresh_rate=!refresh_rate: =!"
+echo(!refresh_rate!| findstr /r /x /c:"[0-9][0-9]*\.*[0-9]*" >nul || set "refresh_rate="
+if not defined refresh_rate (
     echo [%r%^^!%w%] Could not detect refresh rate. Auto setup cannot continue.
     pause > nul
     goto menu
 )
-echo [%b%^^!%w%]Refresh rate : %refresh_rate%
+echo [%b%^^!%w%]Refresh rate : !refresh_rate!
 timeout /t 1 /nobreak > nul
-for /f "delims=" %%i in ('powershell -Command "[math]::Round(1 / %refresh_rate%, 10)"') do set result=%%i
-for /f "delims=" %%i in ('powershell -Command "[math]::Round(%result% * 1000000000, 0)"') do set final=%%i
+for /f "delims=" %%i in ('powershell -Command "[math]::Round(1 / !refresh_rate!, 10)"') do set result=%%i
+for /f "delims=" %%i in ('powershell -Command "[math]::Round(!result! * 1000000000, 0)"') do set final=%%i
 echo [%g%+%w%] Check Result . . . .
 echo.
 timeout /t 1 /nobreak > nul
 echo.
 echo.
+echo [%y%i%w%] Experimental SF phase offsets ^(volatile; NOT a refresh-rate lock^).
 echo [%b%^^!%w%] SurfaceFlinger Setup. . .
 for /f "delims=" %%i in ('powershell -Command "[math]::Round(%final% / 18.518520, 0)"') do set eaglpos=%%i
 for /f "delims=" %%i in ('powershell -Command "[math]::Round(%final% / 8.771929, 0)"') do set apsofs=%%i
@@ -1047,33 +1073,33 @@ for /f "delims=" %%i in ('powershell -Command "[math]::Round(%final% / 0.8771929
 chcp 65001 >nul
 timeout /t 2 /nobreak > nul
 ::elrdur
-adb shell setprop debug.sf.region_sampling_duration_ns %elrdur%
-adb shell setprop debug.sf.cached_set_render_duration_ns %elrdur%
-adb shell setprop debug.sf.early.app.duration %elrdur%
-adb shell setprop debug.sf.early.sf.duration %elrdur%
-adb shell setprop debug.sf.earlyGl.app.duration %elrdur%
-adb shell setprop debug.sf.earlyGl.sf.duration %elrdur%
+adb shell setprop debug.sf.region_sampling_duration_ns %elrdur% <nul
+adb shell setprop debug.sf.cached_set_render_duration_ns %elrdur% <nul
+adb shell setprop debug.sf.early.app.duration %elrdur% <nul
+adb shell setprop debug.sf.early.sf.duration %elrdur% <nul
+adb shell setprop debug.sf.earlyGl.app.duration %elrdur% <nul
+adb shell setprop debug.sf.earlyGl.sf.duration %elrdur% <nul
 ::apsofs
-adb shell setprop debug.sf.early_app_phase_offset_ns %apsofs%
-adb shell setprop debug.sf.early_gl_app_phase_offset_ns %apsofs%
+adb shell setprop debug.sf.early_app_phase_offset_ns %apsofs% <nul
+adb shell setprop debug.sf.early_gl_app_phase_offset_ns %apsofs% <nul
 ::sfelpoassd
-adb shell setprop debug.sf.early_gl_phase_offset_ns %sfelpoassd%
-adb shell setprop debug.sf.early_phase_offset_ns %sfelpoassd%
+adb shell setprop debug.sf.early_gl_phase_offset_ns %sfelpoassd% <nul
+adb shell setprop debug.sf.early_phase_offset_ns %sfelpoassd% <nul
 ::eaglpos
-adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %eaglpos%
-adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %eaglpos%
+adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %eaglpos% <nul
+adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %eaglpos% <nul
 ::elfpsofsasdasx
-adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %elfpsofsasdasx%
-adb shell setprop debug.sf.high_fps_early_phase_offset_ns %elfpsofsasdasx%
+adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %elfpsofsasdasx% <nul
+adb shell setprop debug.sf.high_fps_early_phase_offset_ns %elfpsofsasdasx% <nul
 ::rgstis
-adb shell setprop debug.sf.region_sampling_timer_timeout_ns %rgstis%
+adb shell setprop debug.sf.region_sampling_timer_timeout_ns %rgstis% <nul
 ::rgsmplsa
-adb shell setprop debug.sf.region_sampling_period_ns %rgsmplsa%
-adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %rgsmplsa%
-adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %rgsmplsa%
-adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %rgsmplsa%
-adb shell setprop debug.sf.late.app.duration %rgsmplsa%
-adb shell setprop debug.sf.late.sf.duration %rgsmplsa%
+adb shell setprop debug.sf.region_sampling_period_ns %rgsmplsa% <nul
+adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %rgsmplsa% <nul
+adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %rgsmplsa% <nul
+adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %rgsmplsa% <nul
+adb shell setprop debug.sf.late.app.duration %rgsmplsa% <nul
+adb shell setprop debug.sf.late.sf.duration %rgsmplsa% <nul
 echo [%g%+%w%] Done ^^!
 echo.
 echo.
@@ -1093,7 +1119,7 @@ echo Done %b%%count%%w%/5
 timeout /t 1 /nobreak > nul
 cls
 call :logo
-adb shell dumpsys battery reset
+adb shell dumpsys battery reset <nul
 cls
 call :logo
 set /a count+=1
@@ -1101,7 +1127,7 @@ echo Done %b%%count%%w%/5
 timeout /t 1 /nobreak > nul
 cls
 call :logo
-adb shell sm fstrim
+adb shell sm fstrim <nul
 cls
 call :logo
 set /a count+=1
@@ -1109,37 +1135,37 @@ echo Done %b%%count%%w%/5
 timeout /t 1 /nobreak > nul
 cls
 call :logo
-adb shell am kill-all
-adb shell am kill --user 0 all
-adb shell am kill --user 0 current
-adb shell cmd looper_stats disable
+adb shell am kill-all <nul
+adb shell am kill --user 0 all <nul
+adb shell am kill --user 0 current <nul
+adb shell cmd looper_stats disable <nul
 call :dropbox_lowprio
-adb shell cmd dropbox set-rate-limit 20000000000000
-adb shell cmd autofill set log_level off
-adb shell cmd thermalservice override-status 1
+adb shell cmd dropbox set-rate-limit 20000000000000 <nul
+adb shell cmd autofill set log_level off <nul
+adb shell cmd thermalservice override-status 1 <nul
 :: ----- NEW SAFE OPTIMIZATIONS (from the .sh script, vetted) -----
 :: Universal log silencer (REAL, persists across reboots)
-adb shell setprop persist.log.tag "*:S" > nul 2>&1
-adb shell setprop log.tag "*:S" > nul 2>&1
+adb shell setprop persist.log.tag "*:S" <nul > nul 2>&1
+adb shell setprop log.tag "*:S" <nul > nul 2>&1
 :: NOTE: ANGLE-for-all-apps is intentionally NOT applied here.
 :: It is device/GPU dependent and is known to crash many apps on
 :: non-Pixel hardware (e.g. MediaTek GPUs). It remains available as a
 :: deliberate, reversible choice under Gaming -> Force ANGLE for All
 :: Apps, with a warning. Auto Setup must stay safe for every device.
 :: ---------------------------------------------------------------
-adb shell setprop log.tag.stats_log S
-adb shell setprop log.tag.APM_AudioPolicyManager S
-adb shell setprop log.tag.ALL S
-adb shell settings put global settings_enable_monitor_phantom_procs false
-adb shell simpleperf --log fatal --log-to-android-buffer 0 > nul 2>&1
-adb shell cmd autofill set max_visible_datasets 0
-adb shell cmd voiceinteraction set-debug-hotword-logging false
+adb shell setprop log.tag.stats_log S <nul
+adb shell setprop log.tag.APM_AudioPolicyManager S <nul
+adb shell setprop log.tag.ALL S <nul
+adb shell settings put global settings_enable_monitor_phantom_procs false <nul
+adb shell simpleperf --log fatal --log-to-android-buffer 0 <nul > nul 2>&1
+adb shell cmd autofill set max_visible_datasets 0 <nul
+adb shell cmd voiceinteraction set-debug-hotword-logging false <nul
 call :wm_silence_logs
-adb shell dumpsys binder_calls_stats --disable > nul 2>&1
-adb shell dumpsys binder_calls_stats --disable-detailed-tracking > nul 2>&1
-adb shell settings put global binder_calls_stats sampling_interval=500000000,detailed_tracking=disable,enabled=false,upload_data=false
-adb shell dumpsys batterystats disable full-history > nul 2>&1
-adb shell ime tracing stop
+adb shell dumpsys binder_calls_stats --disable <nul > nul 2>&1
+adb shell dumpsys binder_calls_stats --disable-detailed-tracking <nul > nul 2>&1
+adb shell settings put global binder_calls_stats sampling_interval=500000000,detailed_tracking=disable,enabled=false,upload_data=false <nul
+adb shell dumpsys batterystats disable full-history <nul > nul 2>&1
+adb shell ime tracing stop <nul
 cls
 call :logo
 set /a count+=1
@@ -1147,7 +1173,7 @@ echo Done %b%%count%%w%/5
 timeout /t 1 /nobreak > nul
 cls
 call :logo
-adb shell logcat -c
+adb shell logcat -c <nul
 cls
 call :logo
 set /a count+=1
@@ -1155,7 +1181,7 @@ echo Done %b%%count%%w%/5
 timeout /t 1 /nobreak > nul
 cls
 call :logo
-echo Done , Press Any Button To Go Back
+echo Auto Setup steps finished. Press any key to go back.
 adb shell cmd notification post -S bigtext -t 'Auto Setup Is Complete⚙️' 'Tag' 'Auto Setup Is A Bunch Of Tweaks That Can Be Use For Daily Or Dont Know Anything About This Script' <nul > nul 2>&1
 pause > Nul
 goto menu
@@ -1247,7 +1273,8 @@ echo.
 echo Running background dexopt job...
 call :run_bgdexopt
 echo.
-echo Done. Press any key to go back.
+echo Finished the compile/dexopt pass. See the status lines above.
+echo Press any key to go back.
 pause > nul
 goto Optimize
 :: ===================================================================
@@ -1291,7 +1318,7 @@ echo [2/3] Compiling layout resources (if supported)...
 :: only exists on Android 10-11 - the view compiler was removed in
 :: Android 12+, and is handled by ART Service from 14+. So we run it on
 :: its own and detect non-support.
-adb shell pm compile -a --compile-layouts > "%TEMP%\dcx_layouts.txt" 2>&1
+adb shell pm compile -a --compile-layouts <nul > "%TEMP%\dcx_layouts.txt" 2>&1
 findstr /I /C:"Unknown option" /C:"Error:" /C:"Usage:" "%TEMP%\dcx_layouts.txt" > nul
 if errorlevel 1 (
     echo   Layout resources compiled.
@@ -1305,7 +1332,8 @@ echo.
 echo [3/3] Running background dexopt job...
 call :run_bgdexopt
 echo.
-echo Done. Press any key to go back.
+echo Finished the heaviest compile/dexopt pass. See the status lines above.
+echo Press any key to go back.
 pause > nul
 goto Optimize
 :: ===================================================================
@@ -1363,10 +1391,14 @@ timeout /t 2 /nobreak >nul
 goto animspeed_custom
 
 :animspeed_apply
-adb shell settings put global window_animation_scale %asv%
-adb shell settings put global transition_animation_scale %asv%
+adb shell settings put global window_animation_scale %asv% <nul
+adb shell settings put global transition_animation_scale %asv% <nul
 adb shell settings put global animator_duration_scale %asv% <nul
-echo Done. All three animation scales set to %asv%.
+call :_act_reset
+call :_settings_verify global window_animation_scale %asv%
+call :_settings_verify global transition_animation_scale %asv%
+call :_settings_verify global animator_duration_scale %asv%
+call :_act_summary
 pause > nul
 goto animspeed
 
@@ -1396,14 +1428,15 @@ echo %%a ━ clear last used^^!
 )
 echo.
 echo.
-echo Done, Exit..
-adb shell cmd activity clear-debug-app
-adb shell cmd activity clear-exit-info
-adb shell cmd activity clear-watch-heap all
-adb shell cmd blob_store clear-all-sessions
-adb shell cmd blob_store clear-all-blobs
-timeout /t 2 /nobreak > nul
-cls
+echo Per-package clear finished. Running cleanup commands...
+adb shell cmd activity clear-debug-app <nul
+adb shell cmd activity clear-exit-info <nul
+adb shell cmd activity clear-watch-heap all <nul
+adb shell cmd blob_store clear-all-sessions <nul
+adb shell cmd blob_store clear-all-blobs <nul
+echo.
+echo Done. Press any key to return to Optimize.
+pause > nul
 goto Optimize
 
 :sftmenu
@@ -1412,6 +1445,9 @@ cls
 echo.
 echo.
 call :logo
+echo  %y%Note:%w% profiles write volatile debug.sf.* phase offsets. They do NOT
+echo  lock refresh rate - use Battery - Refresh Rate Lock for Hz. Reboot clears them.
+echo.
 echo                                      [%g%1%w%] 60hz
 echo                                      [%g%2%w%] 90hz
 echo                                      [%g%3%w%] 120hz
@@ -1433,9 +1469,9 @@ title 60hz menu
 echo.
 echo.
 call :logo
-echo                                      [%g%1%w%] Balance Mode
-echo                                      [%g%2%w%] Gaming Mode
-echo                                      [%g%3%w%] Battery Saver Mode
+echo                                      [%g%1%w%] Balance offsets
+echo                                      [%g%2%w%] Low-latency offsets
+echo                                      [%g%3%w%] Conserving offsets
 echo                                      [%g%4%w%] Back
 echo.
 echo.
@@ -1451,38 +1487,38 @@ goto sf60
 cls
 title 60hz SF : Battery Saver Mode
 set chm=6500000
-adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %chm%
-adb shell setprop debug.sf.region_sampling_period_ns %chm%
-adb shell setprop debug.sf.late.app.duration %chm%
-adb shell setprop debug.sf.late.sf.duration %chm%
-adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %chm%
-adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %chm%
+adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %chm% <nul
+adb shell setprop debug.sf.region_sampling_period_ns %chm% <nul
+adb shell setprop debug.sf.late.app.duration %chm% <nul
+adb shell setprop debug.sf.late.sf.duration %chm% <nul
+adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %chm% <nul
+adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %chm% <nul
 ::3100000
 set chh=3500000
-adb shell setprop debug.sf.earlyGl.app.duration %chh%
-adb shell setprop debug.sf.early.sf.duration %chh%
-adb shell setprop debug.sf.region_sampling_duration_ns %chh%
-adb shell setprop debug.sf.early.app.duration %chh%
-adb shell setprop debug.sf.cached_set_render_duration_ns %chh%
-adb shell setprop debug.sf.earlyGl.sf.duration %chh%
+adb shell setprop debug.sf.earlyGl.app.duration %chh% <nul
+adb shell setprop debug.sf.early.sf.duration %chh% <nul
+adb shell setprop debug.sf.region_sampling_duration_ns %chh% <nul
+adb shell setprop debug.sf.early.app.duration %chh% <nul
+adb shell setprop debug.sf.cached_set_render_duration_ns %chh% <nul
+adb shell setprop debug.sf.earlyGl.sf.duration %chh% <nul
 ::13900000
 set chb=14000000
-adb shell setprop debug.sf.region_sampling_timer_timeout_ns %chb%
+adb shell setprop debug.sf.region_sampling_timer_timeout_ns %chb% <nul
 ::1400000
 set chbb=1300000
-adb shell setprop debug.sf.early_app_phase_offset_ns %chbb%
-adb shell setprop debug.sf.early_gl_app_phase_offset_ns %chbb%
+adb shell setprop debug.sf.early_app_phase_offset_ns %chbb% <nul
+adb shell setprop debug.sf.early_gl_app_phase_offset_ns %chbb% <nul
 ::700000
 set chn=750000
-adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %chn%
-adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %chn%
+adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %chn% <nul
+adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %chn% <nul
 ::4700000
 set chsss=4000000
-adb shell setprop debug.sf.early_gl_phase_offset_ns %chsss%
-adb shell setprop debug.sf.early_phase_offset_ns %chsss%
+adb shell setprop debug.sf.early_gl_phase_offset_ns %chsss% <nul
+adb shell setprop debug.sf.early_phase_offset_ns %chsss% <nul
 ::3000000
 set chbay=2800000
-adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %chbay%
+adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %chbay% <nul
 adb shell setprop debug.sf.high_fps_early_phase_offset_ns %chbay% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
@@ -1493,38 +1529,38 @@ cls
 title 60hz SF : Gaming Mode
 call :logo
 set chm=8500000
-adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %chm%
-adb shell setprop debug.sf.region_sampling_period_ns %chm%
-adb shell setprop debug.sf.late.app.duration %chm%
-adb shell setprop debug.sf.late.sf.duration %chm%
-adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %chm%
-adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %chm%
+adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %chm% <nul
+adb shell setprop debug.sf.region_sampling_period_ns %chm% <nul
+adb shell setprop debug.sf.late.app.duration %chm% <nul
+adb shell setprop debug.sf.late.sf.duration %chm% <nul
+adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %chm% <nul
+adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %chm% <nul
 ::3100000
 set chh=5100000
-adb shell setprop debug.sf.earlyGl.app.duration %chh%
-adb shell setprop debug.sf.early.sf.duration %chh%
-adb shell setprop debug.sf.region_sampling_duration_ns %chh%
-adb shell setprop debug.sf.early.app.duration %chh%
-adb shell setprop debug.sf.cached_set_render_duration_ns %chh%
-adb shell setprop debug.sf.earlyGl.sf.duration %chh%
+adb shell setprop debug.sf.earlyGl.app.duration %chh% <nul
+adb shell setprop debug.sf.early.sf.duration %chh% <nul
+adb shell setprop debug.sf.region_sampling_duration_ns %chh% <nul
+adb shell setprop debug.sf.early.app.duration %chh% <nul
+adb shell setprop debug.sf.cached_set_render_duration_ns %chh% <nul
+adb shell setprop debug.sf.earlyGl.sf.duration %chh% <nul
 ::13900000
 set chb=15000000
-adb shell setprop debug.sf.region_sampling_timer_timeout_ns %chb%
+adb shell setprop debug.sf.region_sampling_timer_timeout_ns %chb% <nul
 ::1400000
 set chbb=1550000
-adb shell setprop debug.sf.early_app_phase_offset_ns %chbb%
-adb shell setprop debug.sf.early_gl_app_phase_offset_ns %chbb%
+adb shell setprop debug.sf.early_app_phase_offset_ns %chbb% <nul
+adb shell setprop debug.sf.early_gl_app_phase_offset_ns %chbb% <nul
 ::700000
 set chn=800000
-adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %chn%
-adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %chn%
+adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %chn% <nul
+adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %chn% <nul
 ::4700000
 set chsss=4800000
-adb shell setprop debug.sf.early_gl_phase_offset_ns %chsss%
-adb shell setprop debug.sf.early_phase_offset_ns %chsss%
+adb shell setprop debug.sf.early_gl_phase_offset_ns %chsss% <nul
+adb shell setprop debug.sf.early_phase_offset_ns %chsss% <nul
 ::3000000
 set chbay=3200000
-adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %chbay%
+adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %chbay% <nul
 adb shell setprop debug.sf.high_fps_early_phase_offset_ns %chbay% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
@@ -1536,38 +1572,38 @@ title 60hz SF : Balance Mode
 call :logo
 ::6500000
 set chm=6500000
-adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %chm%
-adb shell setprop debug.sf.region_sampling_period_ns %chm%
-adb shell setprop debug.sf.late.app.duration %chm%
-adb shell setprop debug.sf.late.sf.duration %chm%
-adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %chm%
-adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %chm%
+adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %chm% <nul
+adb shell setprop debug.sf.region_sampling_period_ns %chm% <nul
+adb shell setprop debug.sf.late.app.duration %chm% <nul
+adb shell setprop debug.sf.late.sf.duration %chm% <nul
+adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %chm% <nul
+adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %chm% <nul
 ::3100000
 set chh=2900000
-adb shell setprop debug.sf.earlyGl.app.duration %chh%
-adb shell setprop debug.sf.early.sf.duration %chh%
-adb shell setprop debug.sf.region_sampling_duration_ns %chh%
-adb shell setprop debug.sf.early.app.duration %chh%
-adb shell setprop debug.sf.cached_set_render_duration_ns %chh%
-adb shell setprop debug.sf.earlyGl.sf.duration %chh%
+adb shell setprop debug.sf.earlyGl.app.duration %chh% <nul
+adb shell setprop debug.sf.early.sf.duration %chh% <nul
+adb shell setprop debug.sf.region_sampling_duration_ns %chh% <nul
+adb shell setprop debug.sf.early.app.duration %chh% <nul
+adb shell setprop debug.sf.cached_set_render_duration_ns %chh% <nul
+adb shell setprop debug.sf.earlyGl.sf.duration %chh% <nul
 ::13900000
 set chb=13000000
-adb shell setprop debug.sf.region_sampling_timer_timeout_ns %chb%
+adb shell setprop debug.sf.region_sampling_timer_timeout_ns %chb% <nul
 ::1400000
 set chbb=1350000
-adb shell setprop debug.sf.early_app_phase_offset_ns %chbb%
-adb shell setprop debug.sf.early_gl_app_phase_offset_ns %chbb%
+adb shell setprop debug.sf.early_app_phase_offset_ns %chbb% <nul
+adb shell setprop debug.sf.early_gl_app_phase_offset_ns %chbb% <nul
 ::700000
 set chn=750000
-adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %chn%
-adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %chn%
+adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %chn% <nul
+adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %chn% <nul
 ::4700000
 set chsss=4500000
-adb shell setprop debug.sf.early_gl_phase_offset_ns %chsss%
-adb shell setprop debug.sf.early_phase_offset_ns %chsss%
+adb shell setprop debug.sf.early_gl_phase_offset_ns %chsss% <nul
+adb shell setprop debug.sf.early_phase_offset_ns %chsss% <nul
 ::3000000
 set chbay=3200000
-adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %chbay%
+adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %chbay% <nul
 adb shell setprop debug.sf.high_fps_early_phase_offset_ns %chbay% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
@@ -1577,9 +1613,9 @@ goto sftmenu
 cls
 call :logo
 title 90hz menu
-echo                                      [%g%1%w%] Balance Mode
-echo                                      [%g%2%w%] Gaming Mode
-echo                                      [%g%3%w%] Battery Saver Mode
+echo                                      [%g%1%w%] Balance offsets
+echo                                      [%g%2%w%] Low-latency offsets
+echo                                      [%g%3%w%] Conserving offsets
 echo                                      [%g%4%w%] Back
 echo.
 echo.
@@ -1597,32 +1633,32 @@ title 90hz SF : Battery Mode
 call :logo
 ::Battery Saver Mode 90Hz
 set px=533333
-adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %px%
-adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %px%
+adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %px% <nul
+adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %px% <nul
 set pxl=4733333
-adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %pxl%
-adb shell setprop debug.sf.late.app.duration %pxl%
-adb shell setprop debug.sf.late.sf.duration %pxl%
-adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %pxl%
-adb shell setprop debug.sf.region_sampling_period_ns %pxl%
-adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %pxl%
+adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %pxl% <nul
+adb shell setprop debug.sf.late.app.duration %pxl% <nul
+adb shell setprop debug.sf.late.sf.duration %pxl% <nul
+adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %pxl% <nul
+adb shell setprop debug.sf.region_sampling_period_ns %pxl% <nul
+adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %pxl% <nul
 set chxl=2533333
-adb shell setprop debug.sf.earlyGl.app.duration %chxl%
-adb shell setprop debug.sf.early.sf.duration %chxl%
-adb shell setprop debug.sf.region_sampling_duration_ns %chxl%
-adb shell setprop debug.sf.cached_set_render_duration_ns %chxl%
-adb shell setprop debug.sf.early.app.duration %chxl%
-adb shell setprop debug.sf.earlyGl.sf.duration %chxl%
+adb shell setprop debug.sf.earlyGl.app.duration %chxl% <nul
+adb shell setprop debug.sf.early.sf.duration %chxl% <nul
+adb shell setprop debug.sf.region_sampling_duration_ns %chxl% <nul
+adb shell setprop debug.sf.cached_set_render_duration_ns %chxl% <nul
+adb shell setprop debug.sf.early.app.duration %chxl% <nul
+adb shell setprop debug.sf.earlyGl.sf.duration %chxl% <nul
 set dhbx=13333333
-adb shell setprop debug.sf.region_sampling_timer_timeout_ns %dhbx%
+adb shell setprop debug.sf.region_sampling_timer_timeout_ns %dhbx% <nul
 set dhbxz=753333
-adb shell setprop debug.sf.early_app_phase_offset_ns %dhbxz%
-adb shell setprop debug.sf.early_gl_app_phase_offset_ns %dhbxz%
+adb shell setprop debug.sf.early_app_phase_offset_ns %dhbxz% <nul
+adb shell setprop debug.sf.early_gl_app_phase_offset_ns %dhbxz% <nul
 set xcxz=2800000
-adb shell setprop debug.sf.early_gl_phase_offset_ns %xcxz%
-adb shell setprop debug.sf.early_phase_offset_ns %xcxz%
+adb shell setprop debug.sf.early_gl_phase_offset_ns %xcxz% <nul
+adb shell setprop debug.sf.early_phase_offset_ns %xcxz% <nul
 set xcfs=1733333
-adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %xcfs%
+adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %xcfs% <nul
 adb shell setprop debug.sf.high_fps_early_phase_offset_ns %xcfs% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
@@ -1634,32 +1670,32 @@ title 90hz SF : Gaming Mode
 call :logo
 ::Gaming Mode 90Hz
 set px=653333
-adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %px%
-adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %px%
+adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %px% <nul
+adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %px% <nul
 set pxl=5533333
-adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %pxl%
-adb shell setprop debug.sf.late.app.duration %pxl%
-adb shell setprop debug.sf.late.sf.duration %pxl%
-adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %pxl%
-adb shell setprop debug.sf.region_sampling_period_ns %pxl%
-adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %pxl%
+adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %pxl% <nul
+adb shell setprop debug.sf.late.app.duration %pxl% <nul
+adb shell setprop debug.sf.late.sf.duration %pxl% <nul
+adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %pxl% <nul
+adb shell setprop debug.sf.region_sampling_period_ns %pxl% <nul
+adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %pxl% <nul
 set chxl=2933333
-adb shell setprop debug.sf.earlyGl.app.duration %chxl%
-adb shell setprop debug.sf.early.sf.duration %chxl%
-adb shell setprop debug.sf.region_sampling_duration_ns %chxl%
-adb shell setprop debug.sf.cached_set_render_duration_ns %chxl%
-adb shell setprop debug.sf.early.app.duration %chxl%
-adb shell setprop debug.sf.earlyGl.sf.duration %chxl%
+adb shell setprop debug.sf.earlyGl.app.duration %chxl% <nul
+adb shell setprop debug.sf.early.sf.duration %chxl% <nul
+adb shell setprop debug.sf.region_sampling_duration_ns %chxl% <nul
+adb shell setprop debug.sf.cached_set_render_duration_ns %chxl% <nul
+adb shell setprop debug.sf.early.app.duration %chxl% <nul
+adb shell setprop debug.sf.earlyGl.sf.duration %chxl% <nul
 set dhbx=15333333
-adb shell setprop debug.sf.region_sampling_timer_timeout_ns %dhbx%
+adb shell setprop debug.sf.region_sampling_timer_timeout_ns %dhbx% <nul
 set dhbxz=883333
-adb shell setprop debug.sf.early_app_phase_offset_ns %dhbxz%
-adb shell setprop debug.sf.early_gl_app_phase_offset_ns %dhbxz%
+adb shell setprop debug.sf.early_app_phase_offset_ns %dhbxz% <nul
+adb shell setprop debug.sf.early_gl_app_phase_offset_ns %dhbxz% <nul
 set xcxz=3833333
-adb shell setprop debug.sf.early_gl_phase_offset_ns %xcxz%
-adb shell setprop debug.sf.early_phase_offset_ns %xcxz%
+adb shell setprop debug.sf.early_gl_phase_offset_ns %xcxz% <nul
+adb shell setprop debug.sf.early_phase_offset_ns %xcxz% <nul
 set xcfs=2333333
-adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %xcfs%
+adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %xcfs% <nul
 adb shell setprop debug.sf.high_fps_early_phase_offset_ns %xcfs% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
@@ -1670,37 +1706,37 @@ cls
 title 90hz SF : Balance Mode
 call :logo
 set px=533333
-adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %px%
-adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %px%
+adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %px% <nul
+adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %px% <nul
 ::**
 set pxl=4833333
-adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %pxl%
-adb shell setprop debug.sf.late.app.duration %pxl%
-adb shell setprop debug.sf.late.sf.duration %pxl%
-adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %pxl%
-adb shell setprop debug.sf.region_sampling_period_ns %pxl%
-adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %pxl%
+adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %pxl% <nul
+adb shell setprop debug.sf.late.app.duration %pxl% <nul
+adb shell setprop debug.sf.late.sf.duration %pxl% <nul
+adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %pxl% <nul
+adb shell setprop debug.sf.region_sampling_period_ns %pxl% <nul
+adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %pxl% <nul
 ::***
 set chxl=2533333
-adb shell setprop debug.sf.earlyGl.app.duration %chxl%
-adb shell setprop debug.sf.early.sf.duration %chxl%
-adb shell setprop debug.sf.region_sampling_duration_ns %chxl%
-adb shell setprop debug.sf.cached_set_render_duration_ns %chxl%
-adb shell setprop debug.sf.early.app.duration %chxl%
-adb shell setprop debug.sf.earlyGl.sf.duration %chxl%
+adb shell setprop debug.sf.earlyGl.app.duration %chxl% <nul
+adb shell setprop debug.sf.early.sf.duration %chxl% <nul
+adb shell setprop debug.sf.region_sampling_duration_ns %chxl% <nul
+adb shell setprop debug.sf.cached_set_render_duration_ns %chxl% <nul
+adb shell setprop debug.sf.early.app.duration %chxl% <nul
+adb shell setprop debug.sf.earlyGl.sf.duration %chxl% <nul
 ::****
 set dhbx=11333333
-adb shell setprop debug.sf.region_sampling_timer_timeout_ns %dhbx%
+adb shell setprop debug.sf.region_sampling_timer_timeout_ns %dhbx% <nul
 set dhbxz=833333
-adb shell setprop debug.sf.early_app_phase_offset_ns %dhbxz%
-adb shell setprop debug.sf.early_gl_app_phase_offset_ns %dhbxz%
+adb shell setprop debug.sf.early_app_phase_offset_ns %dhbxz% <nul
+adb shell setprop debug.sf.early_gl_app_phase_offset_ns %dhbxz% <nul
 ::*****
 set xcxz=3333333
-adb shell setprop debug.sf.early_gl_phase_offset_ns %xcxz%
-adb shell setprop debug.sf.early_phase_offset_ns %xcxz%
+adb shell setprop debug.sf.early_gl_phase_offset_ns %xcxz% <nul
+adb shell setprop debug.sf.early_phase_offset_ns %xcxz% <nul
 ::******
 set xcfs=1833333
-adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %xcfs%
+adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %xcfs% <nul
 adb shell setprop debug.sf.high_fps_early_phase_offset_ns %xcfs% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
@@ -1710,9 +1746,9 @@ goto sftmenu
 cls
 title 120hz menu
 call :logo
-echo                                      [%g%1%w%] Balance Mode
-echo                                      [%g%2%w%] Gaming Mode
-echo                                      [%g%3%w%] Battery Saver Mode
+echo                                      [%g%1%w%] Balance offsets
+echo                                      [%g%2%w%] Low-latency offsets
+echo                                      [%g%3%w%] Conserving offsets
 echo                                      [%g%4%w%] Back
 echo.
 echo.
@@ -1730,32 +1766,32 @@ title 120hz SF : Gaming Mode
 call :logo
 ::Gaming Mode 120Hz
 set qk=3666666
-adb shell setprop debug.sf.region_sampling_duration_ns %qk%
-adb shell setprop debug.sf.cached_set_render_duration_ns %qk%
-adb shell setprop debug.sf.early.app.duration %qk%
-adb shell setprop debug.sf.early.sf.duration %qk%
-adb shell setprop debug.sf.earlyGl.app.duration %qk%
-adb shell setprop debug.sf.earlyGl.sf.duration %qk%
+adb shell setprop debug.sf.region_sampling_duration_ns %qk% <nul
+adb shell setprop debug.sf.cached_set_render_duration_ns %qk% <nul
+adb shell setprop debug.sf.early.app.duration %qk% <nul
+adb shell setprop debug.sf.early.sf.duration %qk% <nul
+adb shell setprop debug.sf.earlyGl.app.duration %qk% <nul
+adb shell setprop debug.sf.earlyGl.sf.duration %qk% <nul
 set fsk=1666666
-adb shell setprop debug.sf.early_app_phase_offset_ns %fsk%
-adb shell setprop debug.sf.early_gl_app_phase_offset_ns %fsk%
+adb shell setprop debug.sf.early_app_phase_offset_ns %fsk% <nul
+adb shell setprop debug.sf.early_gl_app_phase_offset_ns %fsk% <nul
 set erl=3866666
-adb shell setprop debug.sf.early_gl_phase_offset_ns %erl%
-adb shell setprop debug.sf.early_phase_offset_ns %erl%
+adb shell setprop debug.sf.early_gl_phase_offset_ns %erl% <nul
+adb shell setprop debug.sf.early_phase_offset_ns %erl% <nul
 set pos=586666
-adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %pos%
-adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %pos%
+adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %pos% <nul
+adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %pos% <nul
 set fpsos=2766666
-adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %fpsos%
-adb shell setprop debug.sf.high_fps_early_phase_offset_ns %fpsos%
+adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %fpsos% <nul
+adb shell setprop debug.sf.high_fps_early_phase_offset_ns %fpsos% <nul
 set tons=19666666
-adb shell setprop debug.sf.region_sampling_timer_timeout_ns %tons%
+adb shell setprop debug.sf.region_sampling_timer_timeout_ns %tons% <nul
 set ltsdur=5966666
-adb shell setprop debug.sf.late.app.duration %ltsdur%
-adb shell setprop debug.sf.late.sf.duration %ltsdur%
-adb shell setprop debug.sf.region_sampling_period_ns %ltsdur%
-adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %ltsdur%
-adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %ltsdur%
+adb shell setprop debug.sf.late.app.duration %ltsdur% <nul
+adb shell setprop debug.sf.late.sf.duration %ltsdur% <nul
+adb shell setprop debug.sf.region_sampling_period_ns %ltsdur% <nul
+adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %ltsdur% <nul
+adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %ltsdur% <nul
 adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %ltsdur% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
@@ -1767,32 +1803,32 @@ title 120hz SF : Battery Mode
 call :logo
 ::Battery Saver Mode 120Hz
 set qk=2066666
-adb shell setprop debug.sf.region_sampling_duration_ns %qk%
-adb shell setprop debug.sf.cached_set_render_duration_ns %qk%
-adb shell setprop debug.sf.early.app.duration %qk%
-adb shell setprop debug.sf.early.sf.duration %qk%
-adb shell setprop debug.sf.earlyGl.app.duration %qk%
-adb shell setprop debug.sf.earlyGl.sf.duration %qk%
+adb shell setprop debug.sf.region_sampling_duration_ns %qk% <nul
+adb shell setprop debug.sf.cached_set_render_duration_ns %qk% <nul
+adb shell setprop debug.sf.early.app.duration %qk% <nul
+adb shell setprop debug.sf.early.sf.duration %qk% <nul
+adb shell setprop debug.sf.earlyGl.app.duration %qk% <nul
+adb shell setprop debug.sf.earlyGl.sf.duration %qk% <nul
 set fsk=796666
-adb shell setprop debug.sf.early_app_phase_offset_ns %fsk%
-adb shell setprop debug.sf.early_gl_app_phase_offset_ns %fsk%
+adb shell setprop debug.sf.early_app_phase_offset_ns %fsk% <nul
+adb shell setprop debug.sf.early_gl_app_phase_offset_ns %fsk% <nul
 set erl=2166666
-adb shell setprop debug.sf.early_gl_phase_offset_ns %erl%
-adb shell setprop debug.sf.early_phase_offset_ns %erl%
+adb shell setprop debug.sf.early_gl_phase_offset_ns %erl% <nul
+adb shell setprop debug.sf.early_phase_offset_ns %erl% <nul
 set pos=396666
-adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %pos%
-adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %pos%
+adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %pos% <nul
+adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %pos% <nul
 set fpsos=1166666
-adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %fpsos%
-adb shell setprop debug.sf.high_fps_early_phase_offset_ns %fpsos%
+adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %fpsos% <nul
+adb shell setprop debug.sf.high_fps_early_phase_offset_ns %fpsos% <nul
 set tons=8466666
-adb shell setprop debug.sf.region_sampling_timer_timeout_ns %tons%
+adb shell setprop debug.sf.region_sampling_timer_timeout_ns %tons% <nul
 set ltsdur=3966666
-adb shell setprop debug.sf.late.app.duration %ltsdur%
-adb shell setprop debug.sf.late.sf.duration %ltsdur%
-adb shell setprop debug.sf.region_sampling_period_ns %ltsdur%
-adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %ltsdur%
-adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %ltsdur%
+adb shell setprop debug.sf.late.app.duration %ltsdur% <nul
+adb shell setprop debug.sf.late.sf.duration %ltsdur% <nul
+adb shell setprop debug.sf.region_sampling_period_ns %ltsdur% <nul
+adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %ltsdur% <nul
+adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %ltsdur% <nul
 adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %ltsdur% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
@@ -1804,38 +1840,38 @@ title 120hz SF : Balance Mode
 call :logo
 ::p1
 set qk=1966666
-adb shell setprop debug.sf.region_sampling_duration_ns %qk%
-adb shell setprop debug.sf.cached_set_render_duration_ns %qk%
-adb shell setprop debug.sf.early.app.duration %qk%
-adb shell setprop debug.sf.early.sf.duration %qk%
-adb shell setprop debug.sf.earlyGl.app.duration %qk%
-adb shell setprop debug.sf.earlyGl.sf.duration %qk%
+adb shell setprop debug.sf.region_sampling_duration_ns %qk% <nul
+adb shell setprop debug.sf.cached_set_render_duration_ns %qk% <nul
+adb shell setprop debug.sf.early.app.duration %qk% <nul
+adb shell setprop debug.sf.early.sf.duration %qk% <nul
+adb shell setprop debug.sf.earlyGl.app.duration %qk% <nul
+adb shell setprop debug.sf.earlyGl.sf.duration %qk% <nul
 ::p2
 set fsk=896666
-adb shell setprop debug.sf.early_app_phase_offset_ns %fsk%
-adb shell setprop debug.sf.early_gl_app_phase_offset_ns %fsk%
+adb shell setprop debug.sf.early_app_phase_offset_ns %fsk% <nul
+adb shell setprop debug.sf.early_gl_app_phase_offset_ns %fsk% <nul
 ::p3
 set erl=2466666
-adb shell setprop debug.sf.early_gl_phase_offset_ns %erl%
-adb shell setprop debug.sf.early_phase_offset_ns %erl%
+adb shell setprop debug.sf.early_gl_phase_offset_ns %erl% <nul
+adb shell setprop debug.sf.early_phase_offset_ns %erl% <nul
 ::p4
 set pos=446666
-adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %pos%
-adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %pos%
+adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %pos% <nul
+adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %pos% <nul
 ::p5
 set fpsos=1466666
-adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %fpsos%
-adb shell setprop debug.sf.high_fps_early_phase_offset_ns %fpsos%
+adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %fpsos% <nul
+adb shell setprop debug.sf.high_fps_early_phase_offset_ns %fpsos% <nul
 ::p6
 set tons=4666666
-adb shell setprop debug.sf.region_sampling_timer_timeout_ns %tons%
+adb shell setprop debug.sf.region_sampling_timer_timeout_ns %tons% <nul
 ::p7
 set ltsdur=4466666
-adb shell setprop debug.sf.late.app.duration %ltsdur%
-adb shell setprop debug.sf.late.sf.duration %ltsdur%
-adb shell setprop debug.sf.region_sampling_period_ns %ltsdur%
-adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %ltsdur%
-adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %ltsdur%
+adb shell setprop debug.sf.late.app.duration %ltsdur% <nul
+adb shell setprop debug.sf.late.sf.duration %ltsdur% <nul
+adb shell setprop debug.sf.region_sampling_period_ns %ltsdur% <nul
+adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %ltsdur% <nul
+adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %ltsdur% <nul
 adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %ltsdur% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
@@ -1849,9 +1885,9 @@ goto sftmenu
 cls
 title 144hz menu
 call :logo
-echo                                      [%g%1%w%] Balance Mode
-echo                                      [%g%2%w%] Gaming Mode
-echo                                      [%g%3%w%] Battery Saver Mode
+echo                                      [%g%1%w%] Balance offsets
+echo                                      [%g%2%w%] Low-latency offsets
+echo                                      [%g%3%w%] Conserving offsets
 echo                                      [%g%4%w%] Back
 echo.
 echo.
@@ -1869,38 +1905,38 @@ call :logo
 :: Gaming Mode 144Hz — optimised for maximum throughput, minimal SF latency
 :: early group (render duration)
 set v144_early=3055555
-adb shell setprop debug.sf.region_sampling_duration_ns %v144_early%
-adb shell setprop debug.sf.cached_set_render_duration_ns %v144_early%
-adb shell setprop debug.sf.early.app.duration %v144_early%
-adb shell setprop debug.sf.early.sf.duration %v144_early%
-adb shell setprop debug.sf.earlyGl.app.duration %v144_early%
-adb shell setprop debug.sf.earlyGl.sf.duration %v144_early%
+adb shell setprop debug.sf.region_sampling_duration_ns %v144_early% <nul
+adb shell setprop debug.sf.cached_set_render_duration_ns %v144_early% <nul
+adb shell setprop debug.sf.early.app.duration %v144_early% <nul
+adb shell setprop debug.sf.early.sf.duration %v144_early% <nul
+adb shell setprop debug.sf.earlyGl.app.duration %v144_early% <nul
+adb shell setprop debug.sf.earlyGl.sf.duration %v144_early% <nul
 :: early phase offsets
 set v144_earlyoff=1388888
-adb shell setprop debug.sf.early_app_phase_offset_ns %v144_earlyoff%
-adb shell setprop debug.sf.early_gl_app_phase_offset_ns %v144_earlyoff%
+adb shell setprop debug.sf.early_app_phase_offset_ns %v144_earlyoff% <nul
+adb shell setprop debug.sf.early_gl_app_phase_offset_ns %v144_earlyoff% <nul
 :: early GL phase
 set v144_earlygl=3222222
-adb shell setprop debug.sf.early_gl_phase_offset_ns %v144_earlygl%
-adb shell setprop debug.sf.early_phase_offset_ns %v144_earlygl%
+adb shell setprop debug.sf.early_gl_phase_offset_ns %v144_earlygl% <nul
+adb shell setprop debug.sf.early_phase_offset_ns %v144_earlygl% <nul
 :: high-fps early app phase
 set v144_hfearly=488888
-adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %v144_hfearly%
-adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %v144_hfearly%
+adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %v144_hfearly% <nul
+adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %v144_hfearly% <nul
 :: high-fps early GL phase
 set v144_hfearlygl=2305555
-adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %v144_hfearlygl%
-adb shell setprop debug.sf.high_fps_early_phase_offset_ns %v144_hfearlygl%
+adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %v144_hfearlygl% <nul
+adb shell setprop debug.sf.high_fps_early_phase_offset_ns %v144_hfearlygl% <nul
 :: region sampling timer timeout
 set v144_timer=16388888
-adb shell setprop debug.sf.region_sampling_timer_timeout_ns %v144_timer%
+adb shell setprop debug.sf.region_sampling_timer_timeout_ns %v144_timer% <nul
 :: late group (VSYNC window)
 set v144_late=4972222
-adb shell setprop debug.sf.late.app.duration %v144_late%
-adb shell setprop debug.sf.late.sf.duration %v144_late%
-adb shell setprop debug.sf.region_sampling_period_ns %v144_late%
-adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %v144_late%
-adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %v144_late%
+adb shell setprop debug.sf.late.app.duration %v144_late% <nul
+adb shell setprop debug.sf.late.sf.duration %v144_late% <nul
+adb shell setprop debug.sf.region_sampling_period_ns %v144_late% <nul
+adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %v144_late% <nul
+adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %v144_late% <nul
 adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %v144_late% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
@@ -1912,32 +1948,32 @@ title 144hz SF : Battery Mode
 call :logo
 :: Battery Mode 144Hz — reduced render budget to ease GPU/SF pressure
 set v144_early=1722222
-adb shell setprop debug.sf.region_sampling_duration_ns %v144_early%
-adb shell setprop debug.sf.cached_set_render_duration_ns %v144_early%
-adb shell setprop debug.sf.early.app.duration %v144_early%
-adb shell setprop debug.sf.early.sf.duration %v144_early%
-adb shell setprop debug.sf.earlyGl.app.duration %v144_early%
-adb shell setprop debug.sf.earlyGl.sf.duration %v144_early%
+adb shell setprop debug.sf.region_sampling_duration_ns %v144_early% <nul
+adb shell setprop debug.sf.cached_set_render_duration_ns %v144_early% <nul
+adb shell setprop debug.sf.early.app.duration %v144_early% <nul
+adb shell setprop debug.sf.early.sf.duration %v144_early% <nul
+adb shell setprop debug.sf.earlyGl.app.duration %v144_early% <nul
+adb shell setprop debug.sf.earlyGl.sf.duration %v144_early% <nul
 set v144_earlyoff=663888
-adb shell setprop debug.sf.early_app_phase_offset_ns %v144_earlyoff%
-adb shell setprop debug.sf.early_gl_app_phase_offset_ns %v144_earlyoff%
+adb shell setprop debug.sf.early_app_phase_offset_ns %v144_earlyoff% <nul
+adb shell setprop debug.sf.early_gl_app_phase_offset_ns %v144_earlyoff% <nul
 set v144_earlygl=1805555
-adb shell setprop debug.sf.early_gl_phase_offset_ns %v144_earlygl%
-adb shell setprop debug.sf.early_phase_offset_ns %v144_earlygl%
+adb shell setprop debug.sf.early_gl_phase_offset_ns %v144_earlygl% <nul
+adb shell setprop debug.sf.early_phase_offset_ns %v144_earlygl% <nul
 set v144_hfearly=330555
-adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %v144_hfearly%
-adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %v144_hfearly%
+adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %v144_hfearly% <nul
+adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %v144_hfearly% <nul
 set v144_hfearlygl=972222
-adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %v144_hfearlygl%
-adb shell setprop debug.sf.high_fps_early_phase_offset_ns %v144_hfearlygl%
+adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %v144_hfearlygl% <nul
+adb shell setprop debug.sf.high_fps_early_phase_offset_ns %v144_hfearlygl% <nul
 set v144_timer=7055555
-adb shell setprop debug.sf.region_sampling_timer_timeout_ns %v144_timer%
+adb shell setprop debug.sf.region_sampling_timer_timeout_ns %v144_timer% <nul
 set v144_late=3305555
-adb shell setprop debug.sf.late.app.duration %v144_late%
-adb shell setprop debug.sf.late.sf.duration %v144_late%
-adb shell setprop debug.sf.region_sampling_period_ns %v144_late%
-adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %v144_late%
-adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %v144_late%
+adb shell setprop debug.sf.late.app.duration %v144_late% <nul
+adb shell setprop debug.sf.late.sf.duration %v144_late% <nul
+adb shell setprop debug.sf.region_sampling_period_ns %v144_late% <nul
+adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %v144_late% <nul
+adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %v144_late% <nul
 adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %v144_late% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
@@ -1949,32 +1985,32 @@ title 144hz SF : Balance Mode
 call :logo
 :: Balance Mode 144Hz — smooth at full refresh rate without gaming overhead
 set v144_early=1638888
-adb shell setprop debug.sf.region_sampling_duration_ns %v144_early%
-adb shell setprop debug.sf.cached_set_render_duration_ns %v144_early%
-adb shell setprop debug.sf.early.app.duration %v144_early%
-adb shell setprop debug.sf.early.sf.duration %v144_early%
-adb shell setprop debug.sf.earlyGl.app.duration %v144_early%
-adb shell setprop debug.sf.earlyGl.sf.duration %v144_early%
+adb shell setprop debug.sf.region_sampling_duration_ns %v144_early% <nul
+adb shell setprop debug.sf.cached_set_render_duration_ns %v144_early% <nul
+adb shell setprop debug.sf.early.app.duration %v144_early% <nul
+adb shell setprop debug.sf.early.sf.duration %v144_early% <nul
+adb shell setprop debug.sf.earlyGl.app.duration %v144_early% <nul
+adb shell setprop debug.sf.earlyGl.sf.duration %v144_early% <nul
 set v144_earlyoff=747222
-adb shell setprop debug.sf.early_app_phase_offset_ns %v144_earlyoff%
-adb shell setprop debug.sf.early_gl_app_phase_offset_ns %v144_earlyoff%
+adb shell setprop debug.sf.early_app_phase_offset_ns %v144_earlyoff% <nul
+adb shell setprop debug.sf.early_gl_app_phase_offset_ns %v144_earlyoff% <nul
 set v144_earlygl=2055555
-adb shell setprop debug.sf.early_gl_phase_offset_ns %v144_earlygl%
-adb shell setprop debug.sf.early_phase_offset_ns %v144_earlygl%
+adb shell setprop debug.sf.early_gl_phase_offset_ns %v144_earlygl% <nul
+adb shell setprop debug.sf.early_phase_offset_ns %v144_earlygl% <nul
 set v144_hfearly=372222
-adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %v144_hfearly%
-adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %v144_hfearly%
+adb shell setprop debug.sf.high_fps_early_app_phase_offset_ns %v144_hfearly% <nul
+adb shell setprop debug.sf.high_fps_early_gl_app_phase_offset_ns %v144_hfearly% <nul
 set v144_hfearlygl=1222222
-adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %v144_hfearlygl%
-adb shell setprop debug.sf.high_fps_early_phase_offset_ns %v144_hfearlygl%
+adb shell setprop debug.sf.high_fps_early_gl_phase_offset_ns %v144_hfearlygl% <nul
+adb shell setprop debug.sf.high_fps_early_phase_offset_ns %v144_hfearlygl% <nul
 set v144_timer=3888888
-adb shell setprop debug.sf.region_sampling_timer_timeout_ns %v144_timer%
+adb shell setprop debug.sf.region_sampling_timer_timeout_ns %v144_timer% <nul
 set v144_late=3722222
-adb shell setprop debug.sf.late.app.duration %v144_late%
-adb shell setprop debug.sf.late.sf.duration %v144_late%
-adb shell setprop debug.sf.region_sampling_period_ns %v144_late%
-adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %v144_late%
-adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %v144_late%
+adb shell setprop debug.sf.late.app.duration %v144_late% <nul
+adb shell setprop debug.sf.late.sf.duration %v144_late% <nul
+adb shell setprop debug.sf.region_sampling_period_ns %v144_late% <nul
+adb shell setprop debug.sf.phase_offset_threshold_for_next_vsync_ns %v144_late% <nul
+adb shell setprop debug.sf.high_fps_late_app_phase_offset_ns %v144_late% <nul
 adb shell setprop debug.sf.high_fps_late_sf_phase_offset_ns %v144_late% <nul
 echo Done , Press Any Button To Go Back
 pause > nul
@@ -1982,20 +2018,55 @@ goto sftmenu
 
 :removesf
 cls
-title Remove SF
+title Remove SF offsets
 call :logo
 echo.
+echo  Clears the debug.sf.* phase-offset / duration props that DCX Auto and
+echo  Optimize - SurfaceFlinger write. Empty setprop resets them for this boot;
+echo  a reboot also clears any leftovers.
 echo.
-echo                       [%r%^^!%w%] Please Restart Device To Finish The Process
+echo  [%g%Y%w%] Clear now    [%g%N%w%] Cancel
+choice /c:YN /n >nul
+if errorlevel 2 goto sftmenu
 echo.
+call :_sf_clear_props
 echo.
-:: NOTE: debug.sf properties persist until reboot. Please restart to clear them.
-timeout /t 2 /nobreak > nul
-echo.
-echo.
-echo Press Any Button To Go Back
-pause > nul
+echo  Cleared. Optional reboot finishes any stuck SF state.
+echo  [%g%R%w%] Reboot now    [%g%B%w%] Back without reboot
+choice /c:RB /n >nul
+if errorlevel 2 goto sftmenu
+adb reboot <nul
 goto sftmenu
+
+:_sf_clear_props
+:: Props written by :setupautorun and the SF Hz profile menus.
+for %%P in (
+    debug.sf.region_sampling_duration_ns
+    debug.sf.cached_set_render_duration_ns
+    debug.sf.early.app.duration
+    debug.sf.early.sf.duration
+    debug.sf.earlyGl.app.duration
+    debug.sf.earlyGl.sf.duration
+    debug.sf.early_app_phase_offset_ns
+    debug.sf.early_gl_app_phase_offset_ns
+    debug.sf.early_gl_phase_offset_ns
+    debug.sf.early_phase_offset_ns
+    debug.sf.high_fps_early_app_phase_offset_ns
+    debug.sf.high_fps_early_gl_app_phase_offset_ns
+    debug.sf.high_fps_early_gl_phase_offset_ns
+    debug.sf.high_fps_early_phase_offset_ns
+    debug.sf.region_sampling_timer_timeout_ns
+    debug.sf.region_sampling_period_ns
+    debug.sf.phase_offset_threshold_for_next_vsync_ns
+    debug.sf.high_fps_late_app_phase_offset_ns
+    debug.sf.high_fps_late_sf_phase_offset_ns
+    debug.sf.late.app.duration
+    debug.sf.late.sf.duration
+) do (
+    adb shell setprop %%P "" <nul >nul 2>&1
+    echo  cleared %%P
+)
+exit /b
 
 :dexopt
 @echo off
@@ -2088,7 +2159,7 @@ for /f "tokens=2 delims=:" %%a in ('adb shell pm list package -3 ^<nul') do (
         echo Skip  !PKG!  ^(protected^)
     ) else (
         echo Kill  !PKG!
-        adb shell am force-stop !PKG! > nul 2>&1
+        adb shell am force-stop !PKG! <nul > nul 2>&1
     )
 )
 adb shell am kill-all <nul > nul 2>&1
@@ -2124,7 +2195,7 @@ if "!package!"=="" (
     goto Optimize
 )
 :: Verify the package actually exists on the device
-adb shell pm list packages 2>nul | findstr /C:"package:%package%" > nul
+adb shell pm list packages 2>nul <nul | findstr /C:"package:%package%" > nul
 if errorlevel 1 (
     echo [%r%^^!%w%] Package "%package%" is not installed on the device.
     pause > nul
@@ -2133,8 +2204,12 @@ if errorlevel 1 (
 echo.
 echo Compiling %package% with mode %mode%...
 adb shell cmd package compile -m %mode% -f %package% <nul
-timeout /t 2 /nobreak > nul
-echo Done , Press Any Button To Go Back
+if errorlevel 1 (
+    echo [%r%^^!%w%] Compile reported a failure for %package%.
+) else (
+    echo [%g%+%w%] Compile finished for %package% ^(mode %mode%^).
+)
+echo Press Any Button To Go Back
 pause > nul
 goto Optimize
 
@@ -2170,7 +2245,11 @@ goto sdgb
 cls
 echo Trimming system cache (may take a moment)...
 adb shell pm trim-caches 1200G <nul
-echo Done. Press any key.
+if errorlevel 1 (
+    echo [%r%^^!%w%] trim-caches reported a failure. Nothing else was changed.
+) else (
+    echo [%g%+%w%] Trim requested. Press any key.
+)
 pause > nul
 goto Optimize
 
@@ -2225,13 +2304,13 @@ echo.
 echo.
 echo                                     %gold%[%w%1%gold%]%w% Toggle Power Saver
 echo                                     %gold%[%w%2%gold%]%w% Toggle Animation
-echo                                     %gold%[%w%3%gold%]%w% Toggle Auto Wifi
-echo                                     %gold%[%w%4%gold%]%w% Toggle Sync
-echo                                     %gold%[%w%5%gold%]%w% Toggle Motion
-echo                                     %gold%[%w%6%gold%]%w% Toggle ZRAM
-echo                                     %gold%[%w%7%gold%]%w% Toggle Extreme Power Saver
+echo                                     %gold%[%w%3%gold%]%w% Wi-Fi/BT scan and related
+echo                                     %gold%[%w%4%gold%]%w% Toggle Sync ^(placebo key^)
+echo                                     %gold%[%w%5%gold%]%w% Samsung motion ^(OEM^)
+echo                                     %gold%[%w%6%gold%]%w% ZRAM preference ^(reboot^)
+echo                                     %gold%[%w%7%gold%]%w% Aggressive saver constants
 echo                                     %gold%[%w%8%gold%]%w% Toggle Send Error
-echo                                     %gold%[%w%9%gold%]%w% Toggle Lock Profilling
+echo                                     %gold%[%w%9%gold%]%w% ART lock profiling ^(dev^)
 echo                                     %gold%[%w%10%gold%]%w% Toggle Logs/etc
 echo                                     %gold%[%w%11%gold%]%w% Next Page
 echo                                     %gold%[%w%12%gold%]%w% Back
@@ -2384,29 +2463,29 @@ set "WLREPORT=%TEMP%\dcx_wakelocks_%TS%.txt"
     echo  ^(Each entry = something keeping CPU awake right now.
     echo   PARTIAL_WAKE_LOCK is the most common battery drain.^)
     echo -----------------------------------------------------------
-    adb shell "dumpsys power 2>/dev/null | grep -E 'Wake Locks:|PARTIAL_WAKE_LOCK|SCREEN_BRIGHT|FULL_WAKE_LOCK'"
+    adb shell "dumpsys power 2>/dev/null | grep -E 'Wake Locks:|PARTIAL_WAKE_LOCK|SCREEN_BRIGHT|FULL_WAKE_LOCK'" <nul
     echo.
     echo.
     echo [Section 2] Top wake-lock holders since last full charge
     echo  ^(Look at "Wake lock" totals - highest = biggest drainers.^)
     echo -----------------------------------------------------------
-    adb shell "dumpsys batterystats --charged 2>/dev/null | head -200"
+    adb shell "dumpsys batterystats --charged 2>/dev/null | head -200" <nul
     echo.
     echo.
     echo [Section 3] Doze ^(deep sleep^) state
     echo  ^(mState=IDLE means doze is active. ACTIVE = apps can run.^)
     echo -----------------------------------------------------------
-    adb shell "dumpsys deviceidle 2>/dev/null | grep -E 'mState=|mLightState=|mActiveIdleOpCount|mScreenOn|mCharging'"
+    adb shell "dumpsys deviceidle 2>/dev/null | grep -E 'mState=|mLightState=|mActiveIdleOpCount|mScreenOn|mCharging'" <nul
     echo.
     echo.
     echo [Section 4] Top alarms ^(background wakeups^)
     echo -----------------------------------------------------------
-    adb shell "dumpsys alarm 2>/dev/null | grep -E 'Top Alarms|wakeups in last|act=' | head -50"
+    adb shell "dumpsys alarm 2>/dev/null | grep -E 'Top Alarms|wakeups in last|act=' | head -50" <nul
     echo.
     echo.
     echo [Section 5] Process CPU consumers ^(last sample^)
     echo -----------------------------------------------------------
-    adb shell "dumpsys cpuinfo 2>/dev/null | head -25"
+    adb shell "dumpsys cpuinfo 2>/dev/null | head -25" <nul
     echo.
     echo ===========================================================
     echo  Quick interpretation:
@@ -2483,37 +2562,54 @@ echo                                     %g%[%w%5%g%]%w% Restore defaults
 echo                                     %g%[%w%6%g%]%w% Back
 set "rl=" & set /p rl="Choose An Option >> "
 if "!rl!"=="1" (
-    adb shell settings put system min_refresh_rate 60
+    adb shell settings put system min_refresh_rate 60 <nul
     adb shell settings put system peak_refresh_rate 60 <nul
-    echo Locked at 60 Hz.
+    call :_act_reset
+    call :_settings_verify system min_refresh_rate 60
+    call :_settings_verify system peak_refresh_rate 60
+    call :_act_summary
     pause > nul
     goto refreshlock
 )
 if "!rl!"=="2" (
-    adb shell settings put system min_refresh_rate 90
+    adb shell settings put system min_refresh_rate 90 <nul
     adb shell settings put system peak_refresh_rate 90 <nul
-    echo Locked at 90 Hz. ^(Falls back if your panel doesn't support 90.^)
+    call :_act_reset
+    call :_settings_verify system min_refresh_rate 90
+    call :_settings_verify system peak_refresh_rate 90
+    call :_act_summary
+    echo ^(Falls back if your panel doesn't support 90.^)
     pause > nul
     goto refreshlock
 )
 if "!rl!"=="3" (
-    adb shell settings put system min_refresh_rate 120
+    adb shell settings put system min_refresh_rate 120 <nul
     adb shell settings put system peak_refresh_rate 120 <nul
-    echo Locked at 120 Hz. ^(Falls back if your panel doesn't support 120.^)
+    call :_act_reset
+    call :_settings_verify system min_refresh_rate 120
+    call :_settings_verify system peak_refresh_rate 120
+    call :_act_summary
+    echo ^(Falls back if your panel doesn't support 120.^)
     pause > nul
     goto refreshlock
 )
 if "!rl!"=="4" (
-    adb shell settings put system min_refresh_rate 1
+    adb shell settings put system min_refresh_rate 1 <nul
     adb shell settings put system peak_refresh_rate 120 <nul
-    echo Adaptive 1-120 Hz.
+    call :_act_reset
+    call :_settings_verify system min_refresh_rate 1
+    call :_settings_verify system peak_refresh_rate 120
+    call :_act_summary
     pause > nul
     goto refreshlock
 )
 if not "!rl!"=="5" goto _skrl5
     adb shell settings delete system min_refresh_rate <nul
     adb shell settings delete system peak_refresh_rate <nul
-    echo Defaults restored.
+    call :_act_reset
+    call :_settings_verify system min_refresh_rate DELETE
+    call :_settings_verify system peak_refresh_rate DELETE
+    call :_act_summary
     pause > nul
     goto refreshlock
 
@@ -2623,13 +2719,13 @@ echo                                     %g%[%w%3%g%]%w% Back
 set "ah=" & set /p ah="Choose An Option >> "
 if "!ah!"=="1" (
     adb shell device_config put app_hibernation app_hibernation_enabled true <nul
-    echo Enabled.
+    call :_dcfg_verify app_hibernation app_hibernation_enabled true
     pause > nul
     goto apphibernation
 )
 if "!ah!"=="2" (
     adb shell device_config put app_hibernation app_hibernation_enabled false <nul
-    echo Disabled.
+    call :_dcfg_verify app_hibernation app_hibernation_enabled false
     pause > nul
     goto apphibernation
 )
@@ -2637,37 +2733,36 @@ if "!ah!"=="3" goto nextpage
 goto apphibernation
 :: ===================================================================
 :: NEW: Account Sync toggle (from Balanced.bat)
-:: Master switch for ALL account auto-sync (Google contacts, calendar,
-:: Gmail push, Drive, etc). Turning OFF is a meaningful battery save
-:: but you'll need to refresh apps manually. Real Settings.Global key.
+:: Writes master_sync_status only. On modern Android nothing reads that key -
+:: real Auto sync lives in SyncManager and is not rootless-writable. Kept so
+:: Backup/Restore can round-trip the value. See README "placebo".
 :: ===================================================================
 :syncmaster
 cls
 title Account Sync Toggle
 call :logo
 echo.
-echo  Master toggle for ALL account auto-sync. Disabling stops:
-echo    - Google contacts/calendar/Drive background sync
-echo    - Gmail push notifications  ^(switches to fetch on open^)
-echo    - Photo backup
-echo  Apps you actively open will still work.
+echo  Writes global master_sync_status only.
+echo  %y%Placebo on modern Android:%w% nothing reads this key. Real Auto sync
+echo  lives in the sync framework ^(dumpsys content^) and needs root to change.
+echo  Kept so Backup/Restore can round-trip the stored value.
 echo.
 echo  Current:
 for /f "delims=" %%i in ('adb shell settings get global master_sync_status 2^>nul ^<nul') do echo    master_sync_status = %%i  (1=on, 0=off)
 echo.
-echo                                     %g%[%w%1%g%]%w% Enable sync (default)
-echo                                     %g%[%w%2%g%]%w% Disable sync (battery saver)
+echo                                     %g%[%w%1%g%]%w% Set master_sync_status = 1
+echo                                     %g%[%w%2%g%]%w% Set master_sync_status = 0
 echo                                     %g%[%w%3%g%]%w% Back
 set "sm=" & set /p sm="Choose An Option >> "
 if "!sm!"=="1" (
     adb shell settings put global master_sync_status 1 <nul
-    echo Sync enabled.
+    echo Value set to 1. Real Auto sync is unchanged on modern Android.
     pause > nul
     goto syncmaster
 )
 if "!sm!"=="2" (
     adb shell settings put global master_sync_status 0 <nul
-    echo Sync disabled. You will need to open apps to fetch new content.
+    echo Value set to 0. Real Auto sync is unchanged on modern Android.
     pause > nul
     goto syncmaster
 )
@@ -2755,12 +2850,12 @@ if "!pkgv2!"=="" goto nexthibernateappphase
 echo.
 echo [#] Set %pkgv2% To Stock . . . .
 echo.
-adb shell cmd appops reset %pkgv2%
-adb shell cmd activity set-bg-restriction-level --user 0 %pkgv2% unrestricted
-adb shell cmd activity set-inactive %pkgv2% false
-adb shell cmd activity set-standby-bucket %pkgv2% active
-adb shell cmd app_hibernation set-state %pkgv2% false
-adb shell cmd dropbox remove-low-priority %pkgv2%
+adb shell cmd appops reset %pkgv2% <nul
+adb shell cmd activity set-bg-restriction-level --user 0 %pkgv2% unrestricted <nul
+adb shell cmd activity set-inactive %pkgv2% false <nul
+adb shell cmd activity set-standby-bucket %pkgv2% active <nul
+adb shell cmd app_hibernation set-state %pkgv2% false <nul
+adb shell cmd dropbox remove-low-priority %pkgv2% <nul
 adb shell cmd tare set-vip 0 %pkgv2% true <nul
 echo.
 echo [#] %pkgv2% Is Back To Stock, Reboot To Finish The Process
@@ -2796,26 +2891,26 @@ for %%b in (
 :: do-block early at parse time and break the script - the same class as the :Summary
 :: crash in sincript. Delayed expansion keeps the block structure intact. The bare
 :: %pkgv2% statements outside any block (below) are not a cmd-parse risk.
-    adb shell cmd appops set !pkgv2! %%b ignore > nul 2>&1
+    adb shell cmd appops set !pkgv2! %%b ignore <nul > nul 2>&1
 )
-adb shell cmd activity service-restart-backoff disable %pkgv2%
-adb shell cmd activity set-bg-restriction-level --user 0 %pkgv2% hibernation
-adb shell cmd activity set-foreground-service-delegate --user 0 %pkgv2% stop
-adb shell cmd activity set-inactive %pkgv2% true
-adb shell cmd activity set-standby-bucket %pkgv2% restricted
-adb shell cmd app_hibernation set-state %pkgv2% true
-adb shell cmd deviceidle sys-whitelist -%pkgv2%
-adb shell cmd deviceidle whitelist -%pkgv2%
-adb shell cmd dropbox add-low-priority %pkgv2%
-adb shell cmd package art clear-app-profiles %pkgv2%
-adb shell cmd package log-visibility --disable %pkgv2%
-adb shell cmd shortcut clear-shortcuts %pkgv2%
-adb shell cmd tare set-vip 0 %pkgv2% false
-adb shell cmd usagestats clear-last-used-timestamps %pkgv2%
-adb shell am force-stop %pkgv2%
-adb shell am kill %pkgv2%
-adb shell am stop-app %pkgv2%
-adb shell cmd activity force-stop %pkgv2%
+adb shell cmd activity service-restart-backoff disable %pkgv2% <nul
+adb shell cmd activity set-bg-restriction-level --user 0 %pkgv2% hibernation <nul
+adb shell cmd activity set-foreground-service-delegate --user 0 %pkgv2% stop <nul
+adb shell cmd activity set-inactive %pkgv2% true <nul
+adb shell cmd activity set-standby-bucket %pkgv2% restricted <nul
+adb shell cmd app_hibernation set-state %pkgv2% true <nul
+adb shell cmd deviceidle sys-whitelist -%pkgv2% <nul
+adb shell cmd deviceidle whitelist -%pkgv2% <nul
+adb shell cmd dropbox add-low-priority %pkgv2% <nul
+adb shell cmd package art clear-app-profiles %pkgv2% <nul
+adb shell cmd package log-visibility --disable %pkgv2% <nul
+adb shell cmd shortcut clear-shortcuts %pkgv2% <nul
+adb shell cmd tare set-vip 0 %pkgv2% false <nul
+adb shell cmd usagestats clear-last-used-timestamps %pkgv2% <nul
+adb shell am force-stop %pkgv2% <nul
+adb shell am kill %pkgv2% <nul
+adb shell am stop-app %pkgv2% <nul
+adb shell cmd activity force-stop %pkgv2% <nul
 adb shell cmd activity kill %pkgv2% <nul
 echo.
 echo %pkgv2% In Hibernate State
@@ -2882,11 +2977,11 @@ title Removing system apps from Doze whitelist...
 :: uid. toybox grep/sed ship on every Android 6+ build DCX targets; if one
 :: is somehow missing the file comes back empty and the loop is a no-op -
 :: the same fail-safe as before, never a wrong removal.
-adb shell "dumpsys deviceidle sys-whitelist | grep -E '^[[:blank:]]*[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z0-9_]+)+(,[0-9]+)?[[:blank:]]*$' | sed 's/[[:blank:]]//g; s/,.*//'" > "%TEMP%\dcx_idle_whitelist.txt"
+adb shell "dumpsys deviceidle sys-whitelist | grep -E '^[[:blank:]]*[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z0-9_]+)+(,[0-9]+)?[[:blank:]]*$' | sed 's/[[:blank:]]//g; s/,.*//'" > "%TEMP%\dcx_idle_whitelist.txt" <nul
 for /f "delims=" %%A in ('type "%TEMP%\dcx_idle_whitelist.txt"') do (
     echo %%A | findstr /I "gms gsf shell ims downloads providers settings systemui inputmethod telecom telephony bluetooth dialer mms phone alarm calendar fused" > nul
     if errorlevel 1 (
-        adb shell cmd deviceidle sys-whitelist -%%A
+        adb shell cmd deviceidle sys-whitelist -%%A <nul
         echo Removed: %%A
     ) else (
         echo [%r%#%w%] %%A Is Protected
@@ -2937,7 +3032,7 @@ for /f "tokens=1 delims=:" %%a in ('adb shell getprop ^<nul ^| findstr "log.tag"
     set "prop=!prop: =!"
     set "prop=!prop:[=!"
     set "prop=!prop:]=!"
-    adb shell setprop !prop! S
+    adb shell setprop !prop! S <nul
 )
 echo Press Any Button To Go Back
 pause > nul
@@ -2947,8 +3042,17 @@ goto nextpage
 cls
 title Universal toggle Logs\etc : On
 call :logo
-echo                       [%r%^^!%w%] Please Restart Device To Finish The Process
+echo  Clearing log.tag* props set by Off ^(empty = platform default^)...
+for /f "tokens=1 delims=:" %%a in ('adb shell getprop ^<nul ^| findstr "log.tag"') do (
+    set "prop=%%a"
+    set "prop=!prop: =!"
+    set "prop=!prop:[=!"
+    set "prop=!prop:]=!"
+    adb shell setprop !prop! "" <nul >nul 2>&1
+)
 echo.
+echo  Cleared. A reboot finishes restoring default log levels.
+echo                       [%r%^^!%w%] Please Restart Device To Finish The Process
 echo.
 echo Press Any Button To Go Back
 pause > nul
@@ -3071,117 +3175,117 @@ goto offlogss
 :mainlogv
 cls
 ::debugprop from tecno pova 6 neo
-adb shell setprop debug.ae.dump.enable false
-adb shell setprop debug.ae.dump.stat 0
-adb shell setprop debug.ae.dump_level 0
-adb shell setprop debug.ae.log.enable false
-adb shell setprop debug.ae.log.level 0
-adb shell setprop debug.ae.logi.enable false
-adb shell setprop debug.af.log.enable false
-adb shell setprop debug.bq.dump false
-adb shell setprop debug.camera.dump false
-adb shell setprop debug.stagefright.mediacodec.trace 0
-adb shell setprop debug.sf.log_transaction false
-adb shell setprop debug.sf.stats false
-adb shell setprop debug.mtkcam.systrace.level 0
-adb shell setprop debug.dump.enable false
-adb shell setprop debug.dump 0
-adb shell setprop debug.camera.log 0
-adb shell setprop debug.ae.stat.log.level 0
-adb shell setprop debug.ae.stat.perf.enable false
-adb shell setprop debug.af.systrace 0
-adb shell setprop debug.awb.systrace.db.enable false
-adb shell setprop debug.flicker.systrace false
-adb shell setprop debug.flicker.log 0
-adb shell setprop debug.pdsystrace 0
-adb shell setprop debug.syncawbsystrace.enable false
-adb shell setprop debug.trace.print.video false
-adb shell setprop debug.trace.print.audio false
-adb shell setprop debug.trace.info false
-adb shell setprop debug.gpu.dump.texture false
-adb shell setprop debug.sf.cpupolicy.log false
-adb shell setprop debug.hwc.wdt_trace false
-adb shell setprop debug.apusys.loglevel 0
-adb shell setprop debug.awb.latency.log.level 0
-adb shell setprop debug.awb_alg.log.level 0
-adb shell setprop debug.edma.loglevel 0
-adb shell setprop debug.ae.pline.table.log 0
-adb shell setprop debug.ae_alg.log.level 0
-adb shell setprop debug.atms.dump false
-adb shell setprop debug.eis.dumpdisplay false
-adb shell setprop debug.featureProfile.dump false
-adb shell setprop debug.flk_dump 0
-adb shell setprop debug.fpipe.force.dump 0
-adb shell setprop debug.hwc.dump_buf_log_enable false
-adb shell setprop debug.ai3a_log.enable false
-adb shell setprop debug.aiawb.ga.log.enable false
-adb shell setprop debug.alsflk.log 0
-adb shell setprop debug.awb.p1ggm.log.enable false
-adb shell setprop debug.awb.sa.log.enable false
-adb shell setprop debug.mediatek.vklayer.dump_analysis_enabled false
-adb shell setprop debug.mediatek.vklayer.dump_blas_info_enabled false
-adb shell setprop debug.mediatek.vklayer.dump_debug_enabled false
-adb shell setprop debug.mediatek.vklayer.dump_debug_mem_at_QSubmit false
-adb shell setprop debug.mediatek.vklayer.dump_debug_mem_enabled false
-adb shell setprop debug.loglevel 0
-adb shell setprop debug.log.enable false
-adb shell setprop debug.thread_raw.log false
-adb shell setprop debug.apusyslog false
-adb shell setprop debug.neuropilot.gpu.systrace false
-adb shell setprop debug.neuron.runtime.ProfilingLevel 0
-adb shell setprop debug.neuron.runtime.EnableDebugger false
-adb shell setprop debug.hwc.aibld_dump_enable false
-adb shell setprop debug.tkflow.bokeh.log 0
-adb shell setprop debug.tone.log.enable false
-adb shell setprop debug.vpustream.loglevel 0
-adb shell setprop debug.smvrb.loglevel 0
-adb shell setprop debug.pipeline.trace 0
-adb shell setprop debug.mtk_tflite.vlog 0
-adb shell setprop debug.sensors.color.log 0
-adb shell setprop debug.P1STT.log 0
-adb shell setprop debug.af_alg.log.level 0
-adb shell setprop debug.awb.sa.log.level 0
-adb shell setprop debug.gpud.gl.state.error.dump 0
-adb shell setprop debug.gpud.log 0
-adb shell setprop debug.3alog.enable false
-adb shell setprop debug.STEREO.Log 0
-adb shell setprop debug.STEREO.dump 0
-adb shell setprop debug.ThreadPool.log 0
-adb shell setprop debug.edma.loglevel 0
-adb shell setprop debug.sync3A.log 0
-adb shell setprop debug.camera.3dnr.log.level 0
-adb shell setprop debug.sync3AWrapper.log 0
-adb shell setprop debug.sf.wdlog 0
-adb shell setprop debug.sf.display_dejitter_log 0
-adb shell setprop debug.sensors.flicker.log 0
-adb shell setprop debug.tpi.s.log 0
-adb shell setprop debug.pip.logLevel 0
-adb shell setprop debug.EntryPool.log 0
-adb shell setprop debug.log.rpt 0
-adb shell setprop debug.ltm.smth.log.enable false
-adb shell setprop debug.fsc.log_level 0
-adb shell setprop debug.gpunn.enable_profiler false
-adb shell setprop debug.hal3av3.log 0
-adb shell setprop debug.pq.enable.trace false
-adb shell setprop debug.pd.dump.enable false
-adb shell setprop debug.p2f.dump.enable false
-adb shell setprop debug.neuron.runtime.DumpVerbose 0
-adb shell setprop debug.vendor.sys.camfilelock.log 0
-adb shell setprop debug.smvr.log.level 0
-adb shell setprop debug.statistic_buf.enable false
-adb shell setprop debug.sync3AMgr.log false
-adb shell setprop debug.tpi.s.async.log false
-adb shell setprop debug.tpi.s.dump false
-adb shell setprop debug.tsfcore.filedump.enable false
-adb shell setprop debug.gpud.wsframebuffer.log 0
-adb shell setprop debug.hmplog 0
-adb shell setprop debug.hwui.memory_dump_disable 1
-adb shell setprop debug.trace.p2.Cropper 0
-adb shell setprop debug.trace.p2.CaptureNode 0
-adb shell setprop debug.trace.p2.LMVInfo 0
-adb shell setprop debug.trace.p2.Streaming_VSDOF 0
-adb shell setprop debug.systrace.p2 0
-adb shell setprop debug.sf.show_msync2_trace false
+adb shell setprop debug.ae.dump.enable false <nul
+adb shell setprop debug.ae.dump.stat 0 <nul
+adb shell setprop debug.ae.dump_level 0 <nul
+adb shell setprop debug.ae.log.enable false <nul
+adb shell setprop debug.ae.log.level 0 <nul
+adb shell setprop debug.ae.logi.enable false <nul
+adb shell setprop debug.af.log.enable false <nul
+adb shell setprop debug.bq.dump false <nul
+adb shell setprop debug.camera.dump false <nul
+adb shell setprop debug.stagefright.mediacodec.trace 0 <nul
+adb shell setprop debug.sf.log_transaction false <nul
+adb shell setprop debug.sf.stats false <nul
+adb shell setprop debug.mtkcam.systrace.level 0 <nul
+adb shell setprop debug.dump.enable false <nul
+adb shell setprop debug.dump 0 <nul
+adb shell setprop debug.camera.log 0 <nul
+adb shell setprop debug.ae.stat.log.level 0 <nul
+adb shell setprop debug.ae.stat.perf.enable false <nul
+adb shell setprop debug.af.systrace 0 <nul
+adb shell setprop debug.awb.systrace.db.enable false <nul
+adb shell setprop debug.flicker.systrace false <nul
+adb shell setprop debug.flicker.log 0 <nul
+adb shell setprop debug.pdsystrace 0 <nul
+adb shell setprop debug.syncawbsystrace.enable false <nul
+adb shell setprop debug.trace.print.video false <nul
+adb shell setprop debug.trace.print.audio false <nul
+adb shell setprop debug.trace.info false <nul
+adb shell setprop debug.gpu.dump.texture false <nul
+adb shell setprop debug.sf.cpupolicy.log false <nul
+adb shell setprop debug.hwc.wdt_trace false <nul
+adb shell setprop debug.apusys.loglevel 0 <nul
+adb shell setprop debug.awb.latency.log.level 0 <nul
+adb shell setprop debug.awb_alg.log.level 0 <nul
+adb shell setprop debug.edma.loglevel 0 <nul
+adb shell setprop debug.ae.pline.table.log 0 <nul
+adb shell setprop debug.ae_alg.log.level 0 <nul
+adb shell setprop debug.atms.dump false <nul
+adb shell setprop debug.eis.dumpdisplay false <nul
+adb shell setprop debug.featureProfile.dump false <nul
+adb shell setprop debug.flk_dump 0 <nul
+adb shell setprop debug.fpipe.force.dump 0 <nul
+adb shell setprop debug.hwc.dump_buf_log_enable false <nul
+adb shell setprop debug.ai3a_log.enable false <nul
+adb shell setprop debug.aiawb.ga.log.enable false <nul
+adb shell setprop debug.alsflk.log 0 <nul
+adb shell setprop debug.awb.p1ggm.log.enable false <nul
+adb shell setprop debug.awb.sa.log.enable false <nul
+adb shell setprop debug.mediatek.vklayer.dump_analysis_enabled false <nul
+adb shell setprop debug.mediatek.vklayer.dump_blas_info_enabled false <nul
+adb shell setprop debug.mediatek.vklayer.dump_debug_enabled false <nul
+adb shell setprop debug.mediatek.vklayer.dump_debug_mem_at_QSubmit false <nul
+adb shell setprop debug.mediatek.vklayer.dump_debug_mem_enabled false <nul
+adb shell setprop debug.loglevel 0 <nul
+adb shell setprop debug.log.enable false <nul
+adb shell setprop debug.thread_raw.log false <nul
+adb shell setprop debug.apusyslog false <nul
+adb shell setprop debug.neuropilot.gpu.systrace false <nul
+adb shell setprop debug.neuron.runtime.ProfilingLevel 0 <nul
+adb shell setprop debug.neuron.runtime.EnableDebugger false <nul
+adb shell setprop debug.hwc.aibld_dump_enable false <nul
+adb shell setprop debug.tkflow.bokeh.log 0 <nul
+adb shell setprop debug.tone.log.enable false <nul
+adb shell setprop debug.vpustream.loglevel 0 <nul
+adb shell setprop debug.smvrb.loglevel 0 <nul
+adb shell setprop debug.pipeline.trace 0 <nul
+adb shell setprop debug.mtk_tflite.vlog 0 <nul
+adb shell setprop debug.sensors.color.log 0 <nul
+adb shell setprop debug.P1STT.log 0 <nul
+adb shell setprop debug.af_alg.log.level 0 <nul
+adb shell setprop debug.awb.sa.log.level 0 <nul
+adb shell setprop debug.gpud.gl.state.error.dump 0 <nul
+adb shell setprop debug.gpud.log 0 <nul
+adb shell setprop debug.3alog.enable false <nul
+adb shell setprop debug.STEREO.Log 0 <nul
+adb shell setprop debug.STEREO.dump 0 <nul
+adb shell setprop debug.ThreadPool.log 0 <nul
+adb shell setprop debug.edma.loglevel 0 <nul
+adb shell setprop debug.sync3A.log 0 <nul
+adb shell setprop debug.camera.3dnr.log.level 0 <nul
+adb shell setprop debug.sync3AWrapper.log 0 <nul
+adb shell setprop debug.sf.wdlog 0 <nul
+adb shell setprop debug.sf.display_dejitter_log 0 <nul
+adb shell setprop debug.sensors.flicker.log 0 <nul
+adb shell setprop debug.tpi.s.log 0 <nul
+adb shell setprop debug.pip.logLevel 0 <nul
+adb shell setprop debug.EntryPool.log 0 <nul
+adb shell setprop debug.log.rpt 0 <nul
+adb shell setprop debug.ltm.smth.log.enable false <nul
+adb shell setprop debug.fsc.log_level 0 <nul
+adb shell setprop debug.gpunn.enable_profiler false <nul
+adb shell setprop debug.hal3av3.log 0 <nul
+adb shell setprop debug.pq.enable.trace false <nul
+adb shell setprop debug.pd.dump.enable false <nul
+adb shell setprop debug.p2f.dump.enable false <nul
+adb shell setprop debug.neuron.runtime.DumpVerbose 0 <nul
+adb shell setprop debug.vendor.sys.camfilelock.log 0 <nul
+adb shell setprop debug.smvr.log.level 0 <nul
+adb shell setprop debug.statistic_buf.enable false <nul
+adb shell setprop debug.sync3AMgr.log false <nul
+adb shell setprop debug.tpi.s.async.log false <nul
+adb shell setprop debug.tpi.s.dump false <nul
+adb shell setprop debug.tsfcore.filedump.enable false <nul
+adb shell setprop debug.gpud.wsframebuffer.log 0 <nul
+adb shell setprop debug.hmplog 0 <nul
+adb shell setprop debug.hwui.memory_dump_disable 1 <nul
+adb shell setprop debug.trace.p2.Cropper 0 <nul
+adb shell setprop debug.trace.p2.CaptureNode 0 <nul
+adb shell setprop debug.trace.p2.LMVInfo 0 <nul
+adb shell setprop debug.trace.p2.Streaming_VSDOF 0 <nul
+adb shell setprop debug.systrace.p2 0 <nul
+adb shell setprop debug.sf.show_msync2_trace false <nul
 ::debugprop from tecno pova 6 neo
 :skiplogv
 cls
@@ -3191,323 +3295,321 @@ call :_dcfg_warn
 :: This is what `persist.log.tag "*:S"` from the user's .sh actually
 :: does - silences ALL logcat tags at the "Silent" level. The
 :: existing per-tag setprops below remain as a belt-and-braces.
-adb shell setprop persist.log.tag "*:S" > nul 2>&1
-adb shell setprop log.tag "*:S" > nul 2>&1
-adb shell setprop debug.vendor.gpu.record_sbwc false
-adb shell setprop debug.egl.blobcache.multifile false
-adb shell setprop debug.tracefpunwindoff 1
-adb shell setprop log.tag.LAUNCHER_TRACE S > nul 2>&1
-adb shell device_config put systemui com.android.systemui.coroutine_tracing false
-adb shell setprop persist.log.tag.DisplayPowerController S > nul 2>&1
-adb shell setprop debug.met_log_d.user null
-adb shell cmd wifi set-verbose-logging disabled > nul 2>&1
-adb shell device_config put profcollect_native_boot enabled false
-adb shell setprop debug.sf.boot_animation false
-adb shell setprop debug.sf.edge_extension_shader false
-adb shell setprop debug.perf_event_max_sample_rate 1
-adb shell setprop debug.perf_event_mlock_kb 2
-adb shell setprop debug.perf_cpu_time_max_percent 1
-adb shell setprop security.perf_harden 0
-adb shell setprop debug.lldb-rpc-server 0
-adb shell setprop debug.MB.running 0
-adb shell setprop debug.hwc.otf 0
-adb shell setprop debug.art.monitor.app false
+adb shell setprop persist.log.tag "*:S" <nul > nul 2>&1
+adb shell setprop log.tag "*:S" <nul > nul 2>&1
+adb shell setprop debug.vendor.gpu.record_sbwc false <nul
+adb shell setprop debug.egl.blobcache.multifile false <nul
+adb shell setprop debug.tracefpunwindoff 1 <nul
+adb shell setprop log.tag.LAUNCHER_TRACE S <nul > nul 2>&1
+adb shell device_config put systemui com.android.systemui.coroutine_tracing false <nul
+adb shell setprop persist.log.tag.DisplayPowerController S <nul > nul 2>&1
+adb shell setprop debug.met_log_d.user null <nul
+adb shell cmd wifi set-verbose-logging disabled <nul > nul 2>&1
+adb shell device_config put profcollect_native_boot enabled false <nul
+adb shell setprop debug.sf.boot_animation false <nul
+adb shell setprop debug.sf.edge_extension_shader false <nul
+adb shell setprop debug.perf_event_max_sample_rate 1 <nul
+adb shell setprop debug.perf_event_mlock_kb 2 <nul
+adb shell setprop debug.perf_cpu_time_max_percent 1 <nul
+adb shell setprop security.perf_harden 0 <nul
+adb shell setprop debug.lldb-rpc-server 0 <nul
+adb shell setprop debug.MB.running 0 <nul
+adb shell setprop debug.hwc.otf 0 <nul
+adb shell setprop debug.art.monitor.app false <nul
 ::if something is wrong , revert this propt by reboot
-adb shell setprop sys.wifitracing.started 0 > nul 2>&1
-adb shell setprop debug.rs.script 0
-adb shell setprop debug.rs.shader 0
-adb shell setprop debug.sensors 0
-adb shell setprop debug.hwui.profile false
-adb shell setprop debug.layout false
-adb shell setprop debug.generate-debug-info false
-adb shell setprop debug.egl.traceGpuCompletion false
-adb shell setprop debug.rs.shader.attributes 0
-adb shell setprop debug.rs.shader.uniforms 0
-adb shell setprop debug.rs.visual 0
-adb shell setprop debug.egl.callstack false
-adb shell setprop debug.orientation.log false
-adb shell setprop debug.ld.all 0
-adb shell setprop debug.hwui.level 0
-adb shell setprop debug.contacts.ksad 0
-adb shell setprop debug.sf.layerdump 0
-adb shell setprop debug.ldbase 0
-adb shell setprop debug.perfmond.atrace 0
-adb shell setprop debug.sf.enable_transaction_tracing false
-adb shell setprop debug.gles.layers 0
-adb shell setprop debug.angle.validation false
-adb shell setprop debug.sf.layer_history_trace false
-adb shell setprop debug.sf.layer_caching_highlight false
-adb shell setprop debug.jni.logging 0
-adb shell setprop debug.orientation.log false
-adb shell setprop debug.track-associations 0
-adb shell setprop debug.tracing.screen_state 0
-adb shell setprop debug.synclog 0
-adb shell setprop debug.sys.looper_stats_enabled 0
-adb shell setprop debug.velocitytracker.alt 0
-adb shell setprop debug.tflite.trace 0
-adb shell setprop debug.adbd.logging 0
-adb shell setprop debug.sf.enable_egl_image_tracker false
-adb shell setprop debug.stagefright.omx-debug 0
-adb shell setprop debug.stagefright.profilecodec 0
-adb shell setprop debug.debuggerd.wait_for_gdb false
-adb shell setprop debug.cp2.scan_all_packages 0
-adb shell setprop debug.tracing.screen_brightness 0
-adb shell setprop debug.servicemanager.log_calls 0
-adb shell setprop debug.hwui.print_config 0
-adb shell setprop debug.choreographer.frametime false
-adb shell setprop debug.sf.vsp_trace false
-adb shell setprop debug.egl.trace 0
-adb shell setprop debug.egl.finish false
-adb shell setprop debug.sf.trace_hint_sessions false
-adb shell setprop debug.sf.vsync_trace_detailed_info false
-adb shell setprop debug.atrace.tags.enableflags 0
-adb shell setprop debug.debuggerd.wait_for_debugger false
-adb shell setprop debug.hwui.capture_skp_enabled false
-adb shell setprop debug.renderengine.skia_atrace_enabled 0
-adb shell setprop debug.mdpcomp.logs 0
-adb shell setprop debug.graphics.gpu.profiler.perfetto 0
-adb shell setprop debug.NewDatabasePerformanceTests.enable_wal false
-adb shell setprop debug.hwui.skia_atrace_enabled 0
-adb shell setprop debug.rs.profile 0
-adb shell setprop debug.sf.dump 0
-adb shell setprop debug.debuggerd.disable 1
-adb shell setprop debug.hwc_dump_en 0
-adb shell setprop persist.traced.enable 0 > nul 2>&1
-adb shell setprop debug.hwc.logvsync 0
-adb shell setprop debug.malloc 0
-adb shell setprop debug.enable.wl_log 0
-adb shell setprop debug.sensors.logging.slpi false
-adb shell setprop debug.tracing.battery_status 0
-adb shell setprop debug.hwui.trace_gpu_resources false
-adb shell setprop debug.hwui.skia_use_perfetto_track_events false
-adb shell setprop debug.hwui.skia_tracing_enabled false
-adb shell setprop debug.hwui.skip_eglmanager_telemetry true
-adb shell setprop persist.traced_perf.enable false > nul 2>&1
-adb shell setprop debug.renderengine.skia_use_perfetto_track_events false
-adb shell setprop debug.tracing.ctl.renderengine.skia_tracing_enabled false
-adb shell setprop debug.hwui.skp_filename false
-adb shell setprop debug.sqlite.journalmode OFF
-adb shell setprop debug.sqlite.syncmode OFF
-adb shell setprop debug.sqlite.journalsizelimit 1mb
-adb shell setprop debug.sqlite.wal.syncmode OFF
-adb shell setprop debug.sf.dump.external false
-adb shell setprop debug.sf.dump.primary false
-adb shell setprop debug.sf.dump.png 0
-adb shell setprop debug.checkjni 0
-adb shell setprop debug.apidump.detailed false
-adb shell setprop debug.renderengine.skia_tracing_enabled false
-adb shell setprop debug.adpf_cts_verbose_logging false
-adb shell setprop debug.tracing.plug_type 0
-adb shell setprop debug.tracing.profile_boot_classpath 0
-adb shell setprop debug.tracing.profile_system_server 0
-adb shell setprop debug.tracing.mnc 0
-adb shell setprop debug.tracing.mcc 0
-adb shell setprop debug.tracing.device_state 0
-adb shell setprop debug.logging.enabled false
-adb shell setprop debug.nn.fuzzer.dumpspec 0
-adb shell setprop debug.nn.fuzzer.log 0
-adb shell setprop debug.nn.fuzzer.detectleak 0
-adb shell setprop debug.perfetto.sdk_sysprop_guard_generation 0
-adb shell setprop debug.libbase.property_test false
-adb shell setprop debug.tracing.ctl.perfetto.sdk_sysprop_guard_generation false
-adb shell setprop debug.tracing.ctl.hwui.skia_use_perfetto_track_events false
-adb shell setprop debug.tracing.ctl.hwui.skia_tracing_enabled false
-adb shell setprop debug.sf.dump.enable false
-adb shell setprop debug.hwc.enable_vds_dump 0
-adb shell setprop debug.power.loghint 0
-adb shell setprop debug.surface_trace 0
-adb shell setprop debug.sf.ddms 0
-adb shell setprop debug.sensors.diag_buffer_log false
-adb shell setprop debug.systemui.latency_tracking 0
-adb shell setprop debug.hwc.trace_hint_sessions false
-adb shell setprop debug.vulkan.enable_callback false
-adb shell setprop debug.angle.enable_vulkan_api_dump_layer 0
-adb shell setprop debug.angle.capture.enabled 0
-adb shell setprop debug.force_remoteinput_history false
-adb shell setprop persist.debug.trace_layouts false > nul 2>&1
-adb shell setprop debug.atrace.prefer_sdk false
-adb shell setprop debug.tracing.desktop_mode_visible_tasks 0
-adb shell setprop debug.msg_enable 0
-adb shell setprop debug.hwc.normalize_hint_session_durations false
-adb shell setprop db.log.detailed 0 > nul 2>&1
-adb shell setprop debug.mdlogger.Running 0
-adb shell setprop debug.sf.sa_log 0
-adb shell setprop debug.hwc.fakevsync 0
-adb shell setprop debug.rs.reduce-split-accum 1
-adb shell setprop debug.hwui.nv_profiling false
-adb shell setprop debug.hwui.filter_test_overhead false
-adb shell setprop debug.trace.enable 0
-adb shell setprop debug.sf.treble_testing_override false
-adb shell setprop debug.sf.kernel_idle_timer_update_overlay false
-adb shell setprop debug.choreographer.janklog false
-adb shell setprop debug.sf.hwc_hotplug_error_via_neg_vsync 0
-adb shell setprop debug.firebase.analytics.app none
-adb shell setprop debug.atrace.user_initiated 0
-adb shell setprop debug.stagefright.rtp false
-adb shell setprop debug.incremental.enforce_readlogs_max_interval_for_system_dataloaders false
-adb shell setprop debug.Stats false
-adb shell setprop debug.AnalysisOrder false
-adb shell setprop debug.DumpLiveExprs false
-adb shell setprop debug.DumpLiveVars false
-adb shell setprop debug.DumpCFG false
-adb shell setprop debug.ViewCFG false
-adb shell setprop debug.DumpCalls false
-adb shell setprop debug.ReportStmts false
-adb shell setprop debug.DumpDominators false
-adb shell setprop debug.DumpCallGraph false
-adb shell setprop debug.ConfigDumper false
-adb shell setprop debug.DumpControlDependencies false
-adb shell setprop debug.ExprInspection false
-adb shell setprop debug.adservices.consent_manager_debug_mode null
-adb shell setprop debug.vulkan.layers ''
+adb shell setprop sys.wifitracing.started 0 <nul > nul 2>&1
+adb shell setprop debug.rs.script 0 <nul
+adb shell setprop debug.rs.shader 0 <nul
+adb shell setprop debug.sensors 0 <nul
+adb shell setprop debug.hwui.profile false <nul
+adb shell setprop debug.layout false <nul
+adb shell setprop debug.generate-debug-info false <nul
+adb shell setprop debug.egl.traceGpuCompletion false <nul
+adb shell setprop debug.rs.shader.attributes 0 <nul
+adb shell setprop debug.rs.shader.uniforms 0 <nul
+adb shell setprop debug.rs.visual 0 <nul
+adb shell setprop debug.egl.callstack false <nul
+adb shell setprop debug.orientation.log false <nul
+adb shell setprop debug.ld.all 0 <nul
+adb shell setprop debug.hwui.level 0 <nul
+adb shell setprop debug.contacts.ksad 0 <nul
+adb shell setprop debug.sf.layerdump 0 <nul
+adb shell setprop debug.ldbase 0 <nul
+adb shell setprop debug.perfmond.atrace 0 <nul
+adb shell setprop debug.sf.enable_transaction_tracing false <nul
+adb shell setprop debug.gles.layers 0 <nul
+adb shell setprop debug.angle.validation false <nul
+adb shell setprop debug.sf.layer_history_trace false <nul
+adb shell setprop debug.sf.layer_caching_highlight false <nul
+adb shell setprop debug.jni.logging 0 <nul
+adb shell setprop debug.orientation.log false <nul
+adb shell setprop debug.track-associations 0 <nul
+adb shell setprop debug.tracing.screen_state 0 <nul
+adb shell setprop debug.synclog 0 <nul
+adb shell setprop debug.sys.looper_stats_enabled 0 <nul
+adb shell setprop debug.velocitytracker.alt 0 <nul
+adb shell setprop debug.tflite.trace 0 <nul
+adb shell setprop debug.adbd.logging 0 <nul
+adb shell setprop debug.sf.enable_egl_image_tracker false <nul
+adb shell setprop debug.stagefright.omx-debug 0 <nul
+adb shell setprop debug.stagefright.profilecodec 0 <nul
+adb shell setprop debug.debuggerd.wait_for_gdb false <nul
+adb shell setprop debug.cp2.scan_all_packages 0 <nul
+adb shell setprop debug.tracing.screen_brightness 0 <nul
+adb shell setprop debug.servicemanager.log_calls 0 <nul
+adb shell setprop debug.hwui.print_config 0 <nul
+adb shell setprop debug.choreographer.frametime false <nul
+adb shell setprop debug.sf.vsp_trace false <nul
+adb shell setprop debug.egl.trace 0 <nul
+adb shell setprop debug.egl.finish false <nul
+adb shell setprop debug.sf.trace_hint_sessions false <nul
+adb shell setprop debug.sf.vsync_trace_detailed_info false <nul
+adb shell setprop debug.atrace.tags.enableflags 0 <nul
+adb shell setprop debug.debuggerd.wait_for_debugger false <nul
+adb shell setprop debug.hwui.capture_skp_enabled false <nul
+adb shell setprop debug.renderengine.skia_atrace_enabled 0 <nul
+adb shell setprop debug.mdpcomp.logs 0 <nul
+adb shell setprop debug.graphics.gpu.profiler.perfetto 0 <nul
+adb shell setprop debug.NewDatabasePerformanceTests.enable_wal false <nul
+adb shell setprop debug.hwui.skia_atrace_enabled 0 <nul
+adb shell setprop debug.rs.profile 0 <nul
+adb shell setprop debug.sf.dump 0 <nul
+adb shell setprop debug.debuggerd.disable 1 <nul
+adb shell setprop debug.hwc_dump_en 0 <nul
+adb shell setprop persist.traced.enable 0 <nul > nul 2>&1
+adb shell setprop debug.hwc.logvsync 0 <nul
+adb shell setprop debug.malloc 0 <nul
+adb shell setprop debug.enable.wl_log 0 <nul
+adb shell setprop debug.sensors.logging.slpi false <nul
+adb shell setprop debug.tracing.battery_status 0 <nul
+adb shell setprop debug.hwui.trace_gpu_resources false <nul
+adb shell setprop debug.hwui.skia_use_perfetto_track_events false <nul
+adb shell setprop debug.hwui.skia_tracing_enabled false <nul
+adb shell setprop debug.hwui.skip_eglmanager_telemetry true <nul
+adb shell setprop persist.traced_perf.enable false <nul > nul 2>&1
+adb shell setprop debug.renderengine.skia_use_perfetto_track_events false <nul
+adb shell setprop debug.tracing.ctl.renderengine.skia_tracing_enabled false <nul
+adb shell setprop debug.hwui.skp_filename false <nul
+adb shell setprop debug.sqlite.journalmode OFF <nul
+adb shell setprop debug.sqlite.syncmode OFF <nul
+adb shell setprop debug.sqlite.journalsizelimit 1mb <nul
+adb shell setprop debug.sqlite.wal.syncmode OFF <nul
+adb shell setprop debug.sf.dump.external false <nul
+adb shell setprop debug.sf.dump.primary false <nul
+adb shell setprop debug.sf.dump.png 0 <nul
+adb shell setprop debug.checkjni 0 <nul
+adb shell setprop debug.apidump.detailed false <nul
+adb shell setprop debug.renderengine.skia_tracing_enabled false <nul
+adb shell setprop debug.adpf_cts_verbose_logging false <nul
+adb shell setprop debug.tracing.plug_type 0 <nul
+adb shell setprop debug.tracing.profile_boot_classpath 0 <nul
+adb shell setprop debug.tracing.profile_system_server 0 <nul
+adb shell setprop debug.tracing.mnc 0 <nul
+adb shell setprop debug.tracing.mcc 0 <nul
+adb shell setprop debug.tracing.device_state 0 <nul
+adb shell setprop debug.logging.enabled false <nul
+adb shell setprop debug.nn.fuzzer.dumpspec 0 <nul
+adb shell setprop debug.nn.fuzzer.log 0 <nul
+adb shell setprop debug.nn.fuzzer.detectleak 0 <nul
+adb shell setprop debug.perfetto.sdk_sysprop_guard_generation 0 <nul
+adb shell setprop debug.libbase.property_test false <nul
+adb shell setprop debug.tracing.ctl.perfetto.sdk_sysprop_guard_generation false <nul
+adb shell setprop debug.tracing.ctl.hwui.skia_use_perfetto_track_events false <nul
+adb shell setprop debug.tracing.ctl.hwui.skia_tracing_enabled false <nul
+adb shell setprop debug.sf.dump.enable false <nul
+adb shell setprop debug.hwc.enable_vds_dump 0 <nul
+adb shell setprop debug.power.loghint 0 <nul
+adb shell setprop debug.surface_trace 0 <nul
+adb shell setprop debug.sf.ddms 0 <nul
+adb shell setprop debug.sensors.diag_buffer_log false <nul
+adb shell setprop debug.systemui.latency_tracking 0 <nul
+adb shell setprop debug.hwc.trace_hint_sessions false <nul
+adb shell setprop debug.vulkan.enable_callback false <nul
+adb shell setprop debug.angle.enable_vulkan_api_dump_layer 0 <nul
+adb shell setprop debug.angle.capture.enabled 0 <nul
+adb shell setprop debug.force_remoteinput_history false <nul
+adb shell setprop persist.debug.trace_layouts false <nul > nul 2>&1
+adb shell setprop debug.atrace.prefer_sdk false <nul
+adb shell setprop debug.tracing.desktop_mode_visible_tasks 0 <nul
+adb shell setprop debug.msg_enable 0 <nul
+adb shell setprop debug.hwc.normalize_hint_session_durations false <nul
+adb shell setprop db.log.detailed 0 <nul > nul 2>&1
+adb shell setprop debug.mdlogger.Running 0 <nul
+adb shell setprop debug.sf.sa_log 0 <nul
+adb shell setprop debug.hwc.fakevsync 0 <nul
+adb shell setprop debug.rs.reduce-split-accum 1 <nul
+adb shell setprop debug.hwui.nv_profiling false <nul
+adb shell setprop debug.hwui.filter_test_overhead false <nul
+adb shell setprop debug.trace.enable 0 <nul
+adb shell setprop debug.sf.treble_testing_override false <nul
+adb shell setprop debug.sf.kernel_idle_timer_update_overlay false <nul
+adb shell setprop debug.choreographer.janklog false <nul
+adb shell setprop debug.sf.hwc_hotplug_error_via_neg_vsync 0 <nul
+adb shell setprop debug.firebase.analytics.app none <nul
+adb shell setprop debug.atrace.user_initiated 0 <nul
+adb shell setprop debug.stagefright.rtp false <nul
+adb shell setprop debug.incremental.enforce_readlogs_max_interval_for_system_dataloaders false <nul
+adb shell setprop debug.Stats false <nul
+adb shell setprop debug.AnalysisOrder false <nul
+adb shell setprop debug.DumpLiveExprs false <nul
+adb shell setprop debug.DumpLiveVars false <nul
+adb shell setprop debug.DumpCFG false <nul
+adb shell setprop debug.ViewCFG false <nul
+adb shell setprop debug.DumpCalls false <nul
+adb shell setprop debug.ReportStmts false <nul
+adb shell setprop debug.DumpDominators false <nul
+adb shell setprop debug.DumpCallGraph false <nul
+adb shell setprop debug.ConfigDumper false <nul
+adb shell setprop debug.DumpControlDependencies false <nul
+adb shell setprop debug.ExprInspection false <nul
+adb shell setprop debug.adservices.consent_manager_debug_mode null <nul
+adb shell setprop debug.vulkan.layers '' <nul
 :::::::::::::::::::::::::::::::::::::::::::::::::::::::
 :: REMOVED: debug.force_low_ram true
 :: This was actively HARMFUL here. It forces low-RAM mode
 :: (smaller heap, aggressive process killing, fewer caches)
 :: which slows the device down. It's still set deliberately
 :: inside :onsvpp (Extreme Power Saver) where it belongs.
-adb shell device_config put device_personalization_services SpeechRecognitionService__clear_logging_events_if_too_much_memory true
+adb shell device_config put device_personalization_services SpeechRecognitionService__clear_logging_events_if_too_much_memory true <nul
 :::::::::::::::::::::::::::::::::::::::::::::::::::::::
 ::changed
-adb shell setprop debug.sf.prime_shader_cache.transparent_image_dimmed_layers false
-adb shell setprop debug.sf.prime_shader_cache.solid_dimmed_layers false
-adb shell setprop debug.sf.prime_shader_cache.shadow_layers false
-adb shell setprop debug.egl.force_msaa false
-adb shell setprop debug.sf.showupdates 0
-adb shell setprop debug.sf.showcpu 0
-adb shell setprop debug.sf.showbackground 0
-adb shell setprop debug.sf.showfps 0
-adb shell setprop debug.rs.debug 0
-adb shell setprop debug.sf.show_refresh_rate_overlay_spinner 0
-adb shell setprop debug.sf.show_refresh_rate_overlay_render_rate 0
-adb shell setprop debug.sf.show_refresh_rate_overlay_in_middle 0
-adb shell setprop debug.hwc.showfps 0
-adb shell setprop debug.hwui.overdraw false
-adb shell setprop debug.hwui.webview_overlays_enabled false
-adb shell setprop debug.sf.enable_hwc_vds false
-adb shell setprop debug.hwui.profile.maxframes 0
-adb shell setprop debug.hwui.show_non_rect_clip hide
-adb shell setprop debug.hwui.show_layers_updates false
-adb shell setprop debug.assert 0
-adb shell setprop debug.hwui.show_dirty_regions false
-adb shell setprop debug.angle.capture.frame_start 0
-adb shell setprop debug.rs.reduce 1
-adb shell setprop debug.sf.gpuoverlay 0
-adb shell setprop debug.stagefright.fps false
-adb shell setprop debug.sf.disable_hwc_vds 1
-adb shell setprop debug.hwc.simulate 0
-adb shell setprop debug.enable_remote_input false
-adb shell setprop debug.angle.markers 0
-adb shell setprop debug.stagefright.experiments false
-adb shell setprop debug.stagefright.enableshaping 0
-adb shell setprop debug.sf.show_predicted_vsync false
+adb shell setprop debug.sf.prime_shader_cache.transparent_image_dimmed_layers false <nul
+adb shell setprop debug.sf.prime_shader_cache.solid_dimmed_layers false <nul
+adb shell setprop debug.sf.prime_shader_cache.shadow_layers false <nul
+adb shell setprop debug.egl.force_msaa false <nul
+adb shell setprop debug.sf.showupdates 0 <nul
+adb shell setprop debug.sf.showcpu 0 <nul
+adb shell setprop debug.sf.showbackground 0 <nul
+adb shell setprop debug.sf.showfps 0 <nul
+adb shell setprop debug.rs.debug 0 <nul
+adb shell setprop debug.sf.show_refresh_rate_overlay_spinner 0 <nul
+adb shell setprop debug.sf.show_refresh_rate_overlay_render_rate 0 <nul
+adb shell setprop debug.sf.show_refresh_rate_overlay_in_middle 0 <nul
+adb shell setprop debug.hwc.showfps 0 <nul
+adb shell setprop debug.hwui.overdraw false <nul
+adb shell setprop debug.hwui.webview_overlays_enabled false <nul
+adb shell setprop debug.sf.enable_hwc_vds false <nul
+adb shell setprop debug.hwui.profile.maxframes 0 <nul
+adb shell setprop debug.hwui.show_non_rect_clip hide <nul
+adb shell setprop debug.hwui.show_layers_updates false <nul
+adb shell setprop debug.assert 0 <nul
+adb shell setprop debug.hwui.show_dirty_regions false <nul
+adb shell setprop debug.angle.capture.frame_start 0 <nul
+adb shell setprop debug.rs.reduce 1 <nul
+adb shell setprop debug.sf.gpuoverlay 0 <nul
+adb shell setprop debug.stagefright.fps false <nul
+adb shell setprop debug.sf.disable_hwc_vds 1 <nul
+adb shell setprop debug.hwc.simulate 0 <nul
+adb shell setprop debug.enable_remote_input false <nul
+adb shell setprop debug.angle.markers 0 <nul
+adb shell setprop debug.stagefright.experiments false <nul
+adb shell setprop debug.stagefright.enableshaping 0 <nul
+adb shell setprop debug.sf.show_predicted_vsync false <nul
 ::changed
 call :dropbox_lowprio
-adb shell cmd dropbox set-rate-limit 20000000000000
-adb shell device_config put runtime_native metrics.reporting-mods 0
-adb shell device_config put runtime_native metrics.reporting-mods-server 0
-adb shell device_config put runtime_native metrics.write-to-statsd false
-adb shell device_config put runtime_native metrics.reporting-num-mods 0
-adb shell device_config put runtime_native metrics.reporting-num-mods-server 0
-adb shell device_config put runtime_native metrics.reporting-spec S
-adb shell device_config put runtime_native metrics.reporting-spec-server S
-adb shell device_config put odad enable_fa_stats_log_logging false
-adb shell device_config put device_personalization_services StatsLog__active_users_logger_enabled false
-adb shell device_config put device_personalization_services StatsLog__active_users_logger_non_persistent false
-adb shell device_config put device_personalization_services StatsLog__enable_new_logger_api false
-adb shell device_config put adservices cobalt_logging_enabled false
-adb shell device_config put adservices enable_logged_topic false
-adb shell device_config put adservices adservice_error_logging_enabled false
-adb shell device_config put adservices measurement_enable_app_package_name_logging false
-adb shell device_config put adservices measurement_enable_source_debug_report false
-adb shell device_config put adservices fledge_app_package_name_logging_enabled false
-adb shell device_config put adservices fledge_auction_server_enable_debug_reporting false
-adb shell device_config put adservices fledge_auction_server_api_usage_metrics_enabled false
-adb shell device_config put adservices enable_ad_services_system_api false
-adb shell device_config put bluetooth INIT_gd_hal_snoop_logger_filtering false
-adb shell device_config put bluetooth INIT_gd_hal_snoop_logger_socket false
-adb shell device_config put odad westworld_logging false
-adb shell device_config put odad log_error_model_id_westworld_enabled false
-adb shell device_config put odad log_model_id_westworld false
-adb shell device_config put odad log_model_version_westworld false
-adb shell device_config put odad log_classification_latency_westworld false
-adb shell device_config put odad moirai_additional_metrics_enabled false
-adb shell device_config put odad mismatch_metrics_v2_enabled false
-adb shell device_config put on_device_personalization odp_enable_client_error_logging false
-adb shell device_config put on_device_personalization fcp_enable_client_error_logging false
-adb shell device_config put on_device_personalization odp_background_jobs_logging_enabled false
-adb shell device_config put on_device_personalization fcp_enable_background_jobs_logging false
-adb shell device_config put device_personalization_services AutofillVC__enable_clearcut_log false
-adb shell device_config put device_personalization_services Captions__enable_clearcut_logging false
-adb shell device_config put device_personalization_services PlatformLogging__enable_metric_wise_populations false
-adb shell device_config put device_personalization_services Superpacks__use_logging_listener false
-adb shell device_config put device_personalization_services Overview__enable_pir_clearcut_logging false
-adb shell device_config put device_personalization_services Overview__enable_pir_westworld_logging false
-adb shell cmd display ab-logging-disable > nul 2>&1
-adb shell cmd display dwb-logging-disable > nul 2>&1
-adb shell cmd display dmd-logging-disable > nul 2>&1
-adb shell settings put global netstats_sample_enabled 0
-adb shell settings put global bluetooth_disabled_profiles 1
-adb shell settings put global sqlite_compatibility_wal_flags legacy_compatibility_wal_enabled=false,wal_syncmode=OFF
-adb shell settings put global foreground_service_starts_logging_enabled_uri false
-adb shell settings put global activity_starts_logging_enabled_uri false
-adb shell settings put global nene_log 0
-adb shell settings put global wifi_link_speed_metrics_enabled 0
-adb shell settings put global wifi_is_unusable_event_metrics_enabled 0
-adb shell settings put global wait_for_debugger 0
-adb shell settings put global contacts_database_wal_enabled 0
-adb shell settings put global logcat_for_system_server_anr 0
-adb shell settings put global enable_gnss_raw_meas_full_tracking 0
-adb shell settings put global force_enable_pss_profiling 0
-adb shell settings put global verbose_logging_level_disabled 1
-adb shell settings put global enable_gpu_debug_layers 0
-adb shell settings delete global gpu_debug_layers
-adb shell settings put global sys_traced 0
-adb shell settings put global autofill_logging_level 0
-adb shell settings put global dropbox_max_files 1
-adb shell settings put global activity_starts_logging_enabled 0
-adb shell settings put global enable_diskstats_logging 0
-adb shell settings put global foreground_service_starts_logging_enabled 0
-adb shell settings put global wifi_verbose_logging_enabled 0
-adb shell settings put global enable_automatic_system_server_heap_dumps 0
-adb shell settings put global settings_enable_monitor_phantom_procs false
-adb shell settings put global enable_opengl_traces false
-adb shell settings put global dropbox:dumpsys:procstats disabled
-adb shell settings put global dropbox:dumpsys:usagestats disabled
-adb shell settings put global battery_stats_constants track_cpu_times_by_proc_state=false,track_cpu_active_cluster_time=false,read_binary_cpu_time=false,max_history_files=0,max_history_buffer_kb=0
-adb shell settings put global chained_battery_attribution_enabled 0
-adb shell settings put global kernel_cpu_thread_reader num_buckets=0,collected_uids=,minimum_total_cpu_usage_millis=999999999
-adb shell settings put global sys_uidcpupower 0
-adb shell settings put global netstats_augment_enabled 0
-adb shell settings put global netstats_combine_subtype_enabled 0
-adb shell settings put global settings_enable_spa_metrics false
-adb shell settings put global settings_adb_metrics_writer false
-adb shell device_config put systemui enable_notification_memory_monitoring false
-adb shell device_config put interaction_jank_monitor enabled false
-adb shell settings put system anr_debugging_mechanism 0
-adb shell settings put system remote_control 0
-adb shell cmd looper_stats disable > nul 2>&1
-adb shell settings put global looper_stats enabled=false,sampling_interval=999999999
-adb shell simpleperf --log fatal --log-to-android-buffer 0 > nul 2>&1
-adb shell cmd autofill set log_level off
-adb shell cmd autofill set max_visible_datasets 0
-adb shell cmd activity clear-debug-app
-adb shell cmd activity clear-exit-info
-adb shell cmd device_policy clear-freeze-period-record > nul 2>&1
-adb shell cmd otadexopt cleanup
-adb shell cmd voiceinteraction set-debug-hotword-logging false
+adb shell cmd dropbox set-rate-limit 20000000000000 <nul
+adb shell device_config put runtime_native metrics.reporting-mods 0 <nul
+adb shell device_config put runtime_native metrics.reporting-mods-server 0 <nul
+adb shell device_config put runtime_native metrics.write-to-statsd false <nul
+adb shell device_config put runtime_native metrics.reporting-num-mods 0 <nul
+adb shell device_config put runtime_native metrics.reporting-num-mods-server 0 <nul
+adb shell device_config put runtime_native metrics.reporting-spec S <nul
+adb shell device_config put runtime_native metrics.reporting-spec-server S <nul
+adb shell device_config put odad enable_fa_stats_log_logging false <nul
+adb shell device_config put device_personalization_services StatsLog__active_users_logger_enabled false <nul
+adb shell device_config put device_personalization_services StatsLog__active_users_logger_non_persistent false <nul
+adb shell device_config put device_personalization_services StatsLog__enable_new_logger_api false <nul
+adb shell device_config put adservices cobalt_logging_enabled false <nul
+adb shell device_config put adservices enable_logged_topic false <nul
+adb shell device_config put adservices adservice_error_logging_enabled false <nul
+adb shell device_config put adservices measurement_enable_app_package_name_logging false <nul
+adb shell device_config put adservices measurement_enable_source_debug_report false <nul
+adb shell device_config put adservices fledge_app_package_name_logging_enabled false <nul
+adb shell device_config put adservices fledge_auction_server_enable_debug_reporting false <nul
+adb shell device_config put adservices fledge_auction_server_api_usage_metrics_enabled false <nul
+adb shell device_config put adservices enable_ad_services_system_api false <nul
+adb shell device_config put bluetooth INIT_gd_hal_snoop_logger_filtering false <nul
+adb shell device_config put bluetooth INIT_gd_hal_snoop_logger_socket false <nul
+adb shell device_config put odad westworld_logging false <nul
+adb shell device_config put odad log_error_model_id_westworld_enabled false <nul
+adb shell device_config put odad log_model_id_westworld false <nul
+adb shell device_config put odad log_model_version_westworld false <nul
+adb shell device_config put odad log_classification_latency_westworld false <nul
+adb shell device_config put odad moirai_additional_metrics_enabled false <nul
+adb shell device_config put odad mismatch_metrics_v2_enabled false <nul
+adb shell device_config put on_device_personalization odp_enable_client_error_logging false <nul
+adb shell device_config put on_device_personalization fcp_enable_client_error_logging false <nul
+adb shell device_config put on_device_personalization odp_background_jobs_logging_enabled false <nul
+adb shell device_config put on_device_personalization fcp_enable_background_jobs_logging false <nul
+adb shell device_config put device_personalization_services AutofillVC__enable_clearcut_log false <nul
+adb shell device_config put device_personalization_services Captions__enable_clearcut_logging false <nul
+adb shell device_config put device_personalization_services PlatformLogging__enable_metric_wise_populations false <nul
+adb shell device_config put device_personalization_services Superpacks__use_logging_listener false <nul
+adb shell device_config put device_personalization_services Overview__enable_pir_clearcut_logging false <nul
+adb shell device_config put device_personalization_services Overview__enable_pir_westworld_logging false <nul
+adb shell cmd display ab-logging-disable <nul > nul 2>&1
+adb shell cmd display dwb-logging-disable <nul > nul 2>&1
+adb shell cmd display dmd-logging-disable <nul > nul 2>&1
+adb shell settings put global netstats_sample_enabled 0 <nul
+adb shell settings put global sqlite_compatibility_wal_flags legacy_compatibility_wal_enabled=false,wal_syncmode=OFF <nul
+adb shell settings put global foreground_service_starts_logging_enabled_uri false <nul
+adb shell settings put global activity_starts_logging_enabled_uri false <nul
+adb shell settings put global nene_log 0 <nul
+adb shell settings put global wifi_link_speed_metrics_enabled 0 <nul
+adb shell settings put global wifi_is_unusable_event_metrics_enabled 0 <nul
+adb shell settings put global wait_for_debugger 0 <nul
+adb shell settings put global contacts_database_wal_enabled 0 <nul
+adb shell settings put global logcat_for_system_server_anr 0 <nul
+adb shell settings put global enable_gnss_raw_meas_full_tracking 0 <nul
+adb shell settings put global force_enable_pss_profiling 0 <nul
+adb shell settings put global verbose_logging_level_disabled 1 <nul
+adb shell settings put global enable_gpu_debug_layers 0 <nul
+adb shell settings delete global gpu_debug_layers <nul
+adb shell settings put global sys_traced 0 <nul
+adb shell settings put global autofill_logging_level 0 <nul
+adb shell settings put global dropbox_max_files 1 <nul
+adb shell settings put global activity_starts_logging_enabled 0 <nul
+adb shell settings put global enable_diskstats_logging 0 <nul
+adb shell settings put global foreground_service_starts_logging_enabled 0 <nul
+adb shell settings put global wifi_verbose_logging_enabled 0 <nul
+adb shell settings put global enable_automatic_system_server_heap_dumps 0 <nul
+adb shell settings put global settings_enable_monitor_phantom_procs false <nul
+adb shell settings put global enable_opengl_traces false <nul
+adb shell settings put global dropbox:dumpsys:procstats disabled <nul
+adb shell settings put global dropbox:dumpsys:usagestats disabled <nul
+adb shell settings put global battery_stats_constants track_cpu_times_by_proc_state=false,track_cpu_active_cluster_time=false,read_binary_cpu_time=false,max_history_files=0,max_history_buffer_kb=0 <nul
+adb shell settings put global chained_battery_attribution_enabled 0 <nul
+adb shell settings put global kernel_cpu_thread_reader num_buckets=0,collected_uids=,minimum_total_cpu_usage_millis=999999999 <nul
+adb shell settings put global sys_uidcpupower 0 <nul
+adb shell settings put global netstats_augment_enabled 0 <nul
+adb shell settings put global netstats_combine_subtype_enabled 0 <nul
+adb shell settings put global settings_enable_spa_metrics false <nul
+adb shell settings put global settings_adb_metrics_writer false <nul
+adb shell device_config put systemui enable_notification_memory_monitoring false <nul
+adb shell device_config put interaction_jank_monitor enabled false <nul
+adb shell settings put system anr_debugging_mechanism 0 <nul
+adb shell settings put system remote_control 0 <nul
+adb shell cmd looper_stats disable <nul > nul 2>&1
+adb shell settings put global looper_stats enabled=false,sampling_interval=999999999 <nul
+adb shell simpleperf --log fatal --log-to-android-buffer 0 <nul > nul 2>&1
+adb shell cmd autofill set log_level off <nul
+adb shell cmd autofill set max_visible_datasets 0 <nul
+adb shell cmd activity clear-debug-app <nul
+adb shell cmd activity clear-exit-info <nul
+adb shell cmd device_policy clear-freeze-period-record <nul > nul 2>&1
+adb shell cmd otadexopt cleanup <nul
+adb shell cmd voiceinteraction set-debug-hotword-logging false <nul
 call :wm_silence_logs
-adb shell dumpsys binder_calls_stats --disable > nul 2>&1
-adb shell dumpsys binder_calls_stats --disable-detailed-tracking > nul 2>&1
-adb shell dumpsys procstats --stop-testing > nul 2>&1
-adb shell settings put global binder_calls_stats sampling_interval=500000000,detailed_tracking=disable,enabled=false,upload_data=false
-adb shell dumpsys batterystats disable full-history > nul 2>&1
-adb shell ime tracing stop
-adb shell logcat -c
-adb shell logcat -G 64kb
-adb shell wm tracing level critical > nul 2>&1
-adb shell wm tracing size 1 > nul 2>&1
-adb shell device_config set_sync_disabled_for_tests persistent > nul 2>&1
+adb shell dumpsys binder_calls_stats --disable <nul > nul 2>&1
+adb shell dumpsys binder_calls_stats --disable-detailed-tracking <nul > nul 2>&1
+adb shell dumpsys procstats --stop-testing <nul > nul 2>&1
+adb shell settings put global binder_calls_stats sampling_interval=500000000,detailed_tracking=disable,enabled=false,upload_data=false <nul
+adb shell dumpsys batterystats disable full-history <nul > nul 2>&1
+adb shell ime tracing stop <nul
+adb shell logcat -c <nul
+adb shell logcat -G 64kb <nul
+adb shell wm tracing level critical <nul > nul 2>&1
+adb shell wm tracing size 1 <nul > nul 2>&1
 echo Done , Press Any Button To Go Back
 
 pause > nul
@@ -3518,131 +3620,130 @@ cls
 title Logs/etc : On
 call :_dcfg_warn
 :: NEW: revert universal log silencer
-adb shell setprop persist.log.tag "" > nul 2>&1
-adb shell setprop log.tag "" > nul 2>&1
-adb shell logcat -G 256kb
-adb shell device_config put adservices enable_ad_services_system_api true
-adb shell device_config put odad mismatch_metrics_v2_enabled true
-adb shell device_config put adservices fledge_auction_server_api_usage_metrics_enabled true
-adb shell device_config put adservices enable_logged_topic true
-adb shell settings delete global settings_adb_metrics_writer > nul 2>&1
-adb shell settings delete global settings_enable_spa_metrics > nul 2>&1
-adb shell device_config put device_personalization_services SpeechRecognitionService__clear_logging_events_if_too_much_memory false
-adb shell settings delete global netstats_augment_enabled > nul 2>&1
-adb shell settings delete global netstats_combine_subtype_enabled > nul 2>&1
-adb shell device_config put interaction_jank_monitor enabled true
-adb shell device_config delete systemui enable_notification_memory_monitoring > nul 2>&1
-adb shell settings delete global sys_uidcpupower > nul 2>&1
-adb shell settings delete global contacts_database_wal_enabled > nul 2>&1
-adb shell settings delete global kernel_cpu_thread_reader > nul 2>&1
-adb shell device_config put bluetooth INIT_gd_hal_snoop_logger_filtering true
-adb shell device_config put bluetooth INIT_gd_hal_snoop_logger_socket true
-adb shell device_config put device_personalization_services AutofillVC__enable_clearcut_log true
-adb shell settings delete global chained_battery_attribution_enabled > nul 2>&1
-adb shell device_config put odad moirai_additional_metrics_enabled true
-adb shell device_config put odad log_classification_latency_westworld true
+adb shell setprop persist.log.tag "" <nul > nul 2>&1
+adb shell setprop log.tag "" <nul > nul 2>&1
+adb shell logcat -G 256kb <nul
+adb shell device_config put adservices enable_ad_services_system_api true <nul
+adb shell device_config put odad mismatch_metrics_v2_enabled true <nul
+adb shell device_config put adservices fledge_auction_server_api_usage_metrics_enabled true <nul
+adb shell device_config put adservices enable_logged_topic true <nul
+adb shell settings delete global settings_adb_metrics_writer <nul > nul 2>&1
+adb shell settings delete global settings_enable_spa_metrics <nul > nul 2>&1
+adb shell device_config put device_personalization_services SpeechRecognitionService__clear_logging_events_if_too_much_memory false <nul
+adb shell settings delete global netstats_augment_enabled <nul > nul 2>&1
+adb shell settings delete global netstats_combine_subtype_enabled <nul > nul 2>&1
+adb shell device_config put interaction_jank_monitor enabled true <nul
+adb shell device_config delete systemui enable_notification_memory_monitoring <nul > nul 2>&1
+adb shell settings delete global sys_uidcpupower <nul > nul 2>&1
+adb shell settings delete global contacts_database_wal_enabled <nul > nul 2>&1
+adb shell settings delete global kernel_cpu_thread_reader <nul > nul 2>&1
+adb shell device_config put bluetooth INIT_gd_hal_snoop_logger_filtering true <nul
+adb shell device_config put bluetooth INIT_gd_hal_snoop_logger_socket true <nul
+adb shell device_config put device_personalization_services AutofillVC__enable_clearcut_log true <nul
+adb shell settings delete global chained_battery_attribution_enabled <nul > nul 2>&1
+adb shell device_config put odad moirai_additional_metrics_enabled true <nul
+adb shell device_config put odad log_classification_latency_westworld true <nul
 :: FIX (revert-completeness): was `put ...track_cpu_times_by_proc_state=false`,
 :: which re-pinned a non-default value instead of reverting. Delete so battery
 :: stats tracking returns to the platform default (:offlogss pinned it to
 :: max_history_files=0 etc).
-adb shell settings delete global battery_stats_constants > nul 2>&1
-adb shell device_config put adservices fledge_auction_server_enable_debug_reporting true
-adb shell device_config put adservices fledge_app_package_name_logging_enabled true
-adb shell device_config put adservices mdd_network_stats_logging_sample_interval 100
-adb shell device_config put adservices mdd_api_logging_sample_interval 100
-adb shell device_config put device_personalization_services Overview__enable_pir_westworld_logging true
-adb shell device_config put device_personalization_services Overview__enable_pir_clearcut_logging true
-adb shell settings delete global dropbox:dumpsys:procstats > nul 2>&1
-adb shell settings delete global dropbox:dumpsys:usagestats > nul 2>&1
-adb shell setprop security.perf_harden 1
-adb shell settings delete global enable_opengl_traces > nul 2>&1
-adb shell device_config put odad log_model_version_westworld true
-adb shell device_config put odad log_model_id_westworld true
-adb shell device_config put odad log_error_model_id_westworld_enabled true
-adb shell device_config put device_personalization_services Superpacks__use_logging_listener true
-adb shell device_config put on_device_personalization fcp_enable_background_jobs_logging true
-adb shell device_config put device_personalization_services Captions__enable_clearcut_logging true
-adb shell device_config put device_personalization_services PlatformLogging__enable_metric_wise_populations true
-adb shell device_config put runtime_native metrics.reporting-spec 1,5,30,60,600
-adb shell device_config put runtime_native metrics.reporting-spec-server 1,10,60,3600,*
-adb shell device_config put runtime_native metrics.write-to-statsd true
-adb shell device_config put runtime_native metrics.reporting-num-mods 100
-adb shell device_config put runtime_native metrics.reporting-num-mods-server 100
-adb shell device_config put runtime_native metrics.reporting-mods 2
-adb shell device_config put runtime_native metrics.reporting-mods-server 2
-adb shell settings delete global netstats_sample_enabled > nul 2>&1
-adb shell settings put global bluetooth_disabled_profiles 0
-adb shell wm tracing level trim > nul 2>&1
-adb shell settings delete global binder_calls_stats > nul 2>&1
-adb shell settings delete global foreground_service_starts_logging_enabled_uri > nul 2>&1
-adb shell settings delete global activity_starts_logging_enabled_uri > nul 2>&1
-adb shell device_config delete profcollect_native_boot > nul 2>&1
-adb shell setprop persist.log.tag.DisplayPowerController ''
-adb shell device_config delete systemui com.android.systemui.coroutine_tracing > nul 2>&1
-adb shell settings delete global nene_log > nul 2>&1
-adb shell settings delete global wifi_link_speed_metrics_enabled > nul 2>&1
-adb shell settings delete global wifi_is_unusable_event_metrics_enabled > nul 2>&1
-adb shell settings delete global wait_for_debugger > nul 2>&1
-adb shell settings delete global contacts_database_wal_enabled > nul 2>&1
-adb shell settings delete global logcat_for_system_server_anr > nul 2>&1
-adb shell settings delete global enable_gnss_raw_meas_full_tracking > nul 2>&1
-adb shell settings delete global force_enable_pss_profiling > nul 2>&1
-adb shell settings delete global verbose_logging_level_disabled > nul 2>&1
-adb shell settings delete global enable_gpu_debug_layers > nul 2>&1
-adb shell cmd autofill set max_visible_datasets 10
-adb shell settings delete global sys_traced > nul 2>&1
-adb shell settings delete system user_log_enabled > nul 2>&1
-adb shell settings delete system window_orientation_listener_log > nul 2>&1
-adb shell settings delete global enable_automatic_system_server_heap_dumps > nul 2>&1
-adb shell settings delete global sys.wifitracing.started > nul 2>&1
-adb shell settings delete global opengl_trace > nul 2>&1
-adb shell settings delete global settings_enable_monitor_phantom_procs > nul 2>&1
-adb shell settings delete global dropbox_max_files > nul 2>&1
-adb shell settings delete global dropbox:dumpsys:usagestats > nul 2>&1
-adb shell settings delete global dropbox:dumpsys:procstats > nul 2>&1
-adb shell settings delete global activity_starts_logging_enabled > nul 2>&1
-adb shell settings delete global enable_diskstats_logging > nul 2>&1
-adb shell settings delete global sys.lmk.reportkills > nul 2>&1
-adb shell settings delete global foreground_service_starts_logging_enabled > nul 2>&1
-adb shell settings delete global wifi_verbose_logging_enabled > nul 2>&1
-adb shell settings delete global enable_automatic_system_server_heap_dumps > nul 2>&1
-adb shell cmd looper_stats enable
-adb shell settings delete system anr_debugging_mechanism > nul 2>&1
-adb shell setprop persist.traced.enable 1 > nul 2>&1
-adb shell settings delete global idle_loglevel > nul 2>&1
-adb shell settings delete global persist.sampling_profiler > nul 2>&1
-adb shell settings delete system Logcat.live > nul 2>&1
-adb shell settings delete system remote_control > nul 2>&1
-adb shell settings delete system log.closeguard.Animation > nul 2>&1
+adb shell settings delete global battery_stats_constants <nul > nul 2>&1
+adb shell device_config put adservices fledge_auction_server_enable_debug_reporting true <nul
+adb shell device_config put adservices fledge_app_package_name_logging_enabled true <nul
+adb shell device_config put adservices mdd_network_stats_logging_sample_interval 100 <nul
+adb shell device_config put adservices mdd_api_logging_sample_interval 100 <nul
+adb shell device_config put device_personalization_services Overview__enable_pir_westworld_logging true <nul
+adb shell device_config put device_personalization_services Overview__enable_pir_clearcut_logging true <nul
+adb shell settings delete global dropbox:dumpsys:procstats <nul > nul 2>&1
+adb shell settings delete global dropbox:dumpsys:usagestats <nul > nul 2>&1
+adb shell setprop security.perf_harden 1 <nul
+adb shell settings delete global enable_opengl_traces <nul > nul 2>&1
+adb shell device_config put odad log_model_version_westworld true <nul
+adb shell device_config put odad log_model_id_westworld true <nul
+adb shell device_config put odad log_error_model_id_westworld_enabled true <nul
+adb shell device_config put device_personalization_services Superpacks__use_logging_listener true <nul
+adb shell device_config put on_device_personalization fcp_enable_background_jobs_logging true <nul
+adb shell device_config put device_personalization_services Captions__enable_clearcut_logging true <nul
+adb shell device_config put device_personalization_services PlatformLogging__enable_metric_wise_populations true <nul
+adb shell device_config put runtime_native metrics.reporting-spec 1,5,30,60,600 <nul
+adb shell device_config put runtime_native metrics.reporting-spec-server 1,10,60,3600,* <nul
+adb shell device_config put runtime_native metrics.write-to-statsd true <nul
+adb shell device_config put runtime_native metrics.reporting-num-mods 100 <nul
+adb shell device_config put runtime_native metrics.reporting-num-mods-server 100 <nul
+adb shell device_config put runtime_native metrics.reporting-mods 2 <nul
+adb shell device_config put runtime_native metrics.reporting-mods-server 2 <nul
+adb shell settings delete global netstats_sample_enabled <nul > nul 2>&1
+adb shell settings delete global bluetooth_disabled_profiles <nul > nul 2>&1
+adb shell wm tracing level trim <nul > nul 2>&1
+adb shell settings delete global binder_calls_stats <nul > nul 2>&1
+adb shell settings delete global foreground_service_starts_logging_enabled_uri <nul > nul 2>&1
+adb shell settings delete global activity_starts_logging_enabled_uri <nul > nul 2>&1
+adb shell device_config delete profcollect_native_boot <nul > nul 2>&1
+adb shell setprop persist.log.tag.DisplayPowerController '' <nul
+adb shell device_config delete systemui com.android.systemui.coroutine_tracing <nul > nul 2>&1
+adb shell settings delete global nene_log <nul > nul 2>&1
+adb shell settings delete global wifi_link_speed_metrics_enabled <nul > nul 2>&1
+adb shell settings delete global wifi_is_unusable_event_metrics_enabled <nul > nul 2>&1
+adb shell settings delete global wait_for_debugger <nul > nul 2>&1
+adb shell settings delete global contacts_database_wal_enabled <nul > nul 2>&1
+adb shell settings delete global logcat_for_system_server_anr <nul > nul 2>&1
+adb shell settings delete global enable_gnss_raw_meas_full_tracking <nul > nul 2>&1
+adb shell settings delete global force_enable_pss_profiling <nul > nul 2>&1
+adb shell settings delete global verbose_logging_level_disabled <nul > nul 2>&1
+adb shell settings delete global enable_gpu_debug_layers <nul > nul 2>&1
+adb shell cmd autofill set max_visible_datasets 10 <nul
+adb shell settings delete global sys_traced <nul > nul 2>&1
+adb shell settings delete system user_log_enabled <nul > nul 2>&1
+adb shell settings delete system window_orientation_listener_log <nul > nul 2>&1
+adb shell settings delete global enable_automatic_system_server_heap_dumps <nul > nul 2>&1
+adb shell settings delete global sys.wifitracing.started <nul > nul 2>&1
+adb shell settings delete global opengl_trace <nul > nul 2>&1
+adb shell settings delete global settings_enable_monitor_phantom_procs <nul > nul 2>&1
+adb shell settings delete global dropbox_max_files <nul > nul 2>&1
+adb shell settings delete global dropbox:dumpsys:usagestats <nul > nul 2>&1
+adb shell settings delete global dropbox:dumpsys:procstats <nul > nul 2>&1
+adb shell settings delete global activity_starts_logging_enabled <nul > nul 2>&1
+adb shell settings delete global enable_diskstats_logging <nul > nul 2>&1
+adb shell settings delete global sys.lmk.reportkills <nul > nul 2>&1
+adb shell settings delete global foreground_service_starts_logging_enabled <nul > nul 2>&1
+adb shell settings delete global wifi_verbose_logging_enabled <nul > nul 2>&1
+adb shell settings delete global enable_automatic_system_server_heap_dumps <nul > nul 2>&1
+adb shell cmd looper_stats enable <nul
+adb shell settings delete system anr_debugging_mechanism <nul > nul 2>&1
+adb shell setprop persist.traced.enable 1 <nul > nul 2>&1
+adb shell settings delete global idle_loglevel <nul > nul 2>&1
+adb shell settings delete global persist.sampling_profiler <nul > nul 2>&1
+adb shell settings delete system Logcat.live <nul > nul 2>&1
+adb shell settings delete system remote_control <nul > nul 2>&1
+adb shell settings delete system log.closeguard.Animation <nul > nul 2>&1
 call :dropbox_lowprio
-adb shell cmd dropbox set-rate-limit 2000
-adb shell setprop persist.traced_perf.enable 1 > nul 2>&1
+adb shell cmd dropbox set-rate-limit 2000 <nul
+adb shell setprop persist.traced_perf.enable 1 <nul > nul 2>&1
 :: FIX: copy-paste bug - this is the On/restore path so it must re-ENABLE
 :: (true). It was `false`, identical to :offlogss, so the key never reverted.
-adb shell device_config put odad enable_fa_stats_log_logging true
-adb shell device_config put device_personalization_services StatsLog__active_users_logger_enabled true
-adb shell device_config put device_personalization_services StatsLog__active_users_logger_non_persistent true
-adb shell device_config put device_personalization_services StatsLog__enable_new_logger_api true
-adb shell device_config put adservices cobalt_logging_enabled true
-adb shell device_config put adservices adservice_error_logging_enabled true
-adb shell device_config put odad westworld_logging true
-adb shell device_config put adservices measurement_enable_source_debug_report true
-adb shell cmd display ab-logging-enable > nul 2>&1
-adb shell cmd display dwb-logging-enable > nul 2>&1
-adb shell cmd display dmd-logging-enable > nul 2>&1
-adb shell device_config put on_device_personalization odp_enable_client_error_logging true
-adb shell device_config put adservices measurement_enable_app_package_name_logging true
-adb shell device_config put on_device_personalization fcp_enable_client_error_logging true
+adb shell device_config put odad enable_fa_stats_log_logging true <nul
+adb shell device_config put device_personalization_services StatsLog__active_users_logger_enabled true <nul
+adb shell device_config put device_personalization_services StatsLog__active_users_logger_non_persistent true <nul
+adb shell device_config put device_personalization_services StatsLog__enable_new_logger_api true <nul
+adb shell device_config put adservices cobalt_logging_enabled true <nul
+adb shell device_config put adservices adservice_error_logging_enabled true <nul
+adb shell device_config put odad westworld_logging true <nul
+adb shell device_config put adservices measurement_enable_source_debug_report true <nul
+adb shell cmd display ab-logging-enable <nul > nul 2>&1
+adb shell cmd display dwb-logging-enable <nul > nul 2>&1
+adb shell cmd display dmd-logging-enable <nul > nul 2>&1
+adb shell device_config put on_device_personalization odp_enable_client_error_logging true <nul
+adb shell device_config put adservices measurement_enable_app_package_name_logging true <nul
+adb shell device_config put on_device_personalization fcp_enable_client_error_logging true <nul
 :: FIX (revert-completeness): :offlogss pins these PERSISTENT keys that this
 :: On/restore path never undid, so log/metric collection stayed disabled after
 :: toggling back On. settings survive reboot, so the restart prompt below does
-:: NOT cover them; set_sync_disabled_for_tests persistent also froze ALL
-:: device_config server sync until reset.
-adb shell device_config set_sync_disabled_for_tests none > nul 2>&1
-adb shell settings delete global looper_stats > nul 2>&1
-adb shell settings delete global sqlite_compatibility_wal_flags > nul 2>&1
-adb shell settings delete global autofill_logging_level > nul 2>&1
-adb shell device_config put on_device_personalization odp_background_jobs_logging_enabled true > nul 2>&1
+:: NOT cover them. DeviceConfig server sync is no longer touched here - it lives
+:: under Tweaks > DeviceConfig server sync.
+adb shell settings delete global looper_stats <nul > nul 2>&1
+adb shell settings delete global sqlite_compatibility_wal_flags <nul > nul 2>&1
+adb shell settings delete global autofill_logging_level <nul > nul 2>&1
+adb shell device_config put on_device_personalization odp_background_jobs_logging_enabled true <nul > nul 2>&1
 adb shell logcat -c <nul
 echo.
 echo.
@@ -3677,8 +3778,11 @@ goto saverpower
 @echo off
 cls
 title Power Saver : Off
-adb shell settings delete global low_power
+adb shell settings delete global low_power <nul
 adb shell settings delete global low_power_sticky <nul
+call :_act_reset
+call :_settings_verify global low_power DELETE
+call :_act_summary
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3687,8 +3791,11 @@ goto Battery
 @echo off
 cls
 title Power Saver : On
-adb shell settings put global low_power 1
+adb shell settings put global low_power 1 <nul
 adb shell settings put global low_power_sticky 0 <nul
+call :_act_reset
+call :_settings_verify global low_power 1
+call :_act_summary
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3715,19 +3822,19 @@ goto animation
 @echo off
 cls
 title Animation : Off
-adb shell settings put global enable_back_animation 0
-adb shell settings put global fancy_ime_animations 0
-adb shell settings put secure accessibility_disable_animations 1
-adb shell settings put global fade_duration 0
-adb shell settings put global reduce_motion 1
-adb shell settings put secure reduce_motion 1
-adb shell settings put secure long_press_timeout 250
-adb shell settings put secure multi_press_timeout 250
-adb shell settings put global enable_back_animation 0
-adb shell settings put global window_animation_scale 0.0
-adb shell settings put global transition_animation_scale 0.0
-adb shell settings put global animator_duration_scale 0.0
-adb shell settings put secure accessibility_disable_animations 1
+adb shell settings put global enable_back_animation 0 <nul
+adb shell settings put global fancy_ime_animations 0 <nul
+adb shell settings put secure accessibility_disable_animations 1 <nul
+adb shell settings put global fade_duration 0 <nul
+adb shell settings put global reduce_motion 1 <nul
+adb shell settings put secure reduce_motion 1 <nul
+adb shell settings put secure long_press_timeout 250 <nul
+adb shell settings put secure multi_press_timeout 250 <nul
+adb shell settings put global enable_back_animation 0 <nul
+adb shell settings put global window_animation_scale 0.0 <nul
+adb shell settings put global transition_animation_scale 0.0 <nul
+adb shell settings put global animator_duration_scale 0.0 <nul
+adb shell settings put secure accessibility_disable_animations 1 <nul
 adb shell settings put global disable_window_blurs 1 <nul
 echo Press Any Button To Go Back
 pause > nul
@@ -3737,53 +3844,53 @@ goto Battery
 @echo off
 cls
 title Animation : On
-adb shell settings delete global reduce_motion > nul 2>&1
-adb shell settings delete global enable_back_animation > nul 2>&1
-adb shell settings delete global fancy_ime_animations > nul 2>&1
-adb shell settings delete secure accessibility_disable_animations > nul 2>&1
-adb shell settings delete global recent_app_transition_duration_scale > nul 2>&1
-adb shell settings delete global recent_app_transition_scale > nul 2>&1
-adb shell settings delete global app_transition_animation_duration_scale > nul 2>&1
-adb shell settings delete global app_transition_animation_scale > nul 2>&1
-adb shell settings delete global reduce_transitions > nul 2>&1
-adb shell settings delete global shadow_animation_scale > nul 2>&1
-adb shell settings delete global remove_animations > nul 2>&1
-adb shell settings delete global fade_duration > nul 2>&1
-adb shell settings delete secure reduce_motion > nul 2>&1
+adb shell settings delete global reduce_motion <nul > nul 2>&1
+adb shell settings delete global enable_back_animation <nul > nul 2>&1
+adb shell settings delete global fancy_ime_animations <nul > nul 2>&1
+adb shell settings delete secure accessibility_disable_animations <nul > nul 2>&1
+adb shell settings delete global recent_app_transition_duration_scale <nul > nul 2>&1
+adb shell settings delete global recent_app_transition_scale <nul > nul 2>&1
+adb shell settings delete global app_transition_animation_duration_scale <nul > nul 2>&1
+adb shell settings delete global app_transition_animation_scale <nul > nul 2>&1
+adb shell settings delete global reduce_transitions <nul > nul 2>&1
+adb shell settings delete global shadow_animation_scale <nul > nul 2>&1
+adb shell settings delete global remove_animations <nul > nul 2>&1
+adb shell settings delete global fade_duration <nul > nul 2>&1
+adb shell settings delete secure reduce_motion <nul > nul 2>&1
 :: FIX (revert-completeness): :offani pins secure long_press_timeout and
 :: multi_press_timeout to 250; restoring animations ("On") must delete them
 :: so tap / long-press timing returns to the platform default (400 / 300 ms).
-adb shell settings delete secure long_press_timeout > nul 2>&1
-adb shell settings delete secure multi_press_timeout > nul 2>&1
-adb shell settings delete global animator_slow_preview > nul 2>&1
-adb shell settings delete global animation_scale_animator_duration > nul 2>&1
-adb shell settings delete global animation_scale_window_transition > nul 2>&1
-adb shell settings delete global activity_open_enter_animation > nul 2>&1
-adb shell settings delete global activity_open_exit_animation > nul 2>&1
-adb shell settings delete global activity_close_enter_animation > nul 2>&1
-adb shell settings delete global activity_close_exit_animation > nul 2>&1
-adb shell settings delete global app_transition_scale > nul 2>&1
-adb shell settings delete global app_transition_duration_scale > nul 2>&1
-adb shell settings delete global app_close_animate_level > nul 2>&1
-adb shell settings delete global windows_anim_duration_scale > nul 2>&1
-adb shell settings delete global windows_anim_scale > nul 2>&1
-adb shell settings delete global windows_transition_anim_scale > nul 2>&1
-adb shell settings delete global windows_transition_animation_duration_scale > nul 2>&1
-adb shell settings delete global window_animation_duration_scale > nul 2>&1
-adb shell settings delete global transition_animation_duration_scale > nul 2>&1
-adb shell settings delete global display_animation_duration_scale > nul 2>&1
-adb shell settings delete global display_animation_scale > nul 2>&1
-adb shell settings delete global window_move_animation_duration_scale > nul 2>&1
-adb shell settings delete global window_move_animation_scale > nul 2>&1
-adb shell settings put global window_animation_scale 1.0 > nul 2>&1
-adb shell settings put global transition_animation_scale 1.0 > nul 2>&1
-adb shell settings put global animator_duration_scale 1.0 > nul 2>&1
-adb shell settings put global disable_window_blurs 0 > nul 2>&1
-adb shell settings delete global accessibility_reduce_transparency > nul 2>&1
-adb shell device_config delete systemui window_cornerRadius > nul 2>&1
-adb shell device_config delete systemui window_blur > nul 2>&1
-adb shell device_config delete systemui window_shadow > nul 2>&1
-adb shell device_config delete systemui reduce_animations > nul 2>&1
+adb shell settings delete secure long_press_timeout <nul > nul 2>&1
+adb shell settings delete secure multi_press_timeout <nul > nul 2>&1
+adb shell settings delete global animator_slow_preview <nul > nul 2>&1
+adb shell settings delete global animation_scale_animator_duration <nul > nul 2>&1
+adb shell settings delete global animation_scale_window_transition <nul > nul 2>&1
+adb shell settings delete global activity_open_enter_animation <nul > nul 2>&1
+adb shell settings delete global activity_open_exit_animation <nul > nul 2>&1
+adb shell settings delete global activity_close_enter_animation <nul > nul 2>&1
+adb shell settings delete global activity_close_exit_animation <nul > nul 2>&1
+adb shell settings delete global app_transition_scale <nul > nul 2>&1
+adb shell settings delete global app_transition_duration_scale <nul > nul 2>&1
+adb shell settings delete global app_close_animate_level <nul > nul 2>&1
+adb shell settings delete global windows_anim_duration_scale <nul > nul 2>&1
+adb shell settings delete global windows_anim_scale <nul > nul 2>&1
+adb shell settings delete global windows_transition_anim_scale <nul > nul 2>&1
+adb shell settings delete global windows_transition_animation_duration_scale <nul > nul 2>&1
+adb shell settings delete global window_animation_duration_scale <nul > nul 2>&1
+adb shell settings delete global transition_animation_duration_scale <nul > nul 2>&1
+adb shell settings delete global display_animation_duration_scale <nul > nul 2>&1
+adb shell settings delete global display_animation_scale <nul > nul 2>&1
+adb shell settings delete global window_move_animation_duration_scale <nul > nul 2>&1
+adb shell settings delete global window_move_animation_scale <nul > nul 2>&1
+adb shell settings put global window_animation_scale 1.0 <nul > nul 2>&1
+adb shell settings put global transition_animation_scale 1.0 <nul > nul 2>&1
+adb shell settings put global animator_duration_scale 1.0 <nul > nul 2>&1
+adb shell settings put global disable_window_blurs 0 <nul > nul 2>&1
+adb shell settings delete global accessibility_reduce_transparency <nul > nul 2>&1
+adb shell device_config delete systemui window_cornerRadius <nul > nul 2>&1
+adb shell device_config delete systemui window_blur <nul > nul 2>&1
+adb shell device_config delete systemui window_shadow <nul > nul 2>&1
+adb shell device_config delete systemui reduce_animations <nul > nul 2>&1
 adb shell device_config delete battery_saver reduce_animations <nul > nul 2>&1
 echo.
 echo.
@@ -3798,10 +3905,11 @@ goto Battery
 :autowifi
 @echo off
 cls
-title Toggle Auto Wifi
+title Wi-Fi/BT scan and related
 echo.
 echo.
-echo Toggle Auto Wifi Here
+echo  Toggles wifi/bt scan-always and related scoring/netstats keys.
+echo  Not an OEM "auto Wi-Fi" switch. Some watchdog keys are ignored on modern stacks.
 echo.
 echo [%r%1%w%] Off
 echo [%r%2%w%] On
@@ -3817,17 +3925,19 @@ goto autowifi
 @echo off
 cls
 title Auto Wifi : Off
-adb shell settings put global wifi_supplicant_scan_interval_ms 240000
-adb shell settings put global wifi_networks_available_notification_on 0
-adb shell settings put global wifi_watchdog_on 0
-adb shell settings put global wifi_watchdog_poor_network_test_enabled 0
-adb shell settings put global auto_wifi 0 > nul 2>&1
-adb shell settings put global wifi_scan_always_enabled 0 > nul 2>&1
-adb shell settings put global bluetooth_scan_always_enabled 0 > nul 2>&1
-adb shell settings put global network_recommendations_enabled 0 > nul 2>&1
-adb shell settings put global netstats_enabled 0 > nul 2>&1
-adb shell settings put global network_scoring_ui_enabled 0 > nul 2>&1
+adb shell settings put global wifi_supplicant_scan_interval_ms 240000 <nul
+adb shell settings put global wifi_networks_available_notification_on 0 <nul
+adb shell settings put global wifi_watchdog_on 0 <nul
+adb shell settings put global wifi_watchdog_poor_network_test_enabled 0 <nul
+adb shell settings put global wifi_scan_always_enabled 0 <nul > nul 2>&1
+adb shell settings put global bluetooth_scan_always_enabled 0 <nul > nul 2>&1
+adb shell settings put global network_recommendations_enabled 0 <nul > nul 2>&1
+adb shell settings put global netstats_enabled 0 <nul > nul 2>&1
+adb shell settings put global network_scoring_ui_enabled 0 <nul > nul 2>&1
 adb shell settings put global wifi_watchdog_poor_network_test_enabled 0 <nul > nul 2>&1
+call :_act_reset
+call :_settings_verify global wifi_scan_always_enabled 0
+call :_act_summary
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3836,17 +3946,19 @@ goto Battery
 @echo off
 cls
 title Auto Wifi : On
-adb shell settings delete global wifi_supplicant_scan_interval_ms > nul 2>&1
-adb shell settings delete global wifi_networks_available_notification_on > nul 2>&1
-adb shell settings delete global wifi_watchdog_on > nul 2>&1
-adb shell settings delete global wifi_watchdog_poor_network_test_enabled > nul 2>&1
-adb shell settings put global auto_wifi 1 > nul 2>&1
-adb shell settings put global wifi_scan_always_enabled 1 > nul 2>&1
-adb shell settings put global bluetooth_scan_always_enabled 1 > nul 2>&1
-adb shell settings delete global network_recommendations_enabled > nul 2>&1
-adb shell settings put global netstats_enabled 1 > nul 2>&1
-adb shell settings put global network_scoring_ui_enabled 1 > nul 2>&1
+adb shell settings delete global wifi_supplicant_scan_interval_ms <nul > nul 2>&1
+adb shell settings delete global wifi_networks_available_notification_on <nul > nul 2>&1
+adb shell settings delete global wifi_watchdog_on <nul > nul 2>&1
 adb shell settings delete global wifi_watchdog_poor_network_test_enabled <nul > nul 2>&1
+adb shell settings put global wifi_scan_always_enabled 1 <nul > nul 2>&1
+adb shell settings put global bluetooth_scan_always_enabled 1 <nul > nul 2>&1
+adb shell settings delete global network_recommendations_enabled <nul > nul 2>&1
+adb shell settings put global netstats_enabled 1 <nul > nul 2>&1
+adb shell settings put global network_scoring_ui_enabled 1 <nul > nul 2>&1
+adb shell settings delete global wifi_watchdog_poor_network_test_enabled <nul > nul 2>&1
+call :_act_reset
+call :_settings_verify global wifi_scan_always_enabled 1
+call :_act_summary
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3856,7 +3968,8 @@ cls
 title Toggle Sync
 echo.
 echo.
-echo Toggle Sync Here
+echo Toggle master_sync_status ^(placebo on modern Android^)
+echo Real Auto sync is not rootless-writable - see Account Sync on page 2.
 echo.
 echo [%r%1%w%] Off
 echo [%r%2%w%] On
@@ -3873,13 +3986,10 @@ goto sync
 cls
 title Sync : Off
 :: FIX (consistency): unify on master_sync_status - the key :syncmaster uses,
-:: the backup captures (:_bk_settings global master_sync_status) and CheckSetting
-:: displays. auto_sync / master_sync_enabled are read by nothing on modern
-:: Android (all three are placebo settings keys; real master sync lives in
-:: SyncManager and isn't rootless-writable), but master_sync_status is at least
-:: the one DCX backs up, so a backup/restore now round-trips this toggle.
-adb shell settings put global master_sync_status 0
-adb shell device_config set_sync_disabled_for_tests persistent <nul > nul 2>&1
+:: the backup captures, and CheckSetting displays. Placebo on modern Android;
+:: DeviceConfig sync is no longer touched here (Tweaks > DeviceConfig server sync).
+adb shell settings put global master_sync_status 0 <nul
+echo Value set. Real Auto sync is unchanged on modern Android.
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3889,8 +3999,8 @@ goto Battery
 cls
 title Sync : On
 :: FIX (consistency): see :offsync - unify on master_sync_status.
-adb shell settings put global master_sync_status 1
-adb shell device_config set_sync_disabled_for_tests none <nul > nul 2>&1
+adb shell settings put global master_sync_status 1 <nul
+echo Value set. Real Auto sync is unchanged on modern Android.
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3898,10 +4008,11 @@ goto Battery
 :motion
 @echo off
 cls
-title Toggle Motion
+title Samsung motion (OEM)
 echo.
 echo.
-echo Toggle Your Motion Here
+echo  Samsung OneUI motion-gesture keys ^(master_motion / air_motion_*^).
+echo  Placebo on non-Samsung devices - AOSP does not read them.
 echo.
 echo [%r%1%w%] Off
 echo [%r%2%w%] On
@@ -3917,9 +4028,9 @@ goto motion
 @echo off
 cls
 title Motion : Off
-adb shell settings put system master_motion 0 > nul 2>&1
-adb shell settings put system motion_engine 0 > nul 2>&1
-adb shell settings put system air_motion_engine 0 > nul 2>&1
+adb shell settings put system master_motion 0 <nul > nul 2>&1
+adb shell settings put system motion_engine 0 <nul > nul 2>&1
+adb shell settings put system air_motion_engine 0 <nul > nul 2>&1
 adb shell settings put system air_motion_wake_up 0 <nul > nul 2>&1
 echo Press Any Button To Go Back
 pause > nul
@@ -3932,9 +4043,9 @@ title Motion : On
 :: FIX: "settings remove" is not a real verb (stock verbs: get/put/delete/
 :: reset/list), so Motion "On" silently reverted nothing - the error was
 :: hidden by >nul 2>&1. "delete" restores the OEM default as intended.
-adb shell settings delete system master_motion > nul 2>&1
-adb shell settings delete system motion_engine > nul 2>&1
-adb shell settings delete system air_motion_engine > nul 2>&1
+adb shell settings delete system master_motion <nul > nul 2>&1
+adb shell settings delete system motion_engine <nul > nul 2>&1
+adb shell settings delete system air_motion_engine <nul > nul 2>&1
 adb shell settings delete system air_motion_wake_up <nul > nul 2>&1
 echo Press Any Button To Go Back
 pause > nul
@@ -3943,10 +4054,11 @@ goto Battery
 :zram
 @echo off
 cls
-title Toggle ZRAM
+title ZRAM preference
 echo.
 echo.
-echo Toggle Your ZRAM Here
+echo  Sets global zram_enabled ^(StorageManager preference^). Needs reboot;
+echo  no-op if the OEM has no zram toggle ^(e.g. Samsung RAM Plus uses other keys^).
 echo.
 echo [%r%1%w%] Off
 echo [%r%2%w%] On
@@ -3962,8 +4074,11 @@ goto zram
 @echo off
 cls
 title ZRAM : Off
-adb shell settings put global zram 0
 adb shell settings put global zram_enabled 0 <nul
+call :_act_reset
+call :_settings_verify global zram_enabled 0
+call :_act_summary
+echo Reboot may be required for this to apply.
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3972,8 +4087,11 @@ goto Battery
 @echo off
 cls
 title ZRAM : On
-adb shell settings put global zram 1
 adb shell settings put global zram_enabled 1 <nul
+call :_act_reset
+call :_settings_verify global zram_enabled 1
+call :_act_summary
+echo Reboot may be required for this to apply.
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3981,10 +4099,11 @@ goto Battery
 :extremepower
 @echo off
 cls
-title Toggle Extreme Power Saver
+title Aggressive saver constants
 echo.
 echo.
-echo Toggle Your Extreme Power Saver Here
+echo  Not OEM "Extreme power saving". Tweaks battery_saver_constants,
+echo  power mode, and related debug/AM flags. device_config bits need root on 14+.
 echo.
 echo [%r%1%w%] Off
 echo [%r%2%w%] On
@@ -4000,14 +4119,14 @@ goto extremepower
 @echo off
 cls
 title Extreme Power Saver : Off
-adb shell device_config delete activity_manager bg_current_drain_auto_restrict_abusive_apps_enabled
-adb shell device_config delete activity_manager bg_auto_restrict_abusive_apps
-adb shell cmd power set-adaptive-power-saver-enabled false
-adb shell cmd power set-mode 0
-adb shell settings put global battery_tip_constants app_restriction_enabled=true
-adb shell settings delete global battery_saver_constants > nul 2>&1
-adb shell settings delete global protect_battery > nul 2>&1
-adb shell settings delete global activity_manager_constants > nul 2>&1
+adb shell device_config delete activity_manager bg_current_drain_auto_restrict_abusive_apps_enabled <nul
+adb shell device_config delete activity_manager bg_auto_restrict_abusive_apps <nul
+adb shell cmd power set-adaptive-power-saver-enabled false <nul
+adb shell cmd power set-mode 0 <nul
+adb shell settings put global battery_tip_constants app_restriction_enabled=true <nul
+adb shell settings delete global battery_saver_constants <nul > nul 2>&1
+adb shell settings delete global protect_battery <nul > nul 2>&1
+adb shell settings delete global activity_manager_constants <nul > nul 2>&1
 :: FIX (revert-completeness): :onsvpp forces the device into low-RAM mode
 :: (debug.force_low_ram true), which persists until reboot and degrades
 :: every app launched afterward. Clear it so "Off" starts reverting
@@ -4034,16 +4153,16 @@ call :_dcfg_warn
 :: two interfaces to the same operation (clears any fake-battery state so
 :: the saver reads the real battery). One call is enough; dumpsys is kept
 :: because it exists on older builds where the "cmd" service shell may not.
-adb shell dumpsys battery reset
-adb shell device_config put activity_manager bg_current_drain_auto_restrict_abusive_apps_enabled true
-adb shell device_config put activity_manager bg_auto_restrict_abusive_apps 1
-adb shell settings put global activity_manager_constants power_check_interval=990000,power_check_max_cpu_1=2,power_check_max_cpu_2=2,power_check_max_cpu_3=2,power_check_max_cpu_4=2
-adb shell settings put global battery_saver_constants advertise_is_enabled=false,enable_datasaver=false,enable_night_mode=true,disable_launch_boost=true,disable_vibration=true,disable_animation=true,disable_soundtrigger=true,defer_full_backup=true,defer_keyvalue_backup=true,enable_firewall=false,location_mode=2,enable_brightness_adjustment=false,adjust_brightness_factor=0.5,force_all_apps_standby=true,force_background_check=true,disable_optional_sensors=true,disable_aod=true,enable_quick_doze=true
-adb shell settings put global battery_tip_constants reduced_battery_enabled=true,battery_saver_tip_enabled=true,high_usage_period_ms=120000,app_restriction_enabled=true,battery_tip_enabled=false,summary_enabled=false,high_usage_enabled=true,high_usage_app_count=1,high_usage_battery_draining=15,reduced_battery_percent=5,low_battery_enabled=true,low_battery_hour=1
-adb shell cmd power set-mode 1
-adb shell cmd power set-adaptive-power-saver-enabled true
-adb shell setprop debug.rs.max-threads 2
-adb shell setprop debug.rs.precision rs_fp_relaxed
+adb shell dumpsys battery reset <nul
+adb shell device_config put activity_manager bg_current_drain_auto_restrict_abusive_apps_enabled true <nul
+adb shell device_config put activity_manager bg_auto_restrict_abusive_apps 1 <nul
+adb shell settings put global activity_manager_constants power_check_interval=990000,power_check_max_cpu_1=2,power_check_max_cpu_2=2,power_check_max_cpu_3=2,power_check_max_cpu_4=2 <nul
+adb shell settings put global battery_saver_constants advertise_is_enabled=false,enable_datasaver=false,enable_night_mode=true,disable_launch_boost=true,disable_vibration=true,disable_animation=true,disable_soundtrigger=true,defer_full_backup=true,defer_keyvalue_backup=true,enable_firewall=false,location_mode=2,enable_brightness_adjustment=false,adjust_brightness_factor=0.5,force_all_apps_standby=true,force_background_check=true,disable_optional_sensors=true,disable_aod=true,enable_quick_doze=true <nul
+adb shell settings put global battery_tip_constants reduced_battery_enabled=true,battery_saver_tip_enabled=true,high_usage_period_ms=120000,app_restriction_enabled=true,battery_tip_enabled=false,summary_enabled=false,high_usage_enabled=true,high_usage_app_count=1,high_usage_battery_draining=15,reduced_battery_percent=5,low_battery_enabled=true,low_battery_hour=1 <nul
+adb shell cmd power set-mode 1 <nul
+adb shell cmd power set-adaptive-power-saver-enabled true <nul
+adb shell setprop debug.rs.max-threads 2 <nul
+adb shell setprop debug.rs.precision rs_fp_relaxed <nul
 adb shell setprop debug.force_low_ram true <nul
 echo Press Any Button To Go Back
 pause > nul
@@ -4069,15 +4188,15 @@ goto senderror
 :offerr
 cls
 title Send Error : Off
-adb shell settings put secure send_action_app_error 0 > nul 2>&1
-adb shell settings put global send_action_app_error 0 > nul 2>&1
-adb shell settings put global enable_diagnostic_data 0 > nul 2>&1
-adb shell settings put system send_security_reports 0 > nul 2>&1
-adb shell settings put secure upload_debug_log_pref 0 > nul 2>&1
-adb shell settings put secure upload_log_pref 0 > nul 2>&1
-adb shell settings put system profiler.force_disable_ulog 1 > nul 2>&1
-adb shell settings put system profiler.force_disable_err_rpt 1 > nul 2>&1
-adb shell settings put secure usage_metrics_marketing_enabled 0 > nul 2>&1
+adb shell settings put secure send_action_app_error 0 <nul > nul 2>&1
+adb shell settings put global send_action_app_error 0 <nul > nul 2>&1
+adb shell settings put global enable_diagnostic_data 0 <nul > nul 2>&1
+adb shell settings put system send_security_reports 0 <nul > nul 2>&1
+adb shell settings put secure upload_debug_log_pref 0 <nul > nul 2>&1
+adb shell settings put secure upload_log_pref 0 <nul > nul 2>&1
+adb shell settings put system profiler.force_disable_ulog 1 <nul > nul 2>&1
+adb shell settings put system profiler.force_disable_err_rpt 1 <nul > nul 2>&1
+adb shell settings put secure usage_metrics_marketing_enabled 0 <nul > nul 2>&1
 adb shell settings put secure USAGE_METRICS_UPLOAD_ENABLED 0 <nul > nul 2>&1
 echo Done , Press Any Button To Go Back
 pause > nul
@@ -4086,15 +4205,15 @@ goto Battery
 :onerr
 cls
 title Send Error : On
-adb shell settings put secure send_action_app_error 1 > nul 2>&1
-adb shell settings put global send_action_app_error 1 > nul 2>&1
-adb shell settings put global enable_diagnostic_data 1 > nul 2>&1
-adb shell settings put system send_security_reports 1 > nul 2>&1
-adb shell settings delete secure upload_debug_log_pref > nul 2>&1
-adb shell settings delete secure upload_log_pref > nul 2>&1
-adb shell settings delete system profiler.force_disable_ulog > nul 2>&1
-adb shell settings delete system profiler.force_disable_err_rpt > nul 2>&1
-adb shell settings delete secure usage_metrics_marketing_enabled > nul 2>&1
+adb shell settings put secure send_action_app_error 1 <nul > nul 2>&1
+adb shell settings put global send_action_app_error 1 <nul > nul 2>&1
+adb shell settings put global enable_diagnostic_data 1 <nul > nul 2>&1
+adb shell settings put system send_security_reports 1 <nul > nul 2>&1
+adb shell settings delete secure upload_debug_log_pref <nul > nul 2>&1
+adb shell settings delete secure upload_log_pref <nul > nul 2>&1
+adb shell settings delete system profiler.force_disable_ulog <nul > nul 2>&1
+adb shell settings delete system profiler.force_disable_err_rpt <nul > nul 2>&1
+adb shell settings delete secure usage_metrics_marketing_enabled <nul > nul 2>&1
 adb shell settings delete secure USAGE_METRICS_UPLOAD_ENABLED <nul > nul 2>&1
 echo Done , Press Any Button To Go Back
 pause > nul
@@ -4102,10 +4221,11 @@ goto Battery
 
 :toggleprofilling
 cls
-title Toggle Lock Profiling
+title ART lock profiling (developer)
 echo.
 echo.
-echo Toggle Your Lock Profiling Here
+echo  ART runtime_native_boot disable_lock_profiling - developer/debug only.
+echo  Not a battery or FPS toggle. device_config writes need root on Android 14+.
 echo.
 echo [%r%1%w%] Off
 echo [%r%2%w%] On
@@ -4149,11 +4269,11 @@ echo          ┗━━━━━━━━━━━━━━━━━━━━━
 echo.
 echo.
 echo                                     %r%[%w%1%r%]%w% Toggle GMS
-echo                                     %r%[%w%2%r%]%w% Toggle Thermal-Service
+echo                                     %r%[%w%2%r%]%w% Thermal override ^(temporary^)
 echo                                     %r%[%w%3%r%]%w% Toggle Package Verifier
 echo                                     %r%[%w%4%r%]%w% Toggle Game-Overlay
-echo                                     %r%[%w%5%r%]%w% Toggle Performance
-echo                                     %r%[%w%6%r%]%w% Network Boost
+echo                                     %r%[%w%5%r%]%w% Performance props ^(debug/OEM dump^)
+echo                                     %r%[%w%6%r%]%w% TCP / DNS / network mode
 echo                                     %r%[%w%7%r%]%w% GPU Renderer (Skia GL/Vulkan)
 echo                                     %r%[%w%8%r%]%w% Force ANGLE for All Apps
 echo                                     %r%[%w%9%r%]%w% Display Scaler (Resolution / DPI)
@@ -4273,7 +4393,7 @@ echo.
 echo    [Y] Apply    [N] Cancel
 choice /c:YN /n >nul
 if errorlevel 2 goto dispscaler
-adb shell wm size %NW%x%NH%
+adb shell wm size %NW%x%NH% <nul
 adb shell wm density %ND% <nul
 echo.
 echo  Applied. If anything looks off, come back and choose Reset.
@@ -4414,7 +4534,7 @@ cls
 title Display Scaler : reset dpi
 call :logo
 echo  Restoring native density (%PD% dpi)...
-adb shell wm density reset
+adb shell wm density reset <nul
 adb shell settings delete secure display_density_forced <nul > nul 2>&1
 echo.
 echo  %y%Heads up:%w% native density can be larger than you like on some
@@ -4428,13 +4548,13 @@ cls
 title Display Scaler : reset
 call :logo
 echo  Restoring the panel's native resolution and density...
-adb shell wm size reset
-adb shell wm density reset
+adb shell wm size reset <nul
+adb shell wm density reset <nul
 :: Some OEM builds (notably Huawei EMUI/HarmonyOS, and older Sony/LG)
 :: do NOT actually clear the forced override on 'reset' - the value is
 :: left behind in the settings DB and survives a reboot. Delete the
 :: backing keys directly so the native size/density really come back.
-adb shell settings delete global display_size_forced > nul 2>&1
+adb shell settings delete global display_size_forced <nul > nul 2>&1
 adb shell settings delete secure display_density_forced <nul > nul 2>&1
 echo.
 echo  Done - back to native (%PW%x%PH% @ %PD% dpi).
@@ -4499,7 +4619,7 @@ goto gpurenderer
 :gpurenderer_vk
 cls
 title GPU Renderer : Skia Vulkan
-adb shell setprop debug.hwui.renderer skiavk
+adb shell setprop debug.hwui.renderer skiavk <nul
 adb shell setprop debug.renderengine.backend skiavkthreaded <nul
 echo Renderer set to skiavk (Skia + Vulkan).
 echo.
@@ -4515,7 +4635,7 @@ goto gpurenderer
 :gpurenderer_gl
 cls
 title GPU Renderer : Skia GL
-adb shell setprop debug.hwui.renderer skiagl
+adb shell setprop debug.hwui.renderer skiagl <nul
 adb shell setprop debug.renderengine.backend skiaglthreaded <nul
 echo Renderer set to skiagl (Skia + OpenGL ES, default).
 pause > nul
@@ -4525,7 +4645,7 @@ goto gpurenderer
 cls
 title GPU Renderer : Clear
 :: An empty value makes Android fall back to the framework default
-adb shell setprop debug.hwui.renderer ""
+adb shell setprop debug.hwui.renderer "" <nul
 adb shell setprop debug.renderengine.backend "" <nul
 echo Renderer override cleared. Framework default in effect after reboot.
 pause > nul
@@ -4592,7 +4712,7 @@ choice /c:YN /n > nul
 if errorlevel 2 goto angleall
 adb shell settings put global angle_gl_driver_all_angle 1 <nul
 echo.
-echo Done. ANGLE is now enabled for all GLES apps.
+call :_settings_verify global angle_gl_driver_all_angle 1
 echo If apps start crashing, return here and Disable/Delete.
 pause > nul
 goto angleall
@@ -4601,7 +4721,7 @@ goto angleall
 cls
 title ANGLE for All Apps : OFF
 adb shell settings put global angle_gl_driver_all_angle 0 <nul
-echo Done. Native GLES driver in use.
+call :_settings_verify global angle_gl_driver_all_angle 0
 pause > nul
 goto angleall
 
@@ -4609,23 +4729,24 @@ goto angleall
 cls
 title ANGLE for All Apps : Delete (default)
 adb shell settings delete global angle_gl_driver_all_angle <nul
-echo Setting removed. Framework picks per-app default again.
+call :_settings_verify global angle_gl_driver_all_angle DELETE
 pause > nul
 goto angleall
 :: ===================================================================
 :: NEW FEATURE: Network Boost
 :: Tunes TCP buffers and DNS for lower latency in online games.
 :: All changes are non-destructive (settings put global) and can be
-:: undone with option [3] which deletes the keys.
+:: undone with option [4] which deletes the keys.
 :: ===================================================================
 :netboost
 cls
 title Network Boost
 call :logo
 echo.
-echo  TCP receive-window hint + optional private DNS for lower latency.
-echo  %y%Note:%w% the old Wi-Fi power tweaks were removed (they could break
-echo  Wi-Fi on Android 15). Reverting is safe and clears any old keys.
+echo  TCP init-window hint + private DNS + preferred network mode.
+echo  Modest effect - not a magic latency boost. DNS often helps more than TCP.
+echo  %y%Note:%w% old Wi-Fi power tweaks were removed (could break Wi-Fi on
+echo  Android 15). Revert still clears any leftovers from an old run.
 echo.
 echo                                     %g%[%w%1%g%]%w% Apply TCP hint (safe)
 echo                                     %g%[%w%2%g%]%w% Set Cloudflare DNS (1.1.1.1)
@@ -4671,21 +4792,21 @@ echo                                     %g%[%w%4%g%]%w% Restore default (delete
 echo                                     %g%[%w%5%g%]%w% Back
 set "pm=" & set /p pm="Choose An Option >> "
 if "!pm!"=="1" (
-    adb shell settings put global preferred_network_mode 9
+    adb shell settings put global preferred_network_mode 9 <nul
     adb shell settings put global preferred_network_mode1 9 <nul
     echo Set to LTE preferred.
     pause > nul
     goto netboost_prefmode
 )
 if "!pm!"=="2" (
-    adb shell settings put global preferred_network_mode 12
+    adb shell settings put global preferred_network_mode 12 <nul
     adb shell settings put global preferred_network_mode1 12 <nul
     echo Set to LTE only. WARNING: voice calls only work if VoLTE is active.
     pause > nul
     goto netboost_prefmode
 )
 if "!pm!"=="3" (
-    adb shell settings put global preferred_network_mode 20
+    adb shell settings put global preferred_network_mode 20 <nul
     adb shell settings put global preferred_network_mode1 20 <nul
     echo Set to 5G preferred.
     pause > nul
@@ -4718,7 +4839,7 @@ echo.
 :: What remains is the one genuinely safe, real key: the initial TCP
 :: receive window. Effect is modest; it does not touch the Wi-Fi stack.
 adb shell "settings put global tcp_default_init_rwnd 60" <nul > nul 2>&1
-echo Done - set tcp_default_init_rwnd (initial TCP receive window).
+call :_settings_verify global tcp_default_init_rwnd 60
 echo.
 echo This change is safe and does not alter Wi-Fi behaviour.
 echo If you want lower latency, the DNS option (Cloudflare) often helps
@@ -4730,8 +4851,12 @@ goto netboost
 cls
 title Network Boost : DNS
 echo Setting private DNS to Cloudflare (1.1.1.1 / one.one.one.one)...
-adb shell settings put global private_dns_mode hostname
+adb shell settings put global private_dns_mode hostname <nul
 adb shell settings put global private_dns_specifier one.one.one.one <nul
+call :_act_reset
+call :_settings_verify global private_dns_mode hostname
+call :_settings_verify global private_dns_specifier one.one.one.one
+call :_act_summary
 echo.
 echo  To use Google DNS instead, run manually:
 echo    settings put global private_dns_specifier dns.google
@@ -4747,17 +4872,20 @@ goto netboost
 :netboost_revert
 cls
 title Network Boost : Revert
-adb shell settings delete global tcp_default_init_rwnd > nul 2>&1
-adb shell settings delete global tether_offload_disabled > nul 2>&1
-adb shell settings delete global mobile_data_always_on > nul 2>&1
-adb shell settings delete global wifi_idle_ms > nul 2>&1
-adb shell settings delete global wifi_suspend_optimizations_enabled > nul 2>&1
-adb shell settings delete global wifi_sleep_policy > nul 2>&1
-adb shell settings put global private_dns_mode opportunistic > nul 2>&1
-adb shell settings delete global private_dns_specifier > nul 2>&1
-adb shell settings delete global preferred_network_mode > nul 2>&1
+adb shell settings delete global tcp_default_init_rwnd <nul > nul 2>&1
+adb shell settings delete global tether_offload_disabled <nul > nul 2>&1
+adb shell settings delete global mobile_data_always_on <nul > nul 2>&1
+adb shell settings delete global wifi_idle_ms <nul > nul 2>&1
+adb shell settings delete global wifi_suspend_optimizations_enabled <nul > nul 2>&1
+adb shell settings delete global wifi_sleep_policy <nul > nul 2>&1
+adb shell settings put global private_dns_mode opportunistic <nul > nul 2>&1
+adb shell settings delete global private_dns_specifier <nul > nul 2>&1
+adb shell settings delete global preferred_network_mode <nul > nul 2>&1
 adb shell settings delete global preferred_network_mode1 <nul > nul 2>&1
-echo All Network Boost settings reverted.
+call :_act_reset
+call :_settings_verify global tcp_default_init_rwnd DELETE
+call :_settings_verify global private_dns_mode opportunistic
+call :_act_summary
 pause > nul
 goto netboost
 :: gms
@@ -4765,18 +4893,22 @@ goto netboost
 @echo off
 cls
 title Toggle GMS
+call :logo
 echo.
+echo  Full Off disables Play Services itself and breaks most Google-dependent apps.
+echo  Safe subset only disables ads/telemetry-adjacent packages and keeps GMS running.
 echo.
-echo Toggle Your GMS Here
-echo.
-echo [%r%1%w%] Off
-echo [%r%2%w%] On
-echo [%r%3%w%] Back
+echo [%r%1%w%] Disable GMS entirely ^(dangerous^)
+echo [%r%2%w%] Enable GMS ^(undo full Off^)
+echo [%g%3%w%] Safe subset Off - ads/telemetry packages only
+echo [%g%4%w%] Safe subset On  - re-enable those packages
+echo [%r%5%w%] Back
 set "toggle=" & set /p toggle="Choose An Option >> "
 if "!toggle!"=="1" goto offgms
 if "!toggle!"=="2" goto ongms
-if "!toggle!"=="3" goto Gaming
-:: guard against invalid input
+if "!toggle!"=="3" goto gms_safe_off
+if "!toggle!"=="4" goto gms_safe_on
+if "!toggle!"=="5" goto Gaming
 goto gms
 
 :offgms
@@ -4805,15 +4937,16 @@ choice /c:YN /n > nul
 if errorlevel 2 goto Gaming
 cls
 title GMS : Off
-adb shell am force-stop com.google.android.gms
-adb shell pm disable-user --user 0 com.google.android.gms
-adb shell settings put global zen_mode 4
-adb shell cmd appops set com.google.android.gms RUN_ANY_IN_BACKGROUND ignore
-adb shell cmd appops set com.google.android.gms RUN_IN_BACKGROUND ignore
-adb shell cmd appops set com.google.android.gms WAKE_LOCK ignore
-adb shell cmd appops set com.google.android.gms START_FOREGROUND ignore
-adb shell cmd appops set com.google.android.gms INSTANT_APP_START_FOREGROUND ignore
-adb shell am set-inactive --user 0 com.google.android.gms true
+adb shell am force-stop com.google.android.gms <nul
+adb shell pm disable-user --user 0 com.google.android.gms <nul
+:: FIX: AOSP zen_mode is 0-3 (0=off,1=priority,2=none,3=alarms). 4 was undefined.
+adb shell settings put global zen_mode 2 <nul
+adb shell cmd appops set com.google.android.gms RUN_ANY_IN_BACKGROUND ignore <nul
+adb shell cmd appops set com.google.android.gms RUN_IN_BACKGROUND ignore <nul
+adb shell cmd appops set com.google.android.gms WAKE_LOCK ignore <nul
+adb shell cmd appops set com.google.android.gms START_FOREGROUND ignore <nul
+adb shell cmd appops set com.google.android.gms INSTANT_APP_START_FOREGROUND ignore <nul
+adb shell am set-inactive --user 0 com.google.android.gms true <nul
 adb shell am set-standby-bucket --user 0 com.google.android.gms never <nul
 echo Press Any Button To Go Back
 pause > nul
@@ -4822,27 +4955,102 @@ goto Gaming
 :ongms
 @echo off
 cls
-adb shell pm enable com.google.android.gms
-adb shell settings put global zen_mode 0
-adb shell cmd appops set com.google.android.gms RUN_ANY_IN_BACKGROUND allow
-adb shell cmd appops set com.google.android.gms RUN_IN_BACKGROUND allow
-adb shell cmd appops set com.google.android.gms WAKE_LOCK allow
-adb shell cmd appops set com.google.android.gms START_FOREGROUND allow
-adb shell cmd appops set com.google.android.gms INSTANT_APP_START_FOREGROUND allow
-adb shell am set-inactive --user 0 com.google.android.gms false
+adb shell pm enable com.google.android.gms <nul
+adb shell settings put global zen_mode 0 <nul
+adb shell cmd appops set com.google.android.gms RUN_ANY_IN_BACKGROUND allow <nul
+adb shell cmd appops set com.google.android.gms RUN_IN_BACKGROUND allow <nul
+adb shell cmd appops set com.google.android.gms WAKE_LOCK allow <nul
+adb shell cmd appops set com.google.android.gms START_FOREGROUND allow <nul
+adb shell cmd appops set com.google.android.gms INSTANT_APP_START_FOREGROUND allow <nul
+adb shell am set-inactive --user 0 com.google.android.gms false <nul
 adb shell am set-standby-bucket --user 0 com.google.android.gms active <nul
 title GMS : On
 echo Press Any Button To Go Back
 pause > nul
 goto Gaming
+
+:: ===================================================================
+:: GMS safe subset - ads/telemetry-adjacent packages only.
+:: Keeps com.google.android.gms enabled. Only acts on packages that are
+:: actually installed. Reversible via Safe subset On.
+:: ===================================================================
+:gms_safe_off
+cls
+title GMS safe subset : Off
+call :logo
+echo.
+echo  Will disable-user these packages if installed ^(Play Services stays up^):
+echo    adservices.api, as.oss, mainline.telemetry, mainline.adservices,
+echo    federatedcompute, partnersetup, feedback, apps.turbo
+echo.
+echo  [%g%Y%w%] Disable them now    [%g%N%w%] Cancel
+choice /c:YN /n >nul
+if errorlevel 2 goto gms
+call :_act_reset
+call :_gms_safe_one disable-user com.google.android.adservices.api
+call :_gms_safe_one disable-user com.google.android.as.oss
+call :_gms_safe_one disable-user com.google.mainline.telemetry
+call :_gms_safe_one disable-user com.google.mainline.adservices
+call :_gms_safe_one disable-user com.google.android.federatedcompute
+call :_gms_safe_one disable-user com.google.android.partnersetup
+call :_gms_safe_one disable-user com.google.android.feedback
+call :_gms_safe_one disable-user com.google.android.apps.turbo
+call :_act_summary
+echo.
+echo  Play Services ^(com.google.android.gms^) was not touched.
+pause >nul
+goto gms
+
+:gms_safe_on
+cls
+title GMS safe subset : On
+call :logo
+echo.
+echo  Re-enabling the safe-subset packages if present...
+echo.
+call :_act_reset
+call :_gms_safe_one enable com.google.android.adservices.api
+call :_gms_safe_one enable com.google.android.as.oss
+call :_gms_safe_one enable com.google.mainline.telemetry
+call :_gms_safe_one enable com.google.mainline.adservices
+call :_gms_safe_one enable com.google.android.federatedcompute
+call :_gms_safe_one enable com.google.android.partnersetup
+call :_gms_safe_one enable com.google.android.feedback
+call :_gms_safe_one enable com.google.android.apps.turbo
+call :_act_summary
+pause >nul
+goto gms
+
+:_gms_safe_one
+:: %1 = disable-user ^| enable    %2 = package
+adb shell pm list packages 2>nul <nul | findstr /C:"package:%~2" >nul
+if errorlevel 1 (
+    echo  skip  %~2 ^(not installed^)
+    exit /b 0
+)
+if /i "%~1"=="enable" (
+    adb shell pm enable --user 0 %~2 <nul >nul 2>&1
+) else (
+    adb shell pm disable-user --user 0 %~2 <nul >nul 2>&1
+)
+if errorlevel 1 (
+    echo  [%r%FAIL%w%] %~1 %~2
+    set /a DCX_VFAIL+=1
+    exit /b 1
+)
+echo  [%g%OK%w%] %~1 %~2
+set /a DCX_VOK+=1
+exit /b 0
+
 :: thermal
 :thermal
 @echo off
 cls
-title Toggle Thermal
+title Thermal override (temporary)
 echo.
 echo.
-echo Toggle Thermal Service
+echo  Temporary thermalservice override-status ^(usually clears on reboot^).
+echo  Not a permanent cooling profile.
 echo.
 echo [%r%1%w%] Process To Setting Thermal
 echo [%r%2%w%] Go Back
@@ -4940,7 +5148,7 @@ cls
 title Remove Settings
 set "package=" & set /p package="Put Your Package Name Here >> "
 if "!package!"=="" goto Gaming
-adb shell device_config delete game_overlay %package% > nul
+adb shell device_config delete game_overlay %package% <nul > nul
 adb shell cmd game reset --user 0 %package% <nul
 cls
 echo.
@@ -4959,7 +5167,7 @@ title Low Settings
 call :_dcfg_warn
 set "package=" & set /p package="Put Your Package Name Here >> "
 if "!package!"=="" goto Gaming
-adb shell device_config put game_overlay %package% mode=1
+adb shell device_config put game_overlay %package% mode=1 <nul
 adb shell cmd game downscale 0.55 %package% <nul
 cls
 echo.
@@ -4978,8 +5186,8 @@ title Medium Settings
 call :_dcfg_warn
 set "package=" & set /p package="Put Your Package Name Here >> "
 if "!package!"=="" goto Gaming
-adb shell device_config put game_overlay %package% mode=1
-adb shell device_config get game_overlay %package%
+adb shell device_config put game_overlay %package% mode=1 <nul
+adb shell device_config get game_overlay %package% <nul
 adb shell cmd game downscale 0.75 %package% <nul
 cls
 echo.
@@ -4994,10 +5202,12 @@ goto Gaming
 :performance
 @echo off
 cls
-title Toggle Performance
+title Performance props (debug/OEM)
 echo.
 echo.
-echo Toggle Your Performance Here
+echo  Writes a large dump of debug/OEM props. Most are volatile and
+echo  device-dependent - not a guaranteed FPS mode. Lasting bits are
+echo  mainly low_power off + thermal reset; Samsung-only keys no-op elsewhere.
 echo.
 echo [%r%1%w%] Toggle
 echo [%r%2%w%] Back
@@ -5029,31 +5239,31 @@ title Performance Mode : Off
 :: FIX: revert by REMOVING the override so the platform default returns.
 :: The old code set the ratio to 80 on "Off" instead of deleting it, so
 :: toggling Off did not actually revert anything.
-adb shell device_config delete storage_native_boot target_dirty_ratio > nul 2>&1
-adb shell device_config delete storage_native_boot target_dirty_background_ratio > nul 2>&1
+adb shell device_config delete storage_native_boot target_dirty_ratio <nul > nul 2>&1
+adb shell device_config delete storage_native_boot target_dirty_background_ratio <nul > nul 2>&1
 
-adb shell logcat -G 256kb
-adb shell settings delete global activity_manager_constants > nul 2>&1
-adb shell device_config delete runtime_native_boot iorap_readahead_enable > nul 2>&1
-adb shell device_config delete surface_flinger_native_boot max_frame_buffer_acquired_buffers > nul 2>&1
-adb shell device_config delete surface_flinger_native_boot adpf_cpu_hint > nul 2>&1
+adb shell logcat -G 256kb <nul
+adb shell settings delete global activity_manager_constants <nul > nul 2>&1
+adb shell device_config delete runtime_native_boot iorap_readahead_enable <nul > nul 2>&1
+adb shell device_config delete surface_flinger_native_boot max_frame_buffer_acquired_buffers <nul > nul 2>&1
+adb shell device_config delete surface_flinger_native_boot adpf_cpu_hint <nul > nul 2>&1
 :: FIX (revert-completeness): :onperf pins PERSISTENT power state that
 :: survives reboot; "Off" must undo it or the device stays in the
 :: performance profile forever. (debug.* setprops are volatile - the
 :: reboot prompted below clears those - so only persistent state is
 :: reverted here. set-mode is NOT forced: "1" would turn low-power mode
 :: ON, the opposite of a revert; un-pinning low_power is enough.)
-adb shell cmd thermalservice reset > nul 2>&1
-adb shell cmd power set-adaptive-power-saver-enabled true > nul 2>&1
-adb shell settings delete global low_power > nul 2>&1
-adb shell settings delete system multicore_packet_scheduler > nul 2>&1
-adb shell settings delete global sem_enhanced_cpu_responsiveness > nul 2>&1
+adb shell cmd thermalservice reset <nul > nul 2>&1
+adb shell cmd power set-adaptive-power-saver-enabled true <nul > nul 2>&1
+adb shell settings delete global low_power <nul > nul 2>&1
+adb shell settings delete system multicore_packet_scheduler <nul > nul 2>&1
+adb shell settings delete global sem_enhanced_cpu_responsiveness <nul > nul 2>&1
 if "%SDK%"=="" (
-    adb shell settings delete global device_idle_constants > nul 2>&1
+    adb shell settings delete global device_idle_constants <nul > nul 2>&1
 ) else if %SDK% GEQ 31 (
-    adb shell device_config delete device_idle inactive_to > nul 2>&1
+    adb shell device_config delete device_idle inactive_to <nul > nul 2>&1
 ) else (
-    adb shell settings delete global device_idle_constants > nul 2>&1
+    adb shell settings delete global device_idle_constants <nul > nul 2>&1
 )
 echo.
 echo.
@@ -5076,132 +5286,132 @@ echo [%r%^^!%w%] All Powersaving Is Disabled
 echo [%r%^^!%w%] If You Want To Enable Power Saver Again, You Need To Disable Performance Mode
 echo [%r%^^!%w%] And Enable Power Saver Mode In Battery Mode
 ::disable powersaver
-adb shell cmd power set-mode 0 > nul 2>&1
-adb shell cmd thermalservice override-status 0
-adb shell settings put global low_power 0
+adb shell cmd power set-mode 0 <nul > nul 2>&1
+adb shell cmd thermalservice override-status 0 <nul
+adb shell settings put global low_power 0 <nul
 if "%SDK%"=="" (
-    adb shell settings put global device_idle_constants inactive_to=300000 > nul 2>&1
+    adb shell settings put global device_idle_constants inactive_to=300000 <nul > nul 2>&1
 ) else if %SDK% GEQ 31 (
-    adb shell device_config put device_idle inactive_to 300000 > nul 2>&1
+    adb shell device_config put device_idle inactive_to 300000 <nul > nul 2>&1
 ) else (
-    adb shell settings put global device_idle_constants inactive_to=300000 > nul 2>&1
+    adb shell settings put global device_idle_constants inactive_to=300000 <nul > nul 2>&1
 )
-adb shell cmd power set-adaptive-power-saver-enabled false
-adb shell setprop debug.power_management_mode pref_max
-adb shell cmd shortcut reset-all-throttling > nul 2>&1
+adb shell cmd power set-adaptive-power-saver-enabled false <nul
+adb shell setprop debug.power_management_mode pref_max <nul
+adb shell cmd shortcut reset-all-throttling <nul > nul 2>&1
 :: FIX: 256mb log buffer in "performance" mode is counter-productive.
 :: A buffer that big stalls the system on flush. 1mb is sufficient.
-adb shell logcat -G 1mb
-adb shell setprop debug.rs.rsov 1
-adb shell setprop debug.rs.default-CPU-driver 0
-adb shell setprop debug.renderengine.graphite true
-adb shell setprop debug.hwc.hdr_nbm_enable 0
+adb shell logcat -G 1mb <nul
+adb shell setprop debug.rs.rsov 1 <nul
+adb shell setprop debug.rs.default-CPU-driver 0 <nul
+adb shell setprop debug.renderengine.graphite true <nul
+adb shell setprop debug.hwc.hdr_nbm_enable 0 <nul
 :: FIX: removed debug.choreographer.vsync false  - disabling vsync
 :: causes screen tearing and breaks frame pacing. Not a real
 :: performance improvement; modern GPUs need vsync for stability.
-adb shell setprop debug.sqlite.journalmode OFF
-adb shell setprop debug.sqlite.syncmode OFF
-adb shell setprop debug.sqlite.journalsizelimit 1mb
-adb shell setprop debug.sqlite.wal.syncmode OFF
-adb shell setprop debug.hwui.disable_draw_defer true
-adb shell setprop debug.hwui.disable_draw_reorder false
-adb shell setprop debug.sf.disable_client_composition_cache 1
-adb shell setprop debug.hwui.initialize_gl_always true
-adb shell setprop debug.sf.drop_missed_frames 1
-adb shell setprop debug.sf.allowed_actual_deviation 0
-adb shell setprop debug.hwui.render_dirty_regions false
-adb shell setprop debug.hwc.flattenning_enabled false
-adb shell setprop debug.hwc.test_plan false
+adb shell setprop debug.sqlite.journalmode OFF <nul
+adb shell setprop debug.sqlite.syncmode OFF <nul
+adb shell setprop debug.sqlite.journalsizelimit 1mb <nul
+adb shell setprop debug.sqlite.wal.syncmode OFF <nul
+adb shell setprop debug.hwui.disable_draw_defer true <nul
+adb shell setprop debug.hwui.disable_draw_reorder false <nul
+adb shell setprop debug.sf.disable_client_composition_cache 1 <nul
+adb shell setprop debug.hwui.initialize_gl_always true <nul
+adb shell setprop debug.sf.drop_missed_frames 1 <nul
+adb shell setprop debug.sf.allowed_actual_deviation 0 <nul
+adb shell setprop debug.hwui.render_dirty_regions false <nul
+adb shell setprop debug.hwc.flattenning_enabled false <nul
+adb shell setprop debug.hwc.test_plan false <nul
 :: FIX: removed debug.hwui.disable_vsync true - same reason as above.
-adb shell setprop debug.incremental.always_enable_read_timeouts_for_system_dataloaders false
-adb shell setprop debug.incremental.enable_read_timeouts_after_install false
-adb shell setprop debug.sf.treat_170m_as_sRGB 0
-adb shell setprop debug.sf.fp16_client_target 1
-adb shell setprop debug.soundtrigger_middleware.use_mock_hal 0
-adb shell setprop debug.extractor.ignore_version false
-adb shell setprop debug.art.monitor.app false
-adb shell setprop debug.sf.vrr_timeout_hint_enabled false
-adb shell setprop debug.sf.enable_hole_punch_pip false
-adb shell setprop debug.hwc.force_gpu 1
-adb shell setprop debug.sf.framedrop 0
-adb shell setprop debug.hwui.clip_surfaceviews true
-adb shell setprop debug.hwui.resample_gainmap_regions false
-adb shell setprop debug.egl.blobcache.multifile true
-adb shell setprop debug.egl.blobcache.multifile_limit 16777216
-adb shell setprop debug.sf.enable_layer_command_batching 1
-adb shell setprop debug.sf.use_content_detection_v2 false
-adb shell setprop debug.adpf.use_report_actual_duration false
-adb shell setprop debug.sf.hint_margin_us 550
-adb shell setprop debug.sf.cached_set_max_defer_render_attmpts 2
-adb shell setprop debug.sf.layer_caching_active_layer_timeout_ms 1200
-adb shell setprop debug.sf.cache_source_crop_only_moved true
-adb shell setprop debug.sf.multithreaded_present 1
-adb shell setprop debug.sf.hwc_hdcp_via_neg_vsync false
-adb shell setprop debug.sf.enable_layer_lifecycle_manager false
-adb shell setprop debug.sf.send_early_power_session_hint true
-adb shell setprop debug.sf.send_late_power_session_hint false
-adb shell setprop debug.sf.hwc.min.duration 0
-adb shell setprop debug.sf.use_frame_rate_priority 1
-adb shell setprop debug.sf.enable_cached_set_render_scheduling true
-adb shell setprop debug.sf.enable_layer_caching 0
-adb shell setprop debug.sf.max_igbp_list_size 7
-adb shell setprop debug.hwc.fakevsync 0
-adb shell setprop debug.enable.sglscale 1
-adb shell setprop debug.enable.gamed 1
-adb shell setprop debug.enabletr true
-adb shell setprop debug.sf.enable_adpf_cpu_hint true
-adb shell setprop debug.rs.precision rs_fp_full
-adb shell setprop debug.hwui.high_performance_mode true
-adb shell settings put system multicore_packet_scheduler 1
-adb shell settings put global sem_enhanced_cpu_responsiveness 1
-adb shell settings put global activity_manager_constants max_cached_processes=12,power_check_interval=80000,power_check_max_cpu_1=85,power_check_max_cpu_2=85,power_check_max_cpu_3=60,power_check_max_cpu_4=15
-adb shell setprop debug.cpurend.vsync false
-adb shell setprop debug.sf.hw 1
-adb shell setprop debug.rs.max-threads 8
-adb shell setprop debug.sf.vsync_reactor_ignore_present_fences true
-adb shell setprop debug.sf.disable_hwc_vds 1
-adb shell setprop debug.sf.enable_hwc_vds false
-adb shell setprop debug.hwui.target_cpu_time_percent 35
-adb shell setprop debug.egl.hw 1
-adb shell setprop debug.rs.reduce-split-accum 1
-adb shell setprop debug.choreographer.skipwarning 16500000
-adb shell setprop debug.sf.luma_sampling 0
-adb shell setprop debug.gr.numframebuffers 3
-adb shell setprop debug.hwui.skip_empty_damage true
-adb shell setprop debug.composition.type dyn
-adb shell setprop debug.hwui.use_buffer_age true
-adb shell setprop debug.hwui.use_partial_updates true
-adb shell setprop debug.egl.swapinterval 0
-adb shell setprop debug.gralloc.map_fb_memory 1
-adb shell setprop debug.gralloc.enable_fb_ubwc 1
-adb shell setprop debug.sf.swaprect 1
-adb shell setprop debug.hwui.filter_test_overhead false
-adb shell setprop debug.hwui.fps_divisor 1
-adb shell setprop debug.graphics.game_default_frame_rate.disabled true
-adb shell setprop debug.sf.latch_unsignaled 1
-adb shell setprop debug.sf.auto_latch_unsignaled true
-adb shell setprop debug.sf.disable_backpressure 1
-adb shell setprop debug.sf.enable_advanced_sf_phase_offset 1
-adb shell setprop debug.gralloc.gfx_ubwc_disable 0
-adb shell setprop debug.hwc.bq_count 3
-adb shell setprop debug.hwc.compose_level 0
-adb shell setprop debug.hwui.use_hint_manager true
-adb shell setprop debug.hwui.render_ahead 3
-adb shell setprop debug.sf.enable_gl_backpressure 0
-adb shell setprop debug.sf.vsync_reactor_ignore_present_fences true
-adb shell setprop debug.sf.set_idle_timer_ms 3500
-adb shell setprop debug.sf.frame_rate_multiple_threshold 120
-adb shell setprop debug.sf.use_phase_offsets_as_durations 0
-adb shell setprop debug.c2.use_dmabufheaps 1
-adb shell setprop debug.sf.prime_shader_cache.image_layers true
-adb shell setprop debug.sf.prime_shader_cache.solid_layers true
-adb shell setprop debug.mdpcomp.idletime 5000
-adb shell setprop debug.mdpcomp.maxpermixer 3
-adb shell device_config put runtime_native_boot iorap_readahead_enable true
-adb shell setprop debug.media.c2.large.audio.frame false
+adb shell setprop debug.incremental.always_enable_read_timeouts_for_system_dataloaders false <nul
+adb shell setprop debug.incremental.enable_read_timeouts_after_install false <nul
+adb shell setprop debug.sf.treat_170m_as_sRGB 0 <nul
+adb shell setprop debug.sf.fp16_client_target 1 <nul
+adb shell setprop debug.soundtrigger_middleware.use_mock_hal 0 <nul
+adb shell setprop debug.extractor.ignore_version false <nul
+adb shell setprop debug.art.monitor.app false <nul
+adb shell setprop debug.sf.vrr_timeout_hint_enabled false <nul
+adb shell setprop debug.sf.enable_hole_punch_pip false <nul
+adb shell setprop debug.hwc.force_gpu 1 <nul
+adb shell setprop debug.sf.framedrop 0 <nul
+adb shell setprop debug.hwui.clip_surfaceviews true <nul
+adb shell setprop debug.hwui.resample_gainmap_regions false <nul
+adb shell setprop debug.egl.blobcache.multifile true <nul
+adb shell setprop debug.egl.blobcache.multifile_limit 16777216 <nul
+adb shell setprop debug.sf.enable_layer_command_batching 1 <nul
+adb shell setprop debug.sf.use_content_detection_v2 false <nul
+adb shell setprop debug.adpf.use_report_actual_duration false <nul
+adb shell setprop debug.sf.hint_margin_us 550 <nul
+adb shell setprop debug.sf.cached_set_max_defer_render_attmpts 2 <nul
+adb shell setprop debug.sf.layer_caching_active_layer_timeout_ms 1200 <nul
+adb shell setprop debug.sf.cache_source_crop_only_moved true <nul
+adb shell setprop debug.sf.multithreaded_present 1 <nul
+adb shell setprop debug.sf.hwc_hdcp_via_neg_vsync false <nul
+adb shell setprop debug.sf.enable_layer_lifecycle_manager false <nul
+adb shell setprop debug.sf.send_early_power_session_hint true <nul
+adb shell setprop debug.sf.send_late_power_session_hint false <nul
+adb shell setprop debug.sf.hwc.min.duration 0 <nul
+adb shell setprop debug.sf.use_frame_rate_priority 1 <nul
+adb shell setprop debug.sf.enable_cached_set_render_scheduling true <nul
+adb shell setprop debug.sf.enable_layer_caching 0 <nul
+adb shell setprop debug.sf.max_igbp_list_size 7 <nul
+adb shell setprop debug.hwc.fakevsync 0 <nul
+adb shell setprop debug.enable.sglscale 1 <nul
+adb shell setprop debug.enable.gamed 1 <nul
+adb shell setprop debug.enabletr true <nul
+adb shell setprop debug.sf.enable_adpf_cpu_hint true <nul
+adb shell setprop debug.rs.precision rs_fp_full <nul
+adb shell setprop debug.hwui.high_performance_mode true <nul
+adb shell settings put system multicore_packet_scheduler 1 <nul
+adb shell settings put global sem_enhanced_cpu_responsiveness 1 <nul
+adb shell settings put global activity_manager_constants max_cached_processes=12,power_check_interval=80000,power_check_max_cpu_1=85,power_check_max_cpu_2=85,power_check_max_cpu_3=60,power_check_max_cpu_4=15 <nul
+adb shell setprop debug.cpurend.vsync false <nul
+adb shell setprop debug.sf.hw 1 <nul
+adb shell setprop debug.rs.max-threads 8 <nul
+adb shell setprop debug.sf.vsync_reactor_ignore_present_fences true <nul
+adb shell setprop debug.sf.disable_hwc_vds 1 <nul
+adb shell setprop debug.sf.enable_hwc_vds false <nul
+adb shell setprop debug.hwui.target_cpu_time_percent 35 <nul
+adb shell setprop debug.egl.hw 1 <nul
+adb shell setprop debug.rs.reduce-split-accum 1 <nul
+adb shell setprop debug.choreographer.skipwarning 16500000 <nul
+adb shell setprop debug.sf.luma_sampling 0 <nul
+adb shell setprop debug.gr.numframebuffers 3 <nul
+adb shell setprop debug.hwui.skip_empty_damage true <nul
+adb shell setprop debug.composition.type dyn <nul
+adb shell setprop debug.hwui.use_buffer_age true <nul
+adb shell setprop debug.hwui.use_partial_updates true <nul
+adb shell setprop debug.egl.swapinterval 0 <nul
+adb shell setprop debug.gralloc.map_fb_memory 1 <nul
+adb shell setprop debug.gralloc.enable_fb_ubwc 1 <nul
+adb shell setprop debug.sf.swaprect 1 <nul
+adb shell setprop debug.hwui.filter_test_overhead false <nul
+adb shell setprop debug.hwui.fps_divisor 1 <nul
+adb shell setprop debug.graphics.game_default_frame_rate.disabled true <nul
+adb shell setprop debug.sf.latch_unsignaled 1 <nul
+adb shell setprop debug.sf.auto_latch_unsignaled true <nul
+adb shell setprop debug.sf.disable_backpressure 1 <nul
+adb shell setprop debug.sf.enable_advanced_sf_phase_offset 1 <nul
+adb shell setprop debug.gralloc.gfx_ubwc_disable 0 <nul
+adb shell setprop debug.hwc.bq_count 3 <nul
+adb shell setprop debug.hwc.compose_level 0 <nul
+adb shell setprop debug.hwui.use_hint_manager true <nul
+adb shell setprop debug.hwui.render_ahead 3 <nul
+adb shell setprop debug.sf.enable_gl_backpressure 0 <nul
+adb shell setprop debug.sf.vsync_reactor_ignore_present_fences true <nul
+adb shell setprop debug.sf.set_idle_timer_ms 3500 <nul
+adb shell setprop debug.sf.frame_rate_multiple_threshold 120 <nul
+adb shell setprop debug.sf.use_phase_offsets_as_durations 0 <nul
+adb shell setprop debug.c2.use_dmabufheaps 1 <nul
+adb shell setprop debug.sf.prime_shader_cache.image_layers true <nul
+adb shell setprop debug.sf.prime_shader_cache.solid_layers true <nul
+adb shell setprop debug.mdpcomp.idletime 5000 <nul
+adb shell setprop debug.mdpcomp.maxpermixer 3 <nul
+adb shell device_config put runtime_native_boot iorap_readahead_enable true <nul
+adb shell setprop debug.media.c2.large.audio.frame false <nul
 ::this device config from google, i don't try do any gimmick device config here, source : https://cs.android.com/search?q=surface_flinger_native_boot&sq=
-adb shell device_config put surface_flinger_native_boot max_frame_buffer_acquired_buffers 3
-adb shell device_config put surface_flinger_native_boot adpf_cpu_hint true
+adb shell device_config put surface_flinger_native_boot max_frame_buffer_acquired_buffers 3 <nul
+adb shell device_config put surface_flinger_native_boot adpf_cpu_hint true <nul
 ::this device config from google, i don't try do any gimmick device config here, source : https://cs.android.com/search?q=surface_flinger_native_boot&sq=
 :: FIX: set an ABSOLUTE target so repeating "On" is idempotent. The old
 :: code did `current+10` every run (unbounded growth on repeated toggles)
@@ -5211,8 +5421,8 @@ adb shell device_config put surface_flinger_native_boot adpf_cpu_hint true
 :: "Off" now deletes the key to truly revert (see :offperf).
 echo storage_native_boot/target_dirty_ratio : 35
 echo storage_native_boot/target_dirty_background_ratio : 5
-adb shell device_config put storage_native_boot target_dirty_ratio 35
-adb shell device_config put storage_native_boot target_dirty_background_ratio 5
+adb shell device_config put storage_native_boot target_dirty_ratio 35 <nul
+adb shell device_config put storage_native_boot target_dirty_background_ratio 5 <nul
 
 echo Press Any Button To Go Back
 pause > nul
@@ -5263,7 +5473,11 @@ if errorlevel 1 (
 )
 adb shell cmd appops set %pkg% RUN_IN_BACKGROUND deny <nul
 echo.
-echo Done - %pkg% is now denied background execution.
+set "_ao="
+for /f "delims=" %%i in ('adb shell cmd appops get %pkg% RUN_IN_BACKGROUND 2^>nul ^<nul') do set "_ao=%%i"
+echo  Device reports: !_ao!
+echo(!_ao!| findstr /I /C:"deny" >nul
+if errorlevel 1 (echo [%r%^^!%w%] Restrict may not have landed.) else (echo [%g%+%w%] Background denied for %pkg%.)
 pause >nul
 goto appmgr
 
@@ -5283,7 +5497,11 @@ if errorlevel 1 (
 )
 adb shell cmd appops set %pkg% RUN_IN_BACKGROUND allow <nul
 echo.
-echo Done - %pkg% may run in the background again.
+set "_ao="
+for /f "delims=" %%i in ('adb shell cmd appops get %pkg% RUN_IN_BACKGROUND 2^>nul ^<nul') do set "_ao=%%i"
+echo  Device reports: !_ao!
+echo(!_ao!| findstr /I /C:"allow" >nul
+if errorlevel 1 (echo [%r%^^!%w%] Allow may not have landed.) else (echo [%g%+%w%] Background allowed for %pkg%.)
 pause >nul
 goto appmgr
 :: ===================================================================
@@ -5340,7 +5558,13 @@ set "pkg=" & set /p pkg="Package name to restore (blank = cancel) >> "
 if "!pkg!"=="" goto appmgr
 adb shell cmd package install-existing %pkg% <nul
 echo.
-echo If it was present, %pkg% is restored for the current user.
+adb shell pm list packages 2>nul <nul | findstr /C:"package:%pkg%" >nul
+if errorlevel 1 (
+    echo [%r%^^!%w%] Restore did not land - "%pkg%" is not installed for this user.
+    echo      It may never have been a system/preloaded package, or the APK is gone.
+) else (
+    echo [%g%+%w%] %pkg% is present for the current user.
+)
 pause >nul
 goto appmgr
 :: ===================================================================
@@ -5461,7 +5685,7 @@ if errorlevel 2 goto appmgr_suggest
 echo.
 for %%p in (%_found%) do (
     echo Removing %%p ...
-    adb shell pm uninstall -k --user 0 %%p
+    adb shell pm uninstall -k --user 0 %%p <nul
 )
 echo.
 echo Done.
@@ -5501,8 +5725,9 @@ echo    %g%[%w%9%g%]%w% Long-press timeout
 echo    %g%[%w%10%g%]%w% Stay awake while charging
 echo    %g%[%w%11%g%]%w% Night - dark theme / night light
 echo    %g%[%w%12%g%]%w% More device tweaks
+echo    %g%[%w%13%g%]%w% DeviceConfig server sync (advanced)
 echo.
-echo    %g%[%w%13%g%]%w% Back to main menu
+echo    %g%[%w%14%g%]%w% Back to main menu
 set "tw=" & set /p tw="Choose An Option >> "
 if not defined tw goto tweaks
 if "!tw!"=="1" goto tw_clock
@@ -5517,8 +5742,46 @@ if "!tw!"=="9" goto tw_lpt
 if "!tw!"=="10" goto tw_stay
 if "!tw!"=="11" goto tw_night
 if "!tw!"=="12" goto tw_more
-if "!tw!"=="13" goto menu
+if "!tw!"=="13" goto tw_dcfgsync
+if "!tw!"=="14" goto menu
 goto tweaks
+
+:tw_dcfgsync
+cls
+title DeviceConfig Server Sync
+call :logo
+call :_dcfg_warn
+echo.
+set "DCS="
+for /f "delims=" %%i in ('adb shell device_config get_sync_disabled_for_tests 2^>nul ^<nul') do set "DCS=%%i"
+if "!DCS!"=="" set "DCS=null"
+set "DCS=!DCS:"=!"
+echo  device_config get_sync_disabled_for_tests = "!DCS!"
+echo.
+echo  This is NOT Google/account sync. It freezes remote DeviceConfig flag
+echo  updates from the server ^(OEM/feature flags^). "persistent" survives
+echo  reboot until you set it back to none. Was previously buried inside
+echo  Battery - Logs Off, which froze sync as a silent side effect.
+echo.
+echo    %g%[%w%1%g%]%w% Allow sync (none) - default / undo
+echo    %g%[%w%2%g%]%w% Disable until reboot (until_reboot)
+echo    %g%[%w%3%g%]%w% Disable permanently (persistent)
+echo    %g%[%w%4%g%]%w% Back
+set "dc=" & set /p dc="Choose An Option >> "
+if not defined dc goto tw_dcfgsync
+if "!dc!"=="1" (adb shell device_config set_sync_disabled_for_tests none <nul >nul 2>&1 & goto tw_dcfgsync)
+if "!dc!"=="2" (adb shell device_config set_sync_disabled_for_tests until_reboot <nul >nul 2>&1 & goto tw_dcfgsync)
+if "!dc!"=="3" (
+    echo.
+    echo  %y%Warning:%w% persistent stays frozen across reboot until you pick [1].
+    echo    [Y] Freeze DeviceConfig sync permanently    [N] Cancel
+    choice /c:YN /n >nul
+    if errorlevel 2 goto tw_dcfgsync
+    adb shell device_config set_sync_disabled_for_tests persistent <nul >nul 2>&1
+    goto tw_dcfgsync
+)
+if "!dc!"=="4" goto tweaks
+goto tw_dcfgsync
 
 :tw_clock
 cls
@@ -6524,7 +6787,11 @@ echo.
 :: because a profile is a file the user can hand-edit.
 for /f "usebackq eol=# tokens=1-3 delims=|" %%a in ("!PROFF!") do call :_tw_prof_apply1 "%%a" "%%b" "%%c"
 echo.
-echo  Done. Undo script: %EXP_UNDO%
+if defined EXP_UNDO (
+    echo  Done. Undo script: %EXP_UNDO%
+) else (
+    echo  Done. ^(No writes landed - nothing to undo.^)
+)
 echo  Press any key . . .
 pause >nul
 goto tw_profile
@@ -6551,9 +6818,11 @@ echo(!PKEY!| findstr /r /x /c:"[a-zA-Z0-9_.-][a-zA-Z0-9_.-]*" >nul || goto _tw_p
 if /i "!PVAL!"=="DELETE" goto _tw_pa_del
 if not defined PVAL goto _tw_pa_badval
 call :_tw_safechk PVAL || goto _tw_pa_badval
-echo(!PVAL!| findstr /r /x /c:"[a-zA-Z0-9_.,:/=+-][a-zA-Z0-9_.,:/=+-]*" >nul || goto _tw_pa_badval
+:: FIX: allow () so sysui_qs_tiles custom(...) values round-trip; quote for adb.
+echo(!PVAL!| findstr /r /x /c:"[a-zA-Z0-9_.,:/=+()-][a-zA-Z0-9_.,:/=+()-]*" >nul || goto _tw_pa_badval
 call :_tw_undo_add !PNS! !PKEY!
-adb shell settings put !PNS! !PKEY! !PVAL! <nul >nul
+set "_sv=!PVAL:'='\''!"
+adb shell "settings put !PNS! !PKEY! '!_sv!'" <nul >nul
 echo    put    !PNS! !PKEY! = !PVAL!
 exit /b
 :_tw_pa_del
@@ -6683,17 +6952,17 @@ goto tw_qs_addgo
 call :_tw_undo_add secure sysui_qs_tiles
 :: Same rebuild-not-append shape as the icon blacklist: drop the spec first
 :: so adding an existing tile moves it rather than duplicating it.
+:: FIX: OEM lists often hold custom(pkg/cls) tokens. A bare
+:: `for %%t in (!QSCUR!)` treats those parentheses as block syntax and
+:: aborts or corrupts the list - tokenize paren-aware via :_tw_qs_enum.
 set "QSNEW="
 if "!QSCUR!"=="null" goto _tw_qs_addput
-for %%t in (!QSCUR!) do (
-    set "QSHIT="
-    for %%u in (!QSTOK!) do if /i "%%t"=="%%u" set "QSHIT=1"
-    if not defined QSHIT set "QSNEW=!QSNEW!,%%t"
-)
+call :_tw_qs_enum
+call :_tw_qs_rebuild_skip
 :_tw_qs_addput
 if /i "!QSPOS!"=="front" (set "QSNEW=,!QSTOK!!QSNEW!") else (set "QSNEW=!QSNEW!,!QSTOK!")
 set "QSNEW=!QSNEW:~1!"
-adb shell settings put secure sysui_qs_tiles !QSNEW! <nul
+call :_tw_qs_put
 goto tw_qs
 
 :tw_qs_del
@@ -6702,14 +6971,10 @@ title Quick Settings Tiles : remove
 call :logo
 echo.
 if "!QSCUR!"=="null" goto tw_qs_empty
-for /f "delims==" %%v in ('set QST_ 2^>nul') do set "%%v="
-set "QSN=0"
+call :_tw_qs_enum
+if "!QSN!"=="0" goto tw_qs_empty
 echo  Current tiles, in display order:
-for %%t in (!QSCUR!) do (
-    set /a QSN+=1
-    set "QST_!QSN!=%%t"
-    echo     %g%[%w%!QSN!%g%]%w% %%t
-)
+for /l %%i in (1,1,!QSN!) do echo     %g%[%w%%%i%g%]%w% !QST_%%i!
 echo     %g%[%w%0%g%]%w% Back
 set "QSPICK=" & set /p QSPICK="Remove which? >> "
 if not defined QSPICK goto tw_qs_del
@@ -6719,14 +6984,46 @@ set "QSTOK="
 if defined QST_!QSPICK! for /f "delims=" %%v in ("!QSPICK!") do set "QSTOK=!QST_%%v!"
 if not defined QSTOK goto tw_qs_del
 call :_tw_undo_add secure sysui_qs_tiles
-set "QSNEW="
-for %%t in (!QSCUR!) do if not "%%t"=="!QSTOK!" set "QSNEW=!QSNEW!,%%t"
+call :_tw_qs_rebuild_skip
 :: An empty list is not a valid value - SystemUI would fall back anyway, so
 :: removing the last tile is expressed honestly as a reset.
 if not defined QSNEW goto tw_qs_reset
 set "QSNEW=!QSNEW:~1!"
-adb shell settings put secure sysui_qs_tiles !QSNEW! <nul
+call :_tw_qs_put
 goto tw_qs
+
+:_tw_qs_enum
+:: Split QSCUR into QST_1..QST_n on commas that are NOT inside (...).
+:: Needed because Huawei/OEM lists embed custom(component/class) tokens.
+for /f "delims==" %%v in ('set QST_ 2^>nul') do set "%%v="
+set "QSN=0"
+if not defined QSCUR exit /b
+if /i "!QSCUR!"=="null" exit /b
+set "_qs_tmp=%TEMP%\dcx_qs_tokens.txt"
+powershell -NoProfile -Command "$s=$env:QSCUR; if([string]::IsNullOrEmpty($s)){exit 0}; $d=0; $c=''; $l=New-Object System.Collections.Generic.List[string]; foreach($ch in $s.ToCharArray()){ if($ch -eq [char]'('){$d++} elseif($ch -eq [char]')'){$d--} elseif($ch -eq [char]',' -and $d -eq 0){ [void]$l.Add($c); $c=''; continue }; $c+=$ch }; if($c.Length -gt 0){[void]$l.Add($c)}; $l | Set-Content -LiteralPath $env:_qs_tmp -Encoding ascii"
+if not exist "%_qs_tmp%" exit /b
+for /f "usebackq delims=" %%t in ("%_qs_tmp%") do (
+    set /a QSN+=1
+    set "QST_!QSN!=%%t"
+)
+del "%_qs_tmp%" >nul 2>&1
+exit /b
+
+:_tw_qs_rebuild_skip
+:: Build QSNEW=,tok,tok from QST_* skipping any token equal to QSTOK.
+set "QSNEW="
+for /l %%i in (1,1,!QSN!) do (
+    set "QSHIT="
+    if defined QSTOK if /i "!QST_%%i!"=="!QSTOK!" set "QSHIT=1"
+    if not defined QSHIT set "QSNEW=!QSNEW!,!QST_%%i!"
+)
+exit /b
+
+:_tw_qs_put
+:: Write QSNEW with device-shell single-quoting so custom(...) survives adb.
+set "_sv=!QSNEW:'='\''!"
+adb shell "settings put secure sysui_qs_tiles '!_sv!'" <nul
+exit /b
 
 :tw_qs_empty
 echo  The device is on its default list - nothing to remove yet.
@@ -7039,6 +7336,54 @@ goto tw_inst
 :: analogue, so they earn their own top-level entry rather than
 :: sitting three levels down.
 :: ===================================================================
+:tw_watch
+cls
+title Watch settings key
+call :logo
+echo.
+echo  Poll one settings key while you flip a toggle on the phone.
+echo  Faster than snapshot/diff when you already know the namespace.
+echo  Press %g%Q%w% to stop. Auto-stops when the value changes.
+echo.
+call :_tw_askns
+if not defined EXP_NS goto settools
+call :_tw_askkey
+if not defined EXP_KEY goto settools
+set "WATCH_NS=!EXP_NS!"
+set "WATCH_KEY=!EXP_KEY!"
+set "WATCH_PREV="
+for /f "delims=" %%i in ('adb shell settings get !WATCH_NS! !WATCH_KEY! 2^>nul ^<nul') do set "WATCH_PREV=%%i"
+if "!WATCH_PREV!"=="" set "WATCH_PREV=null"
+set "WATCH_PREV=!WATCH_PREV:"=!"
+echo.
+echo  Watching %g%!WATCH_NS!/!WATCH_KEY!%w%
+echo  Baseline: "!WATCH_PREV!"
+echo  Flip the toggle on the device now...
+echo.
+:_tw_watch_loop
+:: Q=quit (errorlevel 1), C=continue/timeout default (errorlevel 2+)
+choice /c:QC /n /t 1 /d C >nul
+if errorlevel 2 goto _tw_watch_poll
+echo  Stopped.
+pause >nul
+goto settools
+:_tw_watch_poll
+set "WATCH_NOW="
+for /f "delims=" %%i in ('adb shell settings get !WATCH_NS! !WATCH_KEY! 2^>nul ^<nul') do set "WATCH_NOW=%%i"
+if "!WATCH_NOW!"=="" set "WATCH_NOW=null"
+set "WATCH_NOW=!WATCH_NOW:"=!"
+if "!WATCH_NOW!"=="!WATCH_PREV!" goto _tw_watch_loop
+echo.
+echo  [%g%+%w%] Value changed:
+echo     was: "!WATCH_PREV!"
+echo     now: "!WATCH_NOW!"
+echo.
+echo  Namespace/key: !WATCH_NS! !WATCH_KEY!
+echo  Tip: save it into a Profile, or write it via Settings explorer.
+echo.
+pause >nul
+goto settools
+
 :settools
 cls
 title Settings Tools
@@ -7053,13 +7398,15 @@ echo.
 echo    %g%[%w%1%g%]%w% Settings explorer - list / get / put / delete
 echo    %g%[%w%2%g%]%w% Settings snapshot and diff
 echo    %g%[%w%3%g%]%w% Profiles - save / re-apply a set of keys
-echo    %g%[%w%4%g%]%w% Back to main menu
+echo    %g%[%w%4%g%]%w% Watch a key - poll while you flip a toggle
+echo    %g%[%w%5%g%]%w% Back to main menu
 set "sx=" & set /p sx="Choose An Option >> "
 if not defined sx goto settools
 if "!sx!"=="1" goto tw_explorer
 if "!sx!"=="2" goto tw_snapshot
 if "!sx!"=="3" goto tw_profile
-if "!sx!"=="4" goto menu
+if "!sx!"=="4" goto tw_watch
+if "!sx!"=="5" goto menu
 goto settools
 
 :logo
@@ -7125,8 +7472,8 @@ for %%C in (
     WM_DEBUG_TPL
     WM_DEBUG_EMBEDDED_WINDOWS
 ) do (
-    adb shell wm logging disable-text %%C > nul 2>&1
-    adb shell wm logging disable      %%C > nul 2>&1
+    adb shell wm logging disable-text %%C <nul > nul 2>&1
+    adb shell wm logging disable      %%C <nul > nul 2>&1
 )
 exit /b
 :: ===================================================================
@@ -7137,15 +7484,70 @@ exit /b
 :: identical occurrences).
 :: ===================================================================
 :dropbox_lowprio
-adb shell cmd dropbox add-low-priority system_server
-adb shell cmd dropbox add-low-priority system_server/Subject
-adb shell cmd dropbox add-low-priority data_app_wtf
-adb shell cmd dropbox add-low-priority storage_trim
-adb shell cmd dropbox add-low-priority SYSTEM_BOOT
-adb shell cmd dropbox add-low-priority SYSTEM_AUDIT
-adb shell cmd dropbox add-low-priority system_server_wtf
-adb shell cmd dropbox add-low-priority SYSTEM_LAST_KMSG
+adb shell cmd dropbox add-low-priority system_server <nul
+adb shell cmd dropbox add-low-priority system_server/Subject <nul
+adb shell cmd dropbox add-low-priority data_app_wtf <nul
+adb shell cmd dropbox add-low-priority storage_trim <nul
+adb shell cmd dropbox add-low-priority SYSTEM_BOOT <nul
+adb shell cmd dropbox add-low-priority SYSTEM_AUDIT <nul
+adb shell cmd dropbox add-low-priority system_server_wtf <nul
+adb shell cmd dropbox add-low-priority SYSTEM_LAST_KMSG <nul
 exit /b
+:: ===================================================================
+:: SHARED HELPER: :_settings_verify  ns  key  expected
+:: After a settings put/delete - read the key back and report honestly.
+:: expected = literal value, or DELETE (null/unset), or * (any set value).
+:: ===================================================================
+:_act_reset
+set "DCX_VOK=0" & set "DCX_VFAIL=0"
+exit /b
+
+:_act_summary
+if not defined DCX_VOK set "DCX_VOK=0"
+if not defined DCX_VFAIL set "DCX_VFAIL=0"
+echo.
+if "%DCX_VFAIL%"=="0" (
+    echo [%g%OK%w%] %DCX_VOK% check^(s^) passed.
+) else (
+    echo [%y%WARN%w%] %DCX_VOK% passed, %DCX_VFAIL% failed - see above.
+)
+exit /b
+
+:_settings_verify
+set "_sv_got="
+for /f "delims=" %%i in ('adb shell settings get %~1 %~2 2^>nul ^<nul') do set "_sv_got=%%i"
+if "!_sv_got!"=="" set "_sv_got=null"
+if /i "%~3"=="DELETE" (
+    if /i "!_sv_got!"=="null" (echo [%g%+%w%] %~2 deleted. & set /a DCX_VOK+=1 & exit /b 0)
+    echo [%r%^^!%w%] %~2 still reports "!_sv_got!" - delete may not have landed.
+    set /a DCX_VFAIL+=1
+    exit /b 1
+)
+if /i "%~3"=="*" (
+    if /i not "!_sv_got!"=="null" (echo [%g%+%w%] %~2 = "!_sv_got!" & set /a DCX_VOK+=1 & exit /b 0)
+    echo [%r%^^!%w%] %~2 did not stick ^(device reports null^).
+    set /a DCX_VFAIL+=1
+    exit /b 1
+)
+if "!_sv_got!"=="%~3" (echo [%g%+%w%] %~2 = "!_sv_got!" & set /a DCX_VOK+=1 & exit /b 0)
+echo [%r%^^!%w%] wanted %~2=%~3, device reports "!_sv_got!".
+set /a DCX_VFAIL+=1
+exit /b 1
+
+:: ===================================================================
+:: SHARED HELPER: :_dcfg_verify  namespace  key  expected
+:: Same idea for device_config get/put. On Android 14+ without root a
+:: put often returns cleanly but writes nothing - readback catches that.
+:: ===================================================================
+:_dcfg_verify
+set "_dv_got="
+for /f "delims=" %%i in ('adb shell device_config get %~1 %~2 2^>nul ^<nul') do set "_dv_got=%%i"
+if "!_dv_got!"=="" set "_dv_got=null"
+if "!_dv_got!"=="%~3" (echo [%g%+%w%] %~1/%~2 = "!_dv_got!" & set /a DCX_VOK+=1 & exit /b 0)
+echo [%r%^^!%w%] wanted %~1/%~2=%~3, device reports "!_dv_got!".
+set /a DCX_VFAIL+=1
+exit /b 1
+
 :: ===================================================================
 :: SHARED HELPER: dexopt_all_mode  <filter>  <heavy_flag>
 ::
@@ -7166,17 +7568,17 @@ exit /b
 if %SDK% GEQ 34 goto _dexall_art
 if "%~2"=="1" goto _dexall_heavy_legacy
 echo   [pm dexopt / API %SDK%] pm compile -a -f -m %~1
-adb shell pm compile -a -f -m %~1
+adb shell pm compile -a -f -m %~1 <nul
 exit /b
 
 :_dexall_heavy_legacy
 echo   [pm dexopt / API %SDK%] pm compile -a -f --check-prof false -m %~1
-adb shell pm compile -a -f --check-prof false -m %~1
+adb shell pm compile -a -f --check-prof false -m %~1 <nul
 exit /b
 
 :_dexall_art
 echo   [ART Service / API %SDK%] pm compile -m %~1 -f -a
-adb shell pm compile -m %~1 -f -a
+adb shell pm compile -m %~1 -f -a <nul
 exit /b
 :: ===================================================================
 :: SHARED HELPER: run_bgdexopt
@@ -7194,7 +7596,7 @@ exit /b
 if %SDK% LSS 34 goto _bgdex_legacy
 echo   [ART Service / API %SDK%] running background dexopt...
 echo   (this can take a while and processes every app - please wait)
-adb shell pm art dexopt-packages -r bg-dexopt > "%TEMP%\dcx_bgdex.txt" 2>&1
+adb shell pm art dexopt-packages -r bg-dexopt <nul > "%TEMP%\dcx_bgdex.txt" 2>&1
 :: If the command itself is unavailable, fall back to the legacy job.
 findstr /I /C:"Unknown command" /C:"Usage:" "%TEMP%\dcx_bgdex.txt" > nul && goto _bgdex_fallback
 :: ART Service prints one status line per package (often hundreds).
@@ -7225,11 +7627,11 @@ exit /b
 
 :_bgdex_fallback
 echo   pm art unavailable on this build - using pm bg-dexopt-job...
-adb shell pm bg-dexopt-job
+adb shell pm bg-dexopt-job <nul
 del "%TEMP%\dcx_bgdex.txt" > nul 2>&1
 exit /b
 
 :_bgdex_legacy
-adb shell pm bg-dexopt-job
+adb shell pm bg-dexopt-job <nul
 exit /b
 
