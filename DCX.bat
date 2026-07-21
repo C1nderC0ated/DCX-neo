@@ -369,6 +369,37 @@ goto menu
 ::   Reads the current value of a settings put/delete key. If null,
 ::   writes a `delete`; otherwise writes a `put` with the value.
 :: -------------------------------------------------------------------
+:: ===========================================================================
+:: _dcfg_warn - one-time honest warning about device_config writes on Android 14+.
+:: Per the AOSP change in Android 14 (API 34), "shell can no longer write most
+:: device_config flags by default - the CLI needs superuser privileges." So every
+:: "device_config put" DCX sends returns cleanly but writes NOTHING on 14+ without
+:: root, which would otherwise look like success. This helper says so once, and only
+:: when it actually applies (SDK>=34 AND no root). Reads (device_config get) are
+:: unaffected, so the readouts elsewhere stay truthful. Call it at the top of any menu
+:: that leans on device_config put.
+:_dcfg_warn
+if defined _DCFGWARNED goto :eof
+:: only relevant on Android 14+ (API 34). A non-numeric SDK skips the compare safely.
+set "_dcfg_hi="
+for /f "delims=0123456789" %%n in ("%SDK%") do set "_dcfg_hi=%%n"
+if defined _dcfg_hi goto :eof
+if %SDK% LSS 34 goto :eof
+:: SDK>=34: does the device have root? (device_config put works with su.)
+adb shell "su -c 'echo _DCXROOT'" <nul 2>nul | findstr /C:"_DCXROOT" >nul
+if not errorlevel 1 goto :eof
+:: SDK>=34 and no root -> warn once.
+set "_DCFGWARNED=1"
+echo.
+echo  %gold%Note (Android %SDK%):%w% since Android 14, changing hidden "device_config"
+echo  flags over ADB needs root. Without it these writes are accepted but may%w%
+echo  %gold%not actually stick%w% - the on-screen result can look done while nothing
+echo  changed. Values DCX only *reads* are still accurate.
+echo  For the app-hibernation case there is a no-root path: Developer Options ^>
+echo  %gold%Disable child process restrictions%w%.
+echo.
+goto :eof
+
 :_bk_settings
 :: FIX (robustness): enabledelayedexpansion + quote the value in the generated
 :: line. The old unquoted `%_val%` let a value containing a CMD metacharacter
@@ -2244,6 +2275,7 @@ echo                                     %gold%[%w%7%gold%]%w% App Hibernation (
 echo                                     %gold%[%w%8%gold%]%w% Account Sync Toggle
 echo                                     %gold%[%w%9%gold%]%w% Voice Hotword Toggle
 echo                                     %gold%[%w%A%gold%]%w% Wake-Lock Audit  (battery drain diagnostic)
+echo                                     %gold%[%w%B%gold%]%w% Toggle Finish Activities
 echo                                     %gold%[%w%0%gold%]%w% Back
 echo.
 echo.
@@ -2258,9 +2290,66 @@ if "!ksd!"=="7" goto apphibernation
 if "!ksd!"=="8" goto syncmaster
 if "!ksd!"=="9" goto hotwordtoggle
 if /i "!ksd!"=="A" goto wakelockaudit
+if /i "!ksd!"=="B" goto finishact
 if "!ksd!"=="0" goto Battery
 :: guard against invalid input
 goto nextpage
+:: ===================================================================
+:: Finish Activities  (always_finish_activities - developer setting)
+:: HONEST CAVEAT: documented global setting, but a well-known Android
+:: quirk means setting it over ADB flips the toggle and "settings get"
+:: reports the new value, yet on many builds it does NOT fully take
+:: effect the way manually toggling in Developer Options does. We apply
+:: it, read it back, and say so - same honesty as the device_config
+:: warning. Reversible (0 = off, the Android default).
+:finishact
+cls
+title Finish Activities
+call :logo
+echo.
+echo  Current:
+for /f "delims=" %%i in ('adb shell settings get global always_finish_activities 2^>nul ^<nul') do echo    always_finish_activities = %%i
+echo.
+echo  Destroys each activity as soon as you leave it. Can trim background
+echo  memory, at the cost of slower app resume.
+echo.
+echo                                     %gold%[%w%1%gold%]%w% Turn ON  (1)
+echo                                     %gold%[%w%2%gold%]%w% Turn OFF (0, default)
+echo                                     %gold%[%w%0%gold%]%w% Back
+echo.
+set "fa=" & set /p fa="Choose An Option >> "
+if "!fa!"=="1" goto finishact_on
+if "!fa!"=="2" goto finishact_off
+if "!fa!"=="0" goto nextpage
+goto finishact
+
+:finishact_on
+adb shell settings put global always_finish_activities 1 <nul
+call :_finishact_readback
+goto finishact_done
+
+:finishact_off
+adb shell settings put global always_finish_activities 0 <nul
+call :_finishact_readback
+goto finishact_done
+
+:_finishact_readback
+set "_fav="
+for /f "delims=" %%i in ('adb shell settings get global always_finish_activities 2^>nul ^<nul') do set "_fav=%%i"
+echo.
+echo   Device now reports: always_finish_activities = !_fav!
+echo   %gold%Note:%w% over ADB this flag reliably reports on/off, but on many builds it
+echo   may not fully engage the way toggling it in Developer Options does. If you
+echo   need it to truly take effect, set it there. Setting it back to 0 here always
+echo   restores the default.
+goto :eof
+
+:finishact_done
+echo.
+echo Press Any Button To Go Back
+pause > nul
+goto nextpage
+
 :: ===================================================================
 :: NEW: Wake-Lock Audit  (battery drain diagnostic)
 :: Wake locks prevent CPU/screen sleep. A misbehaving app holding a
@@ -2523,6 +2612,7 @@ if %SDK% LSS 31 (
 )
 
 :_aph_show
+call :_dcfg_warn
 echo.
 echo  Current:
 for /f "delims=" %%i in ('adb shell device_config get app_hibernation app_hibernation_enabled 2^>nul ^<nul') do echo    app_hibernation_enabled = %%i
@@ -3095,6 +3185,7 @@ adb shell setprop debug.sf.show_msync2_trace false
 ::debugprop from tecno pova 6 neo
 :skiplogv
 cls
+call :_dcfg_warn
 ::if something is wrong , revert this prop by reboot
 :: NEW: universal log silencer (real, persistent across reboots).
 :: This is what `persist.log.tag "*:S"` from the user's .sh actually
@@ -3425,6 +3516,7 @@ goto Battery
 :onlogss
 cls
 title Logs/etc : On
+call :_dcfg_warn
 :: NEW: revert universal log silencer
 adb shell setprop persist.log.tag "" > nul 2>&1
 adb shell setprop log.tag "" > nul 2>&1
@@ -3937,6 +4029,7 @@ goto Battery
 @echo off
 cls
 title Extreme Power Saver : On
+call :_dcfg_warn
 :: FIX: this ran BOTH "cmd battery reset" and "dumpsys battery reset" -
 :: two interfaces to the same operation (clears any fake-battery state so
 :: the saver reads the real battery). One call is enough; dumpsys is kept
@@ -4027,6 +4120,7 @@ goto toggleprofilling
 :offprof
 cls
 title Lock Profiling : Off
+call :_dcfg_warn
 adb shell device_config put runtime_native_boot disable_lock_profiling true <nul
 echo Done , Press Any Button To Go Back
 pause > nul
@@ -4035,6 +4129,7 @@ goto Battery
 :onprof
 cls
 title Lock Profiling : ON
+call :_dcfg_warn
 adb shell device_config put runtime_native_boot disable_lock_profiling false <nul
 echo Done , Press Any Button To Go Back
 pause > nul
@@ -4861,6 +4956,7 @@ goto Gaming
 @echo off
 cls
 title Low Settings
+call :_dcfg_warn
 set "package=" & set /p package="Put Your Package Name Here >> "
 if "!package!"=="" goto Gaming
 adb shell device_config put game_overlay %package% mode=1
@@ -4879,6 +4975,7 @@ goto Gaming
 @echo off
 cls
 title Medium Settings
+call :_dcfg_warn
 set "package=" & set /p package="Put Your Package Name Here >> "
 if "!package!"=="" goto Gaming
 adb shell device_config put game_overlay %package% mode=1
@@ -4972,6 +5069,7 @@ goto Gaming
 @echo off
 cls
 title Performance Mode : On
+call :_dcfg_warn
 echo.
 echo.
 echo [%r%^^!%w%] All Powersaving Is Disabled
