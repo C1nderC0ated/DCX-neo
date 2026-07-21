@@ -144,6 +144,7 @@ Page · Back.
 | 8 | **Account Sync Toggle** | Account auto-sync switch. Writes `master_sync_status`, which is **placebo on modern Android** — see [What works vs placebo](#what-actually-works-vs-placebo). |
 | 9 | **Voice Hotword Toggle** | Disable the always-on "Hey Google" pipeline. |
 | A | **Wake-Lock Audit** | Battery-drain diagnostic (below). |
+| B | **Toggle Finish Activities** | toggles `always_finish_activities` via ADB (many Android builds report the value correctly but only fully honor it when enabled through Developer Options). |
 | 0 | **Back** | — |
 
 **Wake-Lock Audit** collects the key battery dumps into one `%TEMP%` report —
