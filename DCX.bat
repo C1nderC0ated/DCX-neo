@@ -2701,7 +2701,12 @@ for %%b in (
     START_FOREGROUND
     WAKE_LOCK
 ) do (
-    adb shell cmd appops set %pkgv2% %%b ignore > nul 2>&1
+:: !pkgv2! (delayed): this is the only %pkgv2% sitting INSIDE a ( ) block (the
+:: for %%b ... do (...) loop). pkgv2 is typed by the user; a ")" in it would close the
+:: do-block early at parse time and break the script - the same class as the :Summary
+:: crash in sincript. Delayed expansion keeps the block structure intact. The bare
+:: %pkgv2% statements outside any block (below) are not a cmd-parse risk.
+    adb shell cmd appops set !pkgv2! %%b ignore > nul 2>&1
 )
 adb shell cmd activity service-restart-backoff disable %pkgv2%
 adb shell cmd activity set-bg-restriction-level --user 0 %pkgv2% hibernation
