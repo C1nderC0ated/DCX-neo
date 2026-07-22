@@ -40,6 +40,10 @@ if %errorlevel% neq 0 (
     pause > nul
     exit /b
 )
+:: Full path to the adb.exe DCX is actually using. Backup/undo .bat files live
+:: in %%USERPROFILE%%\dcx_backups - they do NOT see the local adb\ folder -
+:: so generators embed this path (and refresh dcx_adb_path.txt).
+call :_resolve_adb
 call :logo
 echo                         %m%DCX Developed By AnOrmaluser12, Updated By S1nt3r%d%
 echo                                    %r%Use It At Your Own Risk%w%
@@ -167,8 +171,8 @@ goto menu_ask
 :: ===================================================================
 :: NEW: Backup / Restore of toggleable settings
 ::
-:: Backup dumps current values of every Settings.Global / System key,
-:: device_config flag and system property that DCX can toggle, into
+:: Backup dumps current values of first-class Settings / device_config /
+:: props / wm overrides DCX toggles (not every Logs Off metric key), into
 :: a stand-alone .bat file in %USERPROFILE%\dcx_backups\. The format stays
 :: human-readable and you can edit it before restoring - deleting a line just
 :: skips that key. :restore `call`s it and then checks BOTH its exit code and
@@ -203,10 +207,8 @@ if /i not "%_dvst%"=="device" (
 )
 set "BACKUPDIR=%USERPROFILE%\dcx_backups"
 if not exist "%BACKUPDIR%" mkdir "%BACKUPDIR%"
-:: FIX: build the timestamp via PowerShell so it is locale-independent.
-:: The old %date%/%time% substring slicing assumed a US M/D/Y format and
-:: produced garbled or invalid filenames on other regional date formats.
-:: locale-safe, filename-safe timestamp (no PowerShell = no console code-page reset)
+:: Locale-safe, filename-safe timestamp from %date%/%time% (sanitize separators).
+:: Avoids PowerShell here so the console code page is not reset mid-run.
 set "TS=%date%_%time%"
 set "TS=%TS::=-%"
 set "TS=%TS:/=-%"
@@ -224,23 +226,51 @@ echo.
 :: It was previously '^^)', which inside this ( ... ) block collapses to a
 :: literal caret + an UNescaped ')' that closed the block early, aborting
 :: the whole backup with ". was unexpected at this time." (no file written).
+call :_bk_write_adb_boot "%BAKFILE%"
 (
-    echo @echo off
     echo :: DCX Settings Backup created %date% %time%
-    echo :: This file is a stand-alone restore script - run it with the
-    echo :: same device connected to revert to the captured state.
-    echo ::
-    echo :: You can also edit it (delete lines you don't want to restore^).
-    echo ::
-    echo :: Every restore line below goes through :dcx_do, which checks whether the
-    echo :: write actually landed and counts it. Deleting a line still just skips that
-    echo :: key - the count follows whatever is left.
+    echo :: Stand-alone restore - same device connected. Edit to skip keys.
+    echo :: Labels BEFORE :dcx_main so restore lines stay in :dcx_main.
+    echo :: Every restore line goes through :dcx_do ^(counts OK/FAIL^).
+    echo goto :dcx_main
     echo.
-    echo adb start-server ^>nul 2^>^&1
+    echo :dcx_do
+    echo :: Runs one restore command and records whether it landed. Uses %%ADB%%
+    echo :: from the header ^(not bare adb - this file is not next to adb\^).
+    echo "%%ADB%%" shell %%* ^>nul 2^>^&1
+    echo if errorlevel 1 ^(
+    echo     set /a DCX_FAIL+=1
+    echo     echo   [FAIL] %%*
+    echo ^) else ^(
+    echo     set /a DCX_OK+=1
+    echo ^)
+    echo goto :eof
+    echo.
+    echo :dcx_hold
+    echo if defined DCX_NOPAUSE exit /b 0
+    echo echo.
+    echo echo ----------------------------------------
+    echo echo Press any key to close this window . . .
+    echo pause
+    echo exit /b 0
+    echo.
+    echo :dcx_report
+    echo echo.
+    echo if "%%DCX_FAIL%%"=="0" ^(
+    echo     echo [OK] Restored %%DCX_OK%% settings, none failed.
+    echo ^) else ^(
+    echo     echo [WARN] %%DCX_OK%% restored, %%DCX_FAIL%% FAILED - listed above.
+    echo     echo        The device may be in a mixed state. Reconnect it and run this
+    echo     echo        file again - restoring twice is harmless.
+    echo ^)
+    echo echo.
+    echo call :dcx_hold
+    echo exit /b %%DCX_FAIL%%
+    echo.
+    echo :dcx_main
     echo echo Restoring DCX-managed settings...
     echo set "DCX_OK=0" ^& set "DCX_FAIL=0"
-    echo.
-) > "%BAKFILE%" < nul
+) >> "%BAKFILE%" < nul
 :: Helper macro for capturing settings (Settings.X namespace)
 :: We capture each key by reading current value and building the
 :: corresponding put or delete line.
@@ -287,48 +317,28 @@ call :_bk_settings global low_power_trigger_level    "%BAKFILE%"
 call :_bk_settings global default_install_location   "%BAKFILE%"
 call :_bk_settings global enable_freeform_support    "%BAKFILE%"
 call :_bk_settings global force_resizable_activities "%BAKFILE%"
+call :_bk_settings global zram_enabled               "%BAKFILE%"
+call :_bk_settings global wifi_scan_always_enabled   "%BAKFILE%"
+call :_bk_settings global bluetooth_scan_always_enabled "%BAKFILE%"
+call :_bk_settings global always_finish_activities   "%BAKFILE%"
+call :_bk_settings global package_verifier_enable    "%BAKFILE%"
+call :_bk_settings global low_power_sticky           "%BAKFILE%"
+call :_bk_settings global disable_window_blurs       "%BAKFILE%"
+call :_bk_settings global reduce_motion              "%BAKFILE%"
+call :_bk_settings secure reduce_motion              "%BAKFILE%"
+call :_bk_settings secure accessibility_disable_animations "%BAKFILE%"
+call :_bk_settings global enable_back_animation      "%BAKFILE%"
+call :_bk_settings global fancy_ime_animations       "%BAKFILE%"
+call :_bk_settings secure multi_press_timeout        "%BAKFILE%"
 call :_bk_devcfg   app_hibernation app_hibernation_enabled "%BAKFILE%"
 call :_bk_dcfgsync "%BAKFILE%"
+call :_bk_wm       "%BAKFILE%"
 call :_bk_prop     debug.hwui.renderer        "%BAKFILE%"
 call :_bk_prop     debug.renderengine.backend "%BAKFILE%"
 call :_bk_prop     persist.log.tag            "%BAKFILE%"
-:: FIX: the generated script used to end with a flat "Done. Press any key to close."
-:: no matter what happened. A restore is a long run of adb writes - pull the cable,
-:: drop wireless ADB, or let authorisation expire part-way and the remaining writes
-:: all no-op, yet it still said Done and the device was left half-restored with
-:: nothing to show for it. The footer below counts what actually landed and exits
-:: with the failure count, so both this file standalone AND :restore can tell.
-(
-    echo.
-    echo goto :dcx_report
-    echo.
-    echo :dcx_do
-    echo :: Runs one restore command and records whether it landed. adb exits non-zero
-    echo :: when the device is gone ^(the disconnect case^) and, on Android 7+, when the
-    echo :: command itself is rejected. Values are quoted by the generator, so a value
-    echo :: holding a cmd metacharacter cannot break out of this line.
-    echo adb shell %%* ^>nul 2^>^&1
-    echo if errorlevel 1 ^(
-    echo     set /a DCX_FAIL+=1
-    echo     echo   [FAIL] %%*
-    echo ^) else ^(
-    echo     set /a DCX_OK+=1
-    echo ^)
-    echo goto :eof
-    echo.
-    echo :dcx_report
-    echo echo.
-    echo if "%%DCX_FAIL%%"=="0" ^(
-    echo     echo [OK] Restored %%DCX_OK%% settings, none failed.
-    echo ^) else ^(
-    echo     echo [WARN] %%DCX_OK%% restored, %%DCX_FAIL%% FAILED - listed above.
-    echo     echo        The device may be in a mixed state. Reconnect it and run this
-    echo     echo        file again - restoring twice is harmless.
-    echo ^)
-    echo echo.
-    echo pause ^>nul
-    echo exit /b %%DCX_FAIL%%
-) >> "%BAKFILE%"
+:: Close :dcx_main with goto :dcx_report. Helpers (:dcx_do / :dcx_hold / :dcx_report)
+:: were written ABOVE :dcx_main so this append stays inside the restore body.
+>>"%BAKFILE%" echo goto :dcx_report
 :: FIX (safeguard): "Backup complete." used to print no matter what. The file is built
 :: by ~50 append redirections into %USERPROFILE%\dcx_backups - exactly the kind of path
 :: Controlled Folder Access and antivirus guard. When that happens every append no-ops
@@ -349,6 +359,18 @@ if "%_bkok%"=="0" (
     goto menu
 )
 echo  %g%Backup complete.%w%
+echo    !BAKFILE!
+>"%BACKUPDIR%\dcx_last_backup.txt" echo !BAKFILE!
+echo.
+if defined DCX_ADB (
+    echo  %y%Note:%w% restore .bat embeds adb path:
+    echo    !DCX_ADB!
+    echo  It will also try PATH / dcx_adb_path.txt. Double-clicking from
+    echo  Explorer does NOT use DCX's local adb\ folder automatically.
+) else (
+    echo  %y%Warning:%w% could not embed a full adb path. Put platform-tools on
+    echo  PATH before running the restore .bat outside DCX.
+)
 echo.
 echo  %b%[%w%1%b%]%w% Open backups folder in Explorer
 echo  %b%[%w%2%b%]%w% View this backup in Notepad
@@ -370,6 +392,92 @@ goto menu
 ::   Reads the current value of a settings put/delete key. If null,
 ::   writes a `delete`; otherwise writes a `put` with the value.
 :: -------------------------------------------------------------------
+:: ===========================================================================
+:: _resolve_adb / _bk_write_adb_boot
+:: Backup and undo .bat files are written to %%USERPROFILE%%\dcx_backups. DCX
+:: itself often runs after "cd adb", so bare "adb" works inside DCX but NOT when
+:: those scripts are double-clicked ^(cwd has no adb\ folder, PATH may be empty^).
+:: Capture the full adb.exe path and emit an explicit locator that fails loudly.
+:: ===========================================================================
+:_resolve_adb
+set "DCX_ADB="
+for /f "delims=" %%A in ('where adb 2^>nul') do (
+    set "DCX_ADB=%%~fA"
+    goto _resolve_adb_done
+)
+:_resolve_adb_done
+if not defined DCX_ADB for %%A in (adb.exe) do set "DCX_ADB=%%~fA"
+if defined DCX_ADB if not exist "!DCX_ADB!" set "DCX_ADB="
+set "_bd=%USERPROFILE%\dcx_backups"
+if not exist "%_bd%" mkdir "%_bd%"
+if defined DCX_ADB >"%_bd%\dcx_adb_path.txt" echo !DCX_ADB!
+exit /b 0
+
+:_bk_write_adb_boot
+:: %1 = outfile. Overwrites with @echo off + ADB resolve + start-server.
+:: Disable delayed expansion while echoing so "!ADB!" is not eaten by DCX.
+:: Scripts accept /nopause so DCX can call them without the child holding/closing
+:: the shared console session.
+setlocal DisableDelayedExpansion
+set "OUT=%~1"
+set "BAKED=%DCX_ADB%"
+(
+    echo @echo off
+    echo setlocal
+    echo :: DCX-generated restore/undo. Stored under dcx_backups - NOT next to adb\.
+    echo :: Pass /nopause when launched from DCX so control returns to the menu.
+    echo set "DCX_NOPAUSE="
+    echo if /i "%%~1"=="/nopause" set "DCX_NOPAUSE=1"
+    echo set "ADB="
+    if defined BAKED echo if exist "%BAKED%" set "ADB=%BAKED%"
+    echo if not defined ADB if exist "%%~dp0dcx_adb_path.txt" ^(
+    echo   set /p ADB=^<"%%~dp0dcx_adb_path.txt"
+    echo ^)
+    echo if defined ADB if not exist "%%ADB%%" set "ADB="
+    echo if not defined ADB ^(
+    echo   where adb ^> "%%TEMP%%\dcx_where_adb.txt" 2^>nul
+    echo   set /p ADB=^<"%%TEMP%%\dcx_where_adb.txt"
+    echo ^)
+    echo if defined ADB if not exist "%%ADB%%" set "ADB="
+    echo if not defined ADB ^(
+    echo   echo [ERROR] adb.exe not found.
+    echo   echo   This script lives in %%USERPROFILE%%\dcx_backups and does not see
+    echo   echo   the adb\ folder next to DCX.bat. Fix one of:
+    echo   echo     [1] Add platform-tools to PATH
+    echo   echo     [2] Re-run Backup / a Tweaks write from DCX - embeds adb path
+    echo   echo     [3] Edit set ADB= near the top of this file
+    echo   call :dcx_hold
+    echo   exit /b 1
+    echo ^)
+    echo "%%ADB%%" version ^>nul 2^>^&1
+    echo if errorlevel 1 ^(
+    echo   echo [ERROR] Cannot run adb: "%%ADB%%"
+    echo   call :dcx_hold
+    echo   exit /b 1
+    echo ^)
+    echo echo Using adb: %%ADB%%
+    echo "%%ADB%%" start-server ^>nul 2^>^&1
+) > "%OUT%"
+endlocal
+exit /b 0
+
+:_bk_write_hold_footer
+:: Append :dcx_hold helper to %1 ^(shared by backup + undo generators^).
+setlocal DisableDelayedExpansion
+set "OUT=%~1"
+(
+    echo.
+    echo :dcx_hold
+    echo if defined DCX_NOPAUSE exit /b 0
+    echo echo.
+    echo echo ----------------------------------------
+    echo echo Press any key to close this window . . .
+    echo pause
+    echo exit /b 0
+) >> "%OUT%"
+endlocal
+exit /b 0
+
 :: ===========================================================================
 :: _dcfg_warn - one-time honest warning about device_config writes on Android 14+.
 :: Per the AOSP change in Android 14 (API 34), "shell can no longer write most
@@ -444,9 +552,33 @@ if "!_val!"=="" set "_val=null"
 :: single-quote for the device shell - see the note in :_bk_settings.
 set "_sv=!_val:'='\''!"
 if /i "!_val!"=="null" (
-    >>"%_out%" echo :: %_ns%/%_key% was unset at backup time
+    >>"%_out%" echo call :dcx_do "device_config delete %_ns% %_key%"
 ) else (
     >>"%_out%" echo call :dcx_do "device_config put %_ns% %_key% '!_sv!'"
+)
+endlocal
+exit /b
+
+:_bk_wm
+:: Capture Display Scaler overrides (wm size / wm density). No override -> reset
+:: on restore so a later scale does not survive a Restore to "stock panel".
+setlocal enabledelayedexpansion
+set "_out=%~1"
+set "_osz="
+set "_odz="
+for /f "tokens=2 delims=:" %%a in ('adb shell wm size ^<nul 2^>nul ^| findstr /C:"Override size"') do set "_osz=%%a"
+for /f "tokens=2 delims=:" %%a in ('adb shell wm density ^<nul 2^>nul ^| findstr /C:"Override density"') do set "_odz=%%a"
+set "_osz=!_osz: =!"
+set "_odz=!_odz: =!"
+if defined _osz (
+    >>"%_out%" echo call :dcx_do "wm size !_osz!"
+) else (
+    >>"%_out%" echo call :dcx_do "wm size reset"
+)
+if defined _odz (
+    >>"%_out%" echo call :dcx_do "wm density !_odz!"
+) else (
+    >>"%_out%" echo call :dcx_do "wm density reset"
 )
 endlocal
 exit /b
@@ -505,6 +637,8 @@ if not exist "%BACKUPDIR%" (
     goto menu
 )
 echo  Available backups in %BACKUPDIR%:
+echo  %y%Note:%w% older restore .bats that call bare "adb" need PATH or a
+echo  re-Backup from this DCX ^(new files embed the adb.exe path^).
 echo.
 set "i=0"
 :: Numbered listing - newest first
@@ -547,30 +681,31 @@ echo    [N] Cancel
 choice /c:YN /n > nul
 if errorlevel 2 goto menu
 cls
-call "%RESTOREFILE%"
+echo  Running restore ^(output below^)...
+echo.
+:: Nested cmd.so a buggy/old restore .bat that uses "exit" ^(no /b^) or otherwise
+:: kills its interpreter cannot take DCX's console down with it. /nopause keeps
+:: the hold in DCX so you always see the summary.
+cmd /c ""%RESTOREFILE%" /nopause"
 set "_rrc=%errorlevel%"
-:: FIX: this printed "Restore complete." unconditionally - whatever actually happened.
-:: Two ways it lied: a backup file written by this version exits with its failed-write
-:: count, and older files (written before that existed) always exit 0 even if the
-:: device vanished half way. So check both: the exit code, and whether the device is
-:: even still there. A half-restored device the user believes is fully restored is
-:: worse than a failed restore they know about.
 set "_rdev="
 for /f "delims=" %%d in ('adb get-state 2^>nul') do set "_rdev=%%d"
 echo.
+echo  ----------------------------------------
 if not "%_rrc%"=="0" (
     echo  %r%Restore finished with %_rrc% failed write^(s^)%w% - they are listed above.
     echo  The device may be in a mixed state. Reconnect it and restore again;
     echo  restoring twice is harmless.
 ) else if /i not "%_rdev%"=="device" (
-    echo  %r%The device is no longer connected.%w% The restore may have stopped part-way,
-    echo  and this backup file is too old to report its own failures. Reconnect the
-    echo  device and run the restore again - restoring twice is harmless.
+    echo  %r%The device is no longer connected.%w% The restore may have stopped part-way.
+    echo  Reconnect the device and run the restore again - restoring twice is harmless.
 ) else (
     echo  %g%Restore complete.%w% Some changes may need a reboot to fully apply.
 )
+echo  ----------------------------------------
 echo.
-pause > nul
+echo  Press any key to return to the main menu . . .
+pause >nul
 goto menu
 
 :benchmark
@@ -860,12 +995,13 @@ call :logo
 echo.
 echo  Generating full device report...
 echo.
-:: Build a timestamped report so old reports aren't overwritten
-:: and the user can compare before/after applying tweaks.
-:: FIX: build the timestamp via PowerShell so it is locale-independent.
-:: The old %date%/%time% substring slicing assumed a US M/D/Y format and
-:: produced garbled or invalid filenames on other regional date formats.
-:: locale-safe, filename-safe timestamp (no PowerShell = no console code-page reset)
+:: Remember the previous report path (if any) so the menu can offer a diff.
+set "PREV_REPORT="
+if exist "%TEMP%\dcx_last_report_path.txt" (
+    set /p PREV_REPORT=<"%TEMP%\dcx_last_report_path.txt"
+)
+if not defined PREV_REPORT set "PREV_REPORT=" 
+:: Locale-safe, filename-safe timestamp from %date%/%time%.
 set "TS=%date%_%time%"
 set "TS=%TS::=-%"
 set "TS=%TS:/=-%"
@@ -961,6 +1097,7 @@ set "REPORT=%TEMP%\dcx_report_%TS%.txt"
     echo  End of report
     echo ===========================================================
 ) > "%REPORT%" < nul
+>"%TEMP%\dcx_last_report_path.txt" echo %REPORT%
 :: FIX (report hygiene): the ~10s report is generated ONCE above; the menu is a
 :: separate :check_menu label so open-in-notepad / paginate / invalid input
 :: re-show the menu instead of re-running every adb dump AND writing another
@@ -969,17 +1106,50 @@ set "REPORT=%TEMP%\dcx_report_%TS%.txt"
 :check_menu
 echo  %g%Report saved to:%w%
 echo    %REPORT%
+if defined PREV_REPORT if exist "!PREV_REPORT!" (
+    echo  %g%Previous report:%w%
+    echo    !PREV_REPORT!
+)
 echo.
 echo  %b%[%w%1%b%]%w% Open report in Notepad (scrollable, searchable)
 echo  %b%[%w%2%b%]%w% Show report in this window (paginated with MORE)
 echo  %b%[%w%3%b%]%w% Show short summary here ^& go back
-echo  %b%[%w%4%b%]%w% Back to main menu
+echo  %b%[%w%4%b%]%w% Diff vs previous report
+echo  %b%[%w%5%b%]%w% Back to main menu
 echo.
 set "ck=" & set /p ck="Choose An Option >> "
 if "!ck!"=="1" goto check_open
 if "!ck!"=="2" goto check_paginate
 if "!ck!"=="3" goto check_summary
-if "!ck!"=="4" goto menu
+if "!ck!"=="4" goto check_diff
+if "!ck!"=="5" goto menu
+goto check_menu
+
+:check_diff
+if not defined PREV_REPORT goto check_diff_none
+if not exist "!PREV_REPORT!" goto check_diff_none
+if /i "!PREV_REPORT!"=="!REPORT!" goto check_diff_none
+set "DIFFOUT=%TEMP%\dcx_report_diff.txt"
+echo Comparing:
+echo   OLD: !PREV_REPORT!
+echo   NEW: !REPORT!
+echo.
+fc /n "!PREV_REPORT!" "!REPORT!" > "!DIFFOUT!" 2>&1
+echo  %g%Diff saved to:%w%
+echo    !DIFFOUT!
+echo.
+echo  %b%[%w%1%b%]%w% Open diff in Notepad
+echo  %b%[%w%2%b%]%w% Show diff here (MORE)
+echo  %b%[%w%3%b%]%w% Back
+set "cd=" & set /p cd="Choose An Option >> "
+if "!cd!"=="1" (start "" notepad "!DIFFOUT!" & goto check_menu)
+if "!cd!"=="2" (cls & more "!DIFFOUT!" & pause >nul & goto check_menu)
+goto check_menu
+
+:check_diff_none
+echo  %y%No previous report to diff against.%w%
+echo  Run CheckSetting once, change something, run it again - then use Diff.
+timeout /t 3 /nobreak >nul
 goto check_menu
 
 :check_open
@@ -2355,6 +2525,7 @@ echo                                     %gold%[%w%8%gold%]%w% Account Sync Togg
 echo                                     %gold%[%w%9%gold%]%w% Voice Hotword Toggle
 echo                                     %gold%[%w%A%gold%]%w% Wake-Lock Audit  (battery drain diagnostic)
 echo                                     %gold%[%w%B%gold%]%w% Toggle Finish Activities
+echo                                     %gold%[%w%C%gold%]%w% Per-app battery restrict
 echo                                     %gold%[%w%0%gold%]%w% Back
 echo.
 echo.
@@ -2370,9 +2541,112 @@ if "!ksd!"=="8" goto syncmaster
 if "!ksd!"=="9" goto hotwordtoggle
 if /i "!ksd!"=="A" goto wakelockaudit
 if /i "!ksd!"=="B" goto finishact
+if /i "!ksd!"=="C" goto appbattery
 if "!ksd!"=="0" goto Battery
 :: guard against invalid input
 goto nextpage
+:: ===================================================================
+:: Per-app battery restrict - one screen for inactive / standby / hibernation.
+:: Lighter than full :hibernateapp (no appops flood / profile wipe). Reversible.
+:: ===================================================================
+:appbattery
+cls
+title Per-app battery restrict
+call :logo
+echo.
+echo  Restrict one package without the full Hibernate App hammer.
+echo  Levels use real ADB commands: set-inactive, standby-bucket,
+echo  bg-restriction-level, and ^(API 34+^) app_hibernation set-state.
+echo.
+set "BPKG=" & set /p BPKG="Package name >> "
+if not defined BPKG goto nextpage
+set "BPKG=!BPKG:"=!"
+echo(!BPKG!| findstr /r /x /c:"[a-zA-Z][a-zA-Z0-9._]*" >nul || (
+    echo  %r%Invalid package name.%w%
+    timeout /t 2 /nobreak >nul
+    goto appbattery
+)
+adb shell pm list packages <nul 2>nul | findstr /C:"package:!BPKG!" >nul
+if errorlevel 1 (
+    echo  %r%Package not installed:%w% !BPKG!
+    timeout /t 2 /nobreak >nul
+    goto appbattery
+)
+:appbattery_menu
+cls
+title Per-app battery - !BPKG!
+call :logo
+echo.
+echo  Package: %g%!BPKG!%w%
+echo  Current:
+set "_inact=" & set "_bucket=" & set "_hib="
+for /f "delims=" %%i in ('adb shell am get-inactive !BPKG! 2^>nul ^<nul') do set "_inact=%%i"
+for /f "delims=" %%i in ('adb shell am get-standby-bucket !BPKG! 2^>nul ^<nul') do set "_bucket=%%i"
+if %SDK% GEQ 34 for /f "delims=" %%i in ('adb shell cmd app_hibernation get-state !BPKG! 2^>nul ^<nul') do set "_hib=%%i"
+echo    inactive        : !_inact!
+echo    standby-bucket  : !_bucket!
+if %SDK% GEQ 34 (echo    hibernation     : !_hib!) else (echo    hibernation     : ^(needs API 34+^))
+echo.
+echo    %g%[%w%1%g%]%w% Light   - inactive on, standby rare
+echo    %g%[%w%2%g%]%w% Medium  - restricted bucket + bg-restriction
+echo    %g%[%w%3%g%]%w% Heavy   - hibernation state ^(API 34+^) + medium
+echo    %g%[%w%4%g%]%w% Unrestrict - active / unrestricted / hibernation off
+echo    %g%[%w%5%g%]%w% Back
+set "ab=" & set /p ab="Choose An Option >> "
+if not defined ab goto appbattery_menu
+if "!ab!"=="1" goto appbattery_light
+if "!ab!"=="2" goto appbattery_med
+if "!ab!"=="3" goto appbattery_heavy
+if "!ab!"=="4" goto appbattery_clear
+if "!ab!"=="5" goto nextpage
+goto appbattery_menu
+
+:appbattery_light
+adb shell am set-inactive !BPKG! true <nul
+adb shell am set-standby-bucket !BPKG! rare <nul
+echo.
+echo  Applied Light restrict.
+goto appbattery_done
+
+:appbattery_med
+adb shell am set-inactive !BPKG! true <nul
+adb shell am set-standby-bucket !BPKG! restricted <nul
+adb shell cmd activity set-bg-restriction-level --user 0 !BPKG! restricted <nul
+echo.
+echo  Applied Medium restrict.
+goto appbattery_done
+
+:appbattery_heavy
+if %SDK% LSS 34 (
+    echo  %y%API %SDK% - heavy hibernation needs 34+. Applying Medium instead.%w%
+    goto appbattery_med
+)
+adb shell am set-inactive !BPKG! true <nul
+adb shell am set-standby-bucket !BPKG! restricted <nul
+adb shell cmd activity set-bg-restriction-level --user 0 !BPKG! hibernation <nul
+adb shell cmd app_hibernation set-state !BPKG! true <nul
+adb shell cmd deviceidle whitelist -!BPKG! <nul >nul 2>&1
+echo.
+set "_hib="
+for /f "delims=" %%i in ('adb shell cmd app_hibernation get-state !BPKG! 2^>nul ^<nul') do set "_hib=%%i"
+if /i "!_hib!"=="true" (echo [%g%+%w%] hibernation state = true) else (echo [%y%WARN%w%] hibernation readout = "!_hib!")
+goto appbattery_done
+
+:appbattery_clear
+adb shell am set-inactive !BPKG! false <nul
+adb shell am set-standby-bucket !BPKG! active <nul
+adb shell cmd activity set-bg-restriction-level --user 0 !BPKG! unrestricted <nul
+if %SDK% GEQ 34 adb shell cmd app_hibernation set-state !BPKG! false <nul
+echo.
+echo  Cleared restrictions ^(reboot recommended if the app still misbehaves^).
+goto appbattery_done
+
+:appbattery_done
+echo.
+echo  Press any key . . .
+pause >nul
+goto appbattery_menu
+
 :: ===================================================================
 :: Finish Activities  (always_finish_activities - developer setting)
 :: HONEST CAVEAT: documented global setting, but a well-known Android
@@ -2442,10 +2716,7 @@ call :logo
 echo.
 echo  Generating wake-lock + battery-stats report. Takes ~10 seconds.
 echo.
-:: FIX: build the timestamp via PowerShell so it is locale-independent.
-:: The old %date%/%time% substring slicing assumed a US M/D/Y format and
-:: produced garbled or invalid filenames on other regional date formats.
-:: locale-safe, filename-safe timestamp (no PowerShell = no console code-page reset)
+:: Locale-safe, filename-safe timestamp from %date%/%time% (sanitize separators).
 set "TS=%date%_%time%"
 set "TS=%TS::=-%"
 set "TS=%TS:/=-%"
@@ -2719,13 +2990,17 @@ echo                                     %g%[%w%3%g%]%w% Back
 set "ah=" & set /p ah="Choose An Option >> "
 if "!ah!"=="1" (
     adb shell device_config put app_hibernation app_hibernation_enabled true <nul
+    call :_act_reset
     call :_dcfg_verify app_hibernation app_hibernation_enabled true
+    call :_act_summary
     pause > nul
     goto apphibernation
 )
 if "!ah!"=="2" (
     adb shell device_config put app_hibernation app_hibernation_enabled false <nul
+    call :_act_reset
     call :_dcfg_verify app_hibernation app_hibernation_enabled false
+    call :_act_summary
     pause > nul
     goto apphibernation
 )
@@ -2792,13 +3067,17 @@ echo                                     %g%[%w%3%g%]%w% Back
 set "hw=" & set /p hw="Choose An Option >> "
 if "!hw!"=="1" (
     adb shell settings put global hotword_detection_enabled 1 <nul
-    echo Hotword enabled.
+    call :_act_reset
+    call :_settings_verify global hotword_detection_enabled 1
+    call :_act_summary
     pause > nul
     goto hotwordtoggle
 )
 if "!hw!"=="2" (
     adb shell settings put global hotword_detection_enabled 0 <nul
-    echo Hotword disabled.
+    call :_act_reset
+    call :_settings_verify global hotword_detection_enabled 0
+    call :_act_summary
     pause > nul
     goto hotwordtoggle
 )
@@ -2858,8 +3137,16 @@ adb shell cmd app_hibernation set-state %pkgv2% false <nul
 adb shell cmd dropbox remove-low-priority %pkgv2% <nul
 adb shell cmd tare set-vip 0 %pkgv2% true <nul
 echo.
-echo [#] %pkgv2% Is Back To Stock, Reboot To Finish The Process
-echo.
+set "_hib="
+for /f "delims=" %%i in ('adb shell cmd app_hibernation get-state %pkgv2% 2^>nul ^<nul') do set "_hib=%%i"
+if /i "!_hib!"=="false" (
+    echo [%g%+%w%] %pkgv2% hibernation state = false
+) else if /i "!_hib!"=="true" (
+    echo [%y%WARN%w%] %pkgv2% still reports hibernated - reboot may be required.
+) else (
+    echo [#] %pkgv2% marked stock; hibernation readout was "!_hib!"
+)
+echo [#] Reboot recommended to finish the process.
 echo.
 echo Press Any Button To Go Back
 pause > nul
@@ -2913,8 +3200,15 @@ adb shell am stop-app %pkgv2% <nul
 adb shell cmd activity force-stop %pkgv2% <nul
 adb shell cmd activity kill %pkgv2% <nul
 echo.
-echo %pkgv2% In Hibernate State
-echo.
+set "_hib="
+for /f "delims=" %%i in ('adb shell cmd app_hibernation get-state %pkgv2% 2^>nul ^<nul') do set "_hib=%%i"
+if /i "!_hib!"=="true" (
+    echo [%g%+%w%] %pkgv2% hibernation state = true
+) else if /i "!_hib!"=="false" (
+    echo [%y%WARN%w%] %pkgv2% hibernation state still false - commands may be ignored on this OEM.
+) else (
+    echo [%y%WARN%w%] Could not read hibernation state ^(got "!_hib!"^) - applied best-effort.
+)
 echo.
 echo Press Any Button To Go Back
 pause > nul
@@ -2978,17 +3272,25 @@ title Removing system apps from Doze whitelist...
 :: is somehow missing the file comes back empty and the loop is a no-op -
 :: the same fail-safe as before, never a wrong removal.
 adb shell "dumpsys deviceidle sys-whitelist | grep -E '^[[:blank:]]*[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z0-9_]+)+(,[0-9]+)?[[:blank:]]*$' | sed 's/[[:blank:]]//g; s/,.*//'" > "%TEMP%\dcx_idle_whitelist.txt" <nul
+set "_rm=0" & set "_prot=0"
 for /f "delims=" %%A in ('type "%TEMP%\dcx_idle_whitelist.txt"') do (
     echo %%A | findstr /I "gms gsf shell ims downloads providers settings systemui inputmethod telecom telephony bluetooth dialer mms phone alarm calendar fused" > nul
     if errorlevel 1 (
         adb shell cmd deviceidle sys-whitelist -%%A <nul
         echo Removed: %%A
+        set /a _rm+=1
     ) else (
         echo [%r%#%w%] %%A Is Protected
+        set /a _prot+=1
     )
 )
 del "%TEMP%\dcx_idle_whitelist.txt" > nul 2>&1
 echo.
+if "!_rm!"=="0" (
+    echo [%y%WARN%w%] Removed 0 packages ^(list empty, all protected, or filter matched nothing^).
+) else (
+    echo [%g%+%w%] Removed !_rm! package^(s^), protected !_prot!.
+)
 echo Done, Press Any Button To Go Back
 pause > nul
 goto nextpage
@@ -3678,7 +3980,7 @@ adb shell wm tracing level trim <nul > nul 2>&1
 adb shell settings delete global binder_calls_stats <nul > nul 2>&1
 adb shell settings delete global foreground_service_starts_logging_enabled_uri <nul > nul 2>&1
 adb shell settings delete global activity_starts_logging_enabled_uri <nul > nul 2>&1
-adb shell device_config delete profcollect_native_boot <nul > nul 2>&1
+adb shell device_config delete profcollect_native_boot enabled <nul > nul 2>&1
 adb shell setprop persist.log.tag.DisplayPowerController '' <nul
 adb shell device_config delete systemui com.android.systemui.coroutine_tracing <nul > nul 2>&1
 adb shell settings delete global nene_log <nul > nul 2>&1
@@ -3836,6 +4138,11 @@ adb shell settings put global transition_animation_scale 0.0 <nul
 adb shell settings put global animator_duration_scale 0.0 <nul
 adb shell settings put secure accessibility_disable_animations 1 <nul
 adb shell settings put global disable_window_blurs 1 <nul
+call :_act_reset
+call :_settings_verify global window_animation_scale 0.0
+call :_settings_verify global transition_animation_scale 0.0
+call :_settings_verify global animator_duration_scale 0.0
+call :_act_summary
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -3892,6 +4199,11 @@ adb shell device_config delete systemui window_blur <nul > nul 2>&1
 adb shell device_config delete systemui window_shadow <nul > nul 2>&1
 adb shell device_config delete systemui reduce_animations <nul > nul 2>&1
 adb shell device_config delete battery_saver reduce_animations <nul > nul 2>&1
+call :_act_reset
+call :_settings_verify global window_animation_scale 1.0
+call :_settings_verify global transition_animation_scale 1.0
+call :_settings_verify global animator_duration_scale 1.0
+call :_act_summary
 echo.
 echo.
 echo [%r%^^!%w%] Please Restart Device To Finish The Process
@@ -3937,6 +4249,7 @@ adb shell settings put global network_scoring_ui_enabled 0 <nul > nul 2>&1
 adb shell settings put global wifi_watchdog_poor_network_test_enabled 0 <nul > nul 2>&1
 call :_act_reset
 call :_settings_verify global wifi_scan_always_enabled 0
+call :_settings_verify global bluetooth_scan_always_enabled 0
 call :_act_summary
 echo Press Any Button To Go Back
 pause > nul
@@ -3958,6 +4271,7 @@ adb shell settings put global network_scoring_ui_enabled 1 <nul > nul 2>&1
 adb shell settings delete global wifi_watchdog_poor_network_test_enabled <nul > nul 2>&1
 call :_act_reset
 call :_settings_verify global wifi_scan_always_enabled 1
+call :_settings_verify global bluetooth_scan_always_enabled 1
 call :_act_summary
 echo Press Any Button To Go Back
 pause > nul
@@ -4712,7 +5026,9 @@ choice /c:YN /n > nul
 if errorlevel 2 goto angleall
 adb shell settings put global angle_gl_driver_all_angle 1 <nul
 echo.
+call :_act_reset
 call :_settings_verify global angle_gl_driver_all_angle 1
+call :_act_summary
 echo If apps start crashing, return here and Disable/Delete.
 pause > nul
 goto angleall
@@ -4721,7 +5037,9 @@ goto angleall
 cls
 title ANGLE for All Apps : OFF
 adb shell settings put global angle_gl_driver_all_angle 0 <nul
+call :_act_reset
 call :_settings_verify global angle_gl_driver_all_angle 0
+call :_act_summary
 pause > nul
 goto angleall
 
@@ -4729,7 +5047,9 @@ goto angleall
 cls
 title ANGLE for All Apps : Delete (default)
 adb shell settings delete global angle_gl_driver_all_angle <nul
+call :_act_reset
 call :_settings_verify global angle_gl_driver_all_angle DELETE
+call :_act_summary
 pause > nul
 goto angleall
 :: ===================================================================
@@ -4794,28 +5114,37 @@ set "pm=" & set /p pm="Choose An Option >> "
 if "!pm!"=="1" (
     adb shell settings put global preferred_network_mode 9 <nul
     adb shell settings put global preferred_network_mode1 9 <nul
-    echo Set to LTE preferred.
+    call :_act_reset
+    call :_settings_verify global preferred_network_mode 9
+    call :_act_summary
     pause > nul
     goto netboost_prefmode
 )
 if "!pm!"=="2" (
     adb shell settings put global preferred_network_mode 12 <nul
     adb shell settings put global preferred_network_mode1 12 <nul
-    echo Set to LTE only. WARNING: voice calls only work if VoLTE is active.
+    call :_act_reset
+    call :_settings_verify global preferred_network_mode 12
+    call :_act_summary
+    echo WARNING: voice calls only work if VoLTE is active.
     pause > nul
     goto netboost_prefmode
 )
 if "!pm!"=="3" (
     adb shell settings put global preferred_network_mode 20 <nul
     adb shell settings put global preferred_network_mode1 20 <nul
-    echo Set to 5G preferred.
+    call :_act_reset
+    call :_settings_verify global preferred_network_mode 20
+    call :_act_summary
     pause > nul
     goto netboost_prefmode
 )
 if not "!pm!"=="4" goto _skpm4
     adb shell settings delete global preferred_network_mode <nul
     adb shell settings delete global preferred_network_mode1 <nul
-    echo Default restored.
+    call :_act_reset
+    call :_settings_verify global preferred_network_mode DELETE
+    call :_act_summary
     pause > nul
     goto netboost_prefmode
 
@@ -4839,7 +5168,9 @@ echo.
 :: What remains is the one genuinely safe, real key: the initial TCP
 :: receive window. Effect is modest; it does not touch the Wi-Fi stack.
 adb shell "settings put global tcp_default_init_rwnd 60" <nul > nul 2>&1
+call :_act_reset
 call :_settings_verify global tcp_default_init_rwnd 60
+call :_act_summary
 echo.
 echo This change is safe and does not alter Wi-Fi behaviour.
 echo If you want lower latency, the DNS option (Cloudflare) often helps
@@ -4939,8 +5270,8 @@ cls
 title GMS : Off
 adb shell am force-stop com.google.android.gms <nul
 adb shell pm disable-user --user 0 com.google.android.gms <nul
-:: FIX: AOSP zen_mode is 0-3 (0=off,1=priority,2=none,3=alarms). 4 was undefined.
-adb shell settings put global zen_mode 2 <nul
+:: zen_mode intentionally NOT touched - earlier builds forced DND (zen_mode 2)
+:: on Off and cleared it on On, which overwrote the user's Do Not Disturb state.
 adb shell cmd appops set com.google.android.gms RUN_ANY_IN_BACKGROUND ignore <nul
 adb shell cmd appops set com.google.android.gms RUN_IN_BACKGROUND ignore <nul
 adb shell cmd appops set com.google.android.gms WAKE_LOCK ignore <nul
@@ -4948,6 +5279,13 @@ adb shell cmd appops set com.google.android.gms START_FOREGROUND ignore <nul
 adb shell cmd appops set com.google.android.gms INSTANT_APP_START_FOREGROUND ignore <nul
 adb shell am set-inactive --user 0 com.google.android.gms true <nul
 adb shell am set-standby-bucket --user 0 com.google.android.gms never <nul
+echo.
+adb shell pm list packages -d <nul 2>nul | findstr /C:"package:com.google.android.gms" >nul
+if not errorlevel 1 (
+    echo [%g%+%w%] com.google.android.gms is disabled-user.
+) else (
+    echo [%y%WARN%w%] GMS not listed as disabled - OEM may have blocked the disable.
+)
 echo Press Any Button To Go Back
 pause > nul
 goto Gaming
@@ -4956,7 +5294,6 @@ goto Gaming
 @echo off
 cls
 adb shell pm enable com.google.android.gms <nul
-adb shell settings put global zen_mode 0 <nul
 adb shell cmd appops set com.google.android.gms RUN_ANY_IN_BACKGROUND allow <nul
 adb shell cmd appops set com.google.android.gms RUN_IN_BACKGROUND allow <nul
 adb shell cmd appops set com.google.android.gms WAKE_LOCK allow <nul
@@ -4965,6 +5302,13 @@ adb shell cmd appops set com.google.android.gms INSTANT_APP_START_FOREGROUND all
 adb shell am set-inactive --user 0 com.google.android.gms false <nul
 adb shell am set-standby-bucket --user 0 com.google.android.gms active <nul
 title GMS : On
+echo.
+adb shell pm list packages -d <nul 2>nul | findstr /C:"package:com.google.android.gms" >nul
+if errorlevel 1 (
+    echo [%g%+%w%] com.google.android.gms is enabled.
+) else (
+    echo [%y%WARN%w%] GMS still listed as disabled - enable may not have landed.
+)
 echo Press Any Button To Go Back
 pause > nul
 goto Gaming
@@ -5112,6 +5456,9 @@ goto package
 cls
 title Package Verifier : Off
 adb shell settings put global package_verifier_enable 0 <nul
+call :_act_reset
+call :_settings_verify global package_verifier_enable 0
+call :_act_summary
 echo Press Any Button To Go Back
 pause > nul
 goto Gaming
@@ -5121,6 +5468,9 @@ goto Gaming
 cls
 title Package Verifier : On
 adb shell settings put global package_verifier_enable 1 <nul
+call :_act_reset
+call :_settings_verify global package_verifier_enable 1
+call :_act_summary
 echo Press Any Button To Go Back
 pause > nul
 goto Gaming
@@ -5132,8 +5482,8 @@ title Setting Game-Overlay
 echo.
 echo.
 echo %b%[Remove]%w%  1
-echo %b%[Low]%w%     2
-echo %b%[Medium]%w%  3
+echo %b%[Low]%w%     2   (downscale 0.55)
+echo %b%[Medium]%w%  3   (downscale 0.75)
 echo %b%[Back]  %w%  4
 set "kb=" & set /p kb="Choose An Option >> "
 if "!kb!"=="1" goto removeset
@@ -5727,7 +6077,25 @@ echo    %g%[%w%11%g%]%w% Night - dark theme / night light
 echo    %g%[%w%12%g%]%w% More device tweaks
 echo    %g%[%w%13%g%]%w% DeviceConfig server sync (advanced)
 echo.
-echo    %g%[%w%14%g%]%w% Back to main menu
+echo   %d%Undo / backups%w%
+set "BACKUPDIR=%USERPROFILE%\dcx_backups"
+if defined EXP_UNDO (
+    echo    Session undo: !EXP_UNDO!
+) else if exist "%BACKUPDIR%\dcx_last_undo.txt" (
+    set "_lu="
+    set /p _lu=<"%BACKUPDIR%\dcx_last_undo.txt"
+    echo    Last undo: !_lu!
+) else (
+    echo    No undo script yet this session.
+)
+if exist "%BACKUPDIR%\dcx_last_backup.txt" (
+    set "_lb="
+    set /p _lb=<"%BACKUPDIR%\dcx_last_backup.txt"
+    echo    Last backup: !_lb!
+)
+echo    %g%[%w%14%g%]%w% Undo / backups hub - open or run last undo
+echo.
+echo    %g%[%w%15%g%]%w% Back to main menu
 set "tw=" & set /p tw="Choose An Option >> "
 if not defined tw goto tweaks
 if "!tw!"=="1" goto tw_clock
@@ -5743,8 +6111,81 @@ if "!tw!"=="10" goto tw_stay
 if "!tw!"=="11" goto tw_night
 if "!tw!"=="12" goto tw_more
 if "!tw!"=="13" goto tw_dcfgsync
-if "!tw!"=="14" goto menu
+if "!tw!"=="14" goto tw_undo_hub
+if "!tw!"=="15" goto menu
 goto tweaks
+
+:tw_undo_hub
+cls
+title Undo / Backups
+call :logo
+set "BACKUPDIR=%USERPROFILE%\dcx_backups"
+if not exist "%BACKUPDIR%" mkdir "%BACKUPDIR%"
+set "UNDOFILE="
+if defined EXP_UNDO if exist "!EXP_UNDO!" set "UNDOFILE=!EXP_UNDO!"
+if not defined UNDOFILE if exist "%BACKUPDIR%\dcx_last_undo.txt" (
+    set /p UNDOFILE=<"%BACKUPDIR%\dcx_last_undo.txt"
+)
+set "BAKLAST="
+if exist "%BACKUPDIR%\dcx_last_backup.txt" set /p BAKLAST=<"%BACKUPDIR%\dcx_last_backup.txt"
+echo.
+echo  Folder: %BACKUPDIR%
+echo  Session/last undo:
+if defined UNDOFILE (echo    !UNDOFILE!) else (echo    ^(none yet^))
+echo  Last backup:
+if defined BAKLAST (echo    !BAKLAST!) else (echo    ^(none yet^))
+echo.
+echo    %g%[%w%1%g%]%w% Open undo script in Notepad
+echo    %g%[%w%2%g%]%w% Run undo script now ^(restores captured values^)
+echo    %g%[%w%3%g%]%w% Open backups folder
+echo    %g%[%w%4%g%]%w% Open last backup in Notepad
+echo    %g%[%w%5%g%]%w% Back
+set "uh=" & set /p uh="Choose An Option >> "
+if not defined uh goto tw_undo_hub
+if "!uh!"=="1" goto tw_undo_open
+if "!uh!"=="2" goto tw_undo_run
+if "!uh!"=="3" (start "" "%BACKUPDIR%" & goto tw_undo_hub)
+if "!uh!"=="4" goto tw_bak_open
+if "!uh!"=="5" goto tweaks
+goto tw_undo_hub
+
+:tw_undo_open
+if not defined UNDOFILE goto tw_undo_missing
+if not exist "!UNDOFILE!" goto tw_undo_missing
+start "" notepad "!UNDOFILE!"
+goto tw_undo_hub
+
+:tw_undo_run
+if not defined UNDOFILE goto tw_undo_missing
+if not exist "!UNDOFILE!" goto tw_undo_missing
+echo.
+echo  About to run: !UNDOFILE!
+set "ok=" & set /p ok="Run undo? (y = yes) >> "
+if /i not "!ok!"=="y" goto tw_undo_hub
+echo.
+cmd /c ""!UNDOFILE!" /nopause"
+echo.
+echo  ----------------------------------------
+echo  Undo finished ^(exit code %errorlevel%^).
+echo  Press any key to continue . . .
+pause >nul
+goto tw_undo_hub
+
+:tw_bak_open
+if not defined BAKLAST goto tw_bak_missing
+if not exist "!BAKLAST!" goto tw_bak_missing
+start "" notepad "!BAKLAST!"
+goto tw_undo_hub
+
+:tw_undo_missing
+echo  %y%No undo script found yet.%w% Change something in Tweaks / Explorer first.
+timeout /t 2 /nobreak >nul
+goto tw_undo_hub
+
+:tw_bak_missing
+echo  %y%No backup path recorded yet.%w% Use Main Menu - Backup first.
+timeout /t 2 /nobreak >nul
+goto tw_undo_hub
 
 :tw_dcfgsync
 cls
@@ -5769,15 +6210,17 @@ echo    %g%[%w%3%g%]%w% Disable permanently (persistent)
 echo    %g%[%w%4%g%]%w% Back
 set "dc=" & set /p dc="Choose An Option >> "
 if not defined dc goto tw_dcfgsync
-if "!dc!"=="1" (adb shell device_config set_sync_disabled_for_tests none <nul >nul 2>&1 & goto tw_dcfgsync)
-if "!dc!"=="2" (adb shell device_config set_sync_disabled_for_tests until_reboot <nul >nul 2>&1 & goto tw_dcfgsync)
+if "!dc!"=="1" (call :_tw_undo_dcfgsync & adb shell device_config set_sync_disabled_for_tests none <nul >nul 2>&1 & call :_dcfgsync_verify none & goto tw_dcfgsync)
+if "!dc!"=="2" (call :_tw_undo_dcfgsync & adb shell device_config set_sync_disabled_for_tests until_reboot <nul >nul 2>&1 & call :_dcfgsync_verify until_reboot & goto tw_dcfgsync)
 if "!dc!"=="3" (
     echo.
     echo  %y%Warning:%w% persistent stays frozen across reboot until you pick [1].
     echo    [Y] Freeze DeviceConfig sync permanently    [N] Cancel
     choice /c:YN /n >nul
     if errorlevel 2 goto tw_dcfgsync
+    call :_tw_undo_dcfgsync
     adb shell device_config set_sync_disabled_for_tests persistent <nul >nul 2>&1
+    call :_dcfgsync_verify persistent
     goto tw_dcfgsync
 )
 if "!dc!"=="4" goto tweaks
@@ -5805,9 +6248,9 @@ echo    %g%[%w%3%g%]%w% Reset to device default (delete key)
 echo    %g%[%w%4%g%]%w% Back
 set "tc=" & set /p tc="Choose An Option >> "
 if not defined tc goto tw_clock
-if "!tc!"=="1" (adb shell settings put secure clock_seconds 1 <nul & goto tw_clock)
-if "!tc!"=="2" (adb shell settings put secure clock_seconds 0 <nul & goto tw_clock)
-if "!tc!"=="3" (adb shell settings delete secure clock_seconds >nul 2>&1 <nul & goto tw_clock)
+if "!tc!"=="1" (call :_tw_undo_add secure clock_seconds & adb shell settings put secure clock_seconds 1 <nul & goto tw_clock)
+if "!tc!"=="2" (call :_tw_undo_add secure clock_seconds & adb shell settings put secure clock_seconds 0 <nul & goto tw_clock)
+if "!tc!"=="3" (call :_tw_undo_add secure clock_seconds & adb shell settings delete secure clock_seconds >nul 2>&1 <nul & goto tw_clock)
 if "!tc!"=="4" goto tweaks
 goto tw_clock
 
@@ -5829,9 +6272,9 @@ echo    %g%[%w%3%g%]%w% Reset to device default (delete key)
 echo    %g%[%w%4%g%]%w% Back
 set "tb=" & set /p tb="Choose An Option >> "
 if not defined tb goto tw_batpct
-if "!tb!"=="1" (adb shell settings put system status_bar_show_battery_percent 1 <nul & goto tw_batpct)
-if "!tb!"=="2" (adb shell settings put system status_bar_show_battery_percent 0 <nul & goto tw_batpct)
-if "!tb!"=="3" (adb shell settings delete system status_bar_show_battery_percent >nul 2>&1 <nul & goto tw_batpct)
+if "!tb!"=="1" (call :_tw_undo_add system status_bar_show_battery_percent & adb shell settings put system status_bar_show_battery_percent 1 <nul & goto tw_batpct)
+if "!tb!"=="2" (call :_tw_undo_add system status_bar_show_battery_percent & adb shell settings put system status_bar_show_battery_percent 0 <nul & goto tw_batpct)
+if "!tb!"=="3" (call :_tw_undo_add system status_bar_show_battery_percent & adb shell settings delete system status_bar_show_battery_percent >nul 2>&1 <nul & goto tw_batpct)
 if "!tb!"=="4" goto tweaks
 goto tw_batpct
 
@@ -5875,14 +6318,15 @@ echo    %g%[%w%6%g%]%w% Back
 set "sv=" & set /p sv="Choose An Option >> "
 if not defined sv goto tw_safevol
 if "!sv!"=="1" goto tw_safevol_off
-if "!sv!"=="2" (adb shell settings put global audio_safe_volume_state 3 <nul & goto tw_safevol)
-if "!sv!"=="3" (adb shell settings delete global audio_safe_volume_state >nul 2>&1 <nul & goto tw_safevol)
+if "!sv!"=="2" (call :_tw_undo_add global audio_safe_volume_state & adb shell settings put global audio_safe_volume_state 3 <nul & goto tw_safevol)
+if "!sv!"=="3" (call :_tw_undo_add global audio_safe_volume_state & adb shell settings delete global audio_safe_volume_state >nul 2>&1 <nul & goto tw_safevol)
 if "!sv!"=="4" goto tw_safevol_dose
 if "!sv!"=="5" goto tw_safevol_csdoff
 if "!sv!"=="6" goto tweaks
 goto tw_safevol
 
 :tw_safevol_off
+call :_tw_undo_add global audio_safe_volume_state
 adb shell settings put global audio_safe_volume_state 2 <nul
 echo.
 echo  Done - state set to 2 (inactive). Takes effect at the NEXT boot.
@@ -5909,6 +6353,7 @@ if %SDK% LSS 34 (
     goto tw_safevol
 )
 :: Only matters where CSD is available-but-not-enforced; harmless elsewhere.
+call :_tw_undo_add secure audio_safe_csd_as_a_feature_enabled
 adb shell settings put secure audio_safe_csd_as_a_feature_enabled 0 <nul
 echo  audio_safe_csd_as_a_feature_enabled (secure) set to 0.
 timeout /t 2 /nobreak >nul
@@ -6073,12 +6518,11 @@ if not "!%~1:<=_!"=="!%~1!" exit /b 1
 if not "!%~1:>=_!"=="!%~1!" exit /b 1
 exit /b 0
 
-:_tw_undo_add
-:: Capture the current value of %1/%2 into a runnable undo script BEFORE an
-:: explorer write. Reuses :_bk_settings (null value -> delete line), so the
-:: undo file uses the same format as the main Backup feature. One undo file
-:: per DCX session, created lazily on the first write.
-if defined EXP_UNDO goto _tw_undo_append
+:_tw_undo_ensure
+:: Lazily create a session undo .bat with :dcx_do / :dcx_report defined UP TOP
+:: and a :dcx_main section that grows. New restore lines are inserted before
+:: the trailing "goto :dcx_report" so the file stays runnable after every write.
+if defined EXP_UNDO exit /b 0
 set "BACKUPDIR=%USERPROFILE%\dcx_backups"
 if not exist "%BACKUPDIR%" mkdir "%BACKUPDIR%"
 set "TS=%date%_%time%"
@@ -6089,12 +6533,77 @@ set "TS=%TS:.=-%"
 set "TS=%TS:,=-%"
 set "TS=%TS: =_%"
 set "EXP_UNDO=%BACKUPDIR%\dcx_explorer_undo_%TS%.bat"
-> "%EXP_UNDO%" echo @echo off
->>"%EXP_UNDO%" echo :: DCX Settings-Explorer undo - restores values captured before writes.
->>"%EXP_UNDO%" echo adb start-server ^>nul 2^>^&1
-:_tw_undo_append
+call :_bk_write_adb_boot "%EXP_UNDO%"
+(
+    echo :: DCX Settings-Explorer / Tweaks undo - restores values before writes.
+    echo :: Safe to re-run. Uses %%ADB%% from the header ^(not bare adb^).
+    echo :: Labels BEFORE :dcx_main so appended call :dcx_do lines stay in :dcx_main.
+    echo goto :dcx_main
+    echo.
+    echo :dcx_do
+    echo "%%ADB%%" shell %%* ^>nul 2^>^&1
+    echo if errorlevel 1 ^(
+    echo     set /a DCX_FAIL+=1
+    echo     echo   [FAIL] %%*
+    echo ^) else ^(
+    echo     set /a DCX_OK+=1
+    echo ^)
+    echo goto :eof
+    echo.
+    echo :dcx_hold
+    echo if defined DCX_NOPAUSE exit /b 0
+    echo echo.
+    echo echo ----------------------------------------
+    echo echo Press any key to close this window . . .
+    echo pause
+    echo exit /b 0
+    echo.
+    echo :dcx_report
+    echo echo.
+    echo if "%%DCX_FAIL%%"=="0" ^(
+    echo     echo [OK] Restored %%DCX_OK%% settings, none failed.
+    echo ^) else ^(
+    echo     echo [WARN] %%DCX_OK%% restored, %%DCX_FAIL%% FAILED - listed above.
+    echo ^)
+    echo echo.
+    echo call :dcx_hold
+    echo exit /b %%DCX_FAIL%%
+    echo.
+    echo :dcx_main
+    echo set "DCX_OK=0" ^& set "DCX_FAIL=0"
+    echo goto :dcx_report
+) >> "%EXP_UNDO%"
+>"%BACKUPDIR%\dcx_last_undo.txt" echo !EXP_UNDO!
+exit /b 0
+
+:_tw_undo_add
+:: Capture settings namespace/key into the session undo script before a write.
+call :_tw_undo_ensure
+call :_tw_undo_prep
 call :_bk_settings %~1 %~2 "%EXP_UNDO%"
+call :_tw_undo_finish
 exit /b
+
+:_tw_undo_dcfgsync
+:: Capture DeviceConfig sync mode into the same undo script.
+call :_tw_undo_ensure
+call :_tw_undo_prep
+call :_bk_dcfgsync "%EXP_UNDO%"
+call :_tw_undo_finish
+exit /b
+
+:_tw_undo_prep
+:: Drop the trailing "goto :dcx_report" under :dcx_main so the next
+:: call :dcx_do line is appended inside :dcx_main ^(not after :dcx_hold^).
+if not defined EXP_UNDO exit /b 1
+if not exist "%EXP_UNDO%" exit /b 1
+findstr /v /b /c:"goto :dcx_report" "%EXP_UNDO%" > "%EXP_UNDO%.tmp" 2>nul
+if exist "%EXP_UNDO%.tmp" move /y "%EXP_UNDO%.tmp" "%EXP_UNDO%" >nul
+exit /b 0
+
+:_tw_undo_finish
+>>"%EXP_UNDO%" echo goto :dcx_report
+exit /b 0
 
 :tw_snapshot
 cls
@@ -6686,24 +7195,34 @@ echo      namespace^|key^|value      e.g.  global^|audio_safe_volume_state^|2
 echo      namespace^|key^|DELETE     removes the key
 echo  Lines starting with # are ignored, so you can annotate freely.
 echo.
-echo  Applying re-writes every listed key in one pass. That is how you
-echo  re-arm a per-boot tweak - the volume cap being the obvious one -
-echo  after a reboot, without walking the menus again.
+echo  Apply re-writes every listed key in one pass - re-arm per-boot tweaks
+echo  ^(volume cap^) or a whole Tweaks+Battery/Gaming stack after reboot.
 echo  Folder: %PROFDIR%
 echo.
-echo    %g%[%w%1%g%]%w% Save the current tweak keys as a profile
-echo    %g%[%w%2%g%]%w% Apply a profile
-echo    %g%[%w%3%g%]%w% Open the profiles folder
-echo    %g%[%w%4%g%]%w% Back
+echo    %g%[%w%1%g%]%w% Save Tweaks-only profile
+echo    %g%[%w%2%g%]%w% Save full stack ^(Tweaks + Battery/Gaming keys^)
+echo    %g%[%w%3%g%]%w% Apply a profile
+echo    %g%[%w%4%g%]%w% Open the profiles folder
+echo    %g%[%w%5%g%]%w% Back
 set "pr=" & set /p pr="Choose An Option >> "
 if not defined pr goto tw_profile
-if "!pr!"=="1" goto tw_prof_save
-if "!pr!"=="2" goto tw_prof_apply
-if "!pr!"=="3" (start "" "%PROFDIR%" & goto tw_profile)
-if "!pr!"=="4" goto settools
+if "!pr!"=="1" (set "PROFMODE=tweaks" & goto tw_prof_save)
+if "!pr!"=="2" (set "PROFMODE=stack" & goto tw_prof_save)
+if "!pr!"=="3" goto tw_prof_apply
+if "!pr!"=="4" (start "" "%PROFDIR%" & goto tw_profile)
+if "!pr!"=="5" goto settools
 goto tw_profile
 
 :tw_prof_save
+echo.
+set "PROFNAME=" & set /p PROFNAME="Optional name ^(blank = auto timestamp^) >> "
+set "PROFNAME=!PROFNAME:"=!"
+if defined PROFNAME (
+    echo(!PROFNAME!| findstr /r /x /c:"[a-zA-Z0-9_ .-][a-zA-Z0-9_ .-]*" >nul || (
+        echo  %r%Name has unsafe characters - using timestamp instead.%w%
+        set "PROFNAME="
+    )
+)
 set "TS=%date%_%time%"
 set "TS=%TS::=-%"
 set "TS=%TS:/=-%"
@@ -6711,33 +7230,71 @@ set "TS=%TS:\=-%"
 set "TS=%TS:.=-%"
 set "TS=%TS:,=-%"
 set "TS=%TS: =_%"
-set "PROFF=%PROFDIR%\profile_%TS%.txt"
-> "%PROFF%" echo # DCX profile saved %date% %time%
->>"%PROFF%" echo # format: namespace^|key^|value   (value DELETE removes the key)
-call :_tw_prof_add secure clock_seconds "%PROFF%"
-call :_tw_prof_add system status_bar_show_battery_percent "%PROFF%"
-call :_tw_prof_add global audio_safe_volume_state "%PROFF%"
-call :_tw_prof_add secure audio_safe_csd_as_a_feature_enabled "%PROFF%"
-call :_tw_prof_add secure icon_blacklist "%PROFF%"
-call :_tw_prof_add global heads_up_notifications_enabled "%PROFF%"
-call :_tw_prof_add system font_scale "%PROFF%"
-call :_tw_prof_add secure long_press_timeout "%PROFF%"
-call :_tw_prof_add global stay_on_while_plugged_in "%PROFF%"
-call :_tw_prof_add secure night_display_activated "%PROFF%"
-call :_tw_prof_add secure night_display_color_temperature "%PROFF%"
-call :_tw_prof_add global sysui_demo_allowed "%PROFF%"
-call :_tw_prof_add secure sysui_qs_tiles "%PROFF%"
-call :_tw_prof_add secure camera_double_tap_power_gesture_disabled "%PROFF%"
-call :_tw_prof_add global charging_sounds_enabled "%PROFF%"
-call :_tw_prof_add global sys_storage_threshold_percentage "%PROFF%"
-call :_tw_prof_add global low_power_trigger_level "%PROFF%"
-call :_tw_prof_add global enable_freeform_support "%PROFF%"
+if defined PROFNAME (
+    set "PROFF=%PROFDIR%\!PROFNAME!.txt"
+) else (
+    set "PROFF=%PROFDIR%\profile_%TS%.txt"
+)
+> "!PROFF!" echo # DCX profile saved %date% %time% mode=!PROFMODE!
+>>"!PROFF!" echo # format: namespace^|key^|value   (value DELETE removes the key)
+call :_tw_prof_add_tweaks "!PROFF!"
+if /i "!PROFMODE!"=="stack" call :_tw_prof_add_stack "!PROFF!"
 echo.
-echo  Saved: %PROFF%
+echo  Saved: !PROFF!
 echo  Edit it in Notepad to trim it down to just the keys you care about.
 echo  Press any key . . .
 pause >nul
 goto tw_profile
+
+:_tw_prof_add_tweaks
+call :_tw_prof_add secure clock_seconds "%~1"
+call :_tw_prof_add system status_bar_show_battery_percent "%~1"
+call :_tw_prof_add global audio_safe_volume_state "%~1"
+call :_tw_prof_add secure audio_safe_csd_as_a_feature_enabled "%~1"
+call :_tw_prof_add secure icon_blacklist "%~1"
+call :_tw_prof_add global heads_up_notifications_enabled "%~1"
+call :_tw_prof_add system font_scale "%~1"
+call :_tw_prof_add secure long_press_timeout "%~1"
+call :_tw_prof_add global stay_on_while_plugged_in "%~1"
+call :_tw_prof_add secure night_display_activated "%~1"
+call :_tw_prof_add secure night_display_color_temperature "%~1"
+call :_tw_prof_add global sysui_demo_allowed "%~1"
+call :_tw_prof_add secure sysui_qs_tiles "%~1"
+call :_tw_prof_add secure camera_double_tap_power_gesture_disabled "%~1"
+call :_tw_prof_add global charging_sounds_enabled "%~1"
+call :_tw_prof_add global sys_storage_threshold_percentage "%~1"
+call :_tw_prof_add global low_power_trigger_level "%~1"
+call :_tw_prof_add global enable_freeform_support "%~1"
+exit /b
+
+:_tw_prof_add_stack
+:: Battery / Gaming first-class keys - same ones Backup round-trips.
+>>"%~1" echo # --- stack: Battery / Gaming ---
+call :_tw_prof_add global window_animation_scale "%~1"
+call :_tw_prof_add global transition_animation_scale "%~1"
+call :_tw_prof_add global animator_duration_scale "%~1"
+call :_tw_prof_add system min_refresh_rate "%~1"
+call :_tw_prof_add system peak_refresh_rate "%~1"
+call :_tw_prof_add global angle_gl_driver_all_angle "%~1"
+call :_tw_prof_add global low_power "%~1"
+call :_tw_prof_add global low_power_sticky "%~1"
+call :_tw_prof_add global zram_enabled "%~1"
+call :_tw_prof_add global wifi_scan_always_enabled "%~1"
+call :_tw_prof_add global bluetooth_scan_always_enabled "%~1"
+call :_tw_prof_add global hotword_detection_enabled "%~1"
+call :_tw_prof_add global always_finish_activities "%~1"
+call :_tw_prof_add global package_verifier_enable "%~1"
+call :_tw_prof_add global disable_window_blurs "%~1"
+call :_tw_prof_add global reduce_motion "%~1"
+call :_tw_prof_add secure reduce_motion "%~1"
+call :_tw_prof_add secure accessibility_disable_animations "%~1"
+call :_tw_prof_add global enable_back_animation "%~1"
+call :_tw_prof_add global fancy_ime_animations "%~1"
+call :_tw_prof_add secure multi_press_timeout "%~1"
+call :_tw_prof_add global tcp_default_init_rwnd "%~1"
+call :_tw_prof_add global private_dns_mode "%~1"
+call :_tw_prof_add global preferred_network_mode "%~1"
+exit /b
 
 :_tw_prof_add
 :: %1 ns  %2 key  %3 profile file. Unset keys are recorded as DELETE so a
@@ -7391,13 +7948,12 @@ call :logo
 echo.
 echo                               %m%Settings Tools%w%
 echo.
-echo  Tweaks %gold%[6]%w% is the curated list of things worth changing.
-echo  These work on any key in the settings provider, including the ones
-echo  DCX has no menu row for.
+echo  Generic tools for ANY settings key ^(list / get / put / watch / profile^).
+echo  For the curated status-bar and system toggles, use Main Menu - Tweaks.
 echo.
 echo    %g%[%w%1%g%]%w% Settings explorer - list / get / put / delete
 echo    %g%[%w%2%g%]%w% Settings snapshot and diff
-echo    %g%[%w%3%g%]%w% Profiles - save / re-apply a set of keys
+echo    %g%[%w%3%g%]%w% Profiles - curated keys or full Battery/Gaming stack
 echo    %g%[%w%4%g%]%w% Watch a key - poll while you flip a toggle
 echo    %g%[%w%5%g%]%w% Back to main menu
 set "sx=" & set /p sx="Choose An Option >> "
@@ -7533,6 +8089,22 @@ if "!_sv_got!"=="%~3" (echo [%g%+%w%] %~2 = "!_sv_got!" & set /a DCX_VOK+=1 & ex
 echo [%r%^^!%w%] wanted %~2=%~3, device reports "!_sv_got!".
 set /a DCX_VFAIL+=1
 exit /b 1
+
+:: ===================================================================
+:: SHARED HELPER: :_dcfgsync_verify  expected
+:: Read back device_config get_sync_disabled_for_tests after a Tweaks write.
+:: ===================================================================
+:_dcfgsync_verify
+set "_ds="
+for /f "delims=" %%i in ('adb shell device_config get_sync_disabled_for_tests 2^>nul ^<nul') do set "_ds=%%i"
+if "!_ds!"=="" set "_ds=null"
+set "_ds=!_ds:"=!"
+if /i "!_ds!"=="%~1" (
+    echo [%g%+%w%] sync_disabled_for_tests = "!_ds!"
+) else (
+    echo [%y%WARN%w%] wanted sync mode %~1, device reports "!_ds!" - may need root on Android 14+.
+)
+exit /b
 
 :: ===================================================================
 :: SHARED HELPER: :_dcfg_verify  namespace  key  expected
