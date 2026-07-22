@@ -50,8 +50,7 @@ DCX neo is a community tool, not affiliated with Google or any manufacturer.
    folder next to `DCX.bat` (the Release already contains one; DCX `cd`s into
    it automatically).
 2. **Enable USB debugging** — Settings → About phone → tap **Build number**
-   ×7 → Developer options → **USB debugging**. Connect and tap **Allow** on the
-   RSA prompt.
+   ×7 → Developer options → **USB debugging**. Connect and tap **Allow** on the RSA prompt.
 3. **Run** `DCX.bat` (double-click or from `cmd`).
 
 ---
@@ -61,9 +60,8 @@ DCX neo is a community tool, not affiliated with Google or any manufacturer.
 On startup DCX neo sets up ANSI colours, verifies ADB, and waits up to 10 s for
 an authorised device — if none appears you can jump straight to **[W] Wireless
 ADB setup** or **[R]etry** instead of exiting. It then prints your device model
-and Android API level, e.g. `Device: Pixel 7   API level: 34`. The Main,
-Gaming, Battery and Optimize screens show a live header with **uptime** and
-**CPU load**.
+and Android API level, e.g. `Device: Pixel 7   API level: 34`. The Main, Gaming,
+Battery and Optimize screens show a live header with **uptime** and **CPU load**.
 
 ---
 
@@ -94,7 +92,7 @@ Gaming, Battery and Optimize screens show a live header with **uptime** and
 
 | # | Option | What it does |
 |---|---|---|
-| 1 | **Toggle GMS** | Full disable/enable of Google Mobile Services (warns + confirms — disabling breaks push, Maps, sign-in, Pay…). Also offers a **safe subset**: disable ads/telemetry-adjacent packages only (`adservices`, `as.oss`, mainline telemetry, federatedcompute, partnersetup, feedback, turbo) while keeping Play Services running. Reversible. |
+| 1 | **Toggle GMS** | Full disable/enable of Google Mobile Services (warns + confirms — disabling breaks push, Maps, sign-in, Pay…). Does **not** change Do Not Disturb / `zen_mode`. Also offers a **safe subset**: disable ads/telemetry-adjacent packages only (`adservices`, `as.oss`, mainline telemetry, federatedcompute, partnersetup, feedback, turbo) while keeping Play Services running. Reversible. |
 | 2 | **Thermal override (temporary)** | `cmd thermalservice override-status` (0–6) to relax throttling. Usually clears on reboot — not a permanent cooling profile. Validated input. |
 | 3 | **Toggle Package Verifier** | Play Protect package verification on/off. |
 | 4 | **Toggle Game-Overlay** | Game Manager downscale + optional `game_overlay` DeviceConfig (14+ may need root). |
@@ -102,7 +100,7 @@ Gaming, Battery and Optimize screens show a live header with **uptime** and
 | 6 | **TCP / DNS / network mode** | TCP receive-window hint, optional private DNS (Cloudflare), preferred network mode (LTE/5G), full revert. ⚠️ see below. Modest effect — not a magic latency boost. |
 | 7 | **GPU Renderer** | Switch HWUI renderer: `skiagl` (default) / `skiavk` (Skia Vulkan) / clear. |
 | 8 | **Force ANGLE for All Apps** | Route all GLES apps through ANGLE. ⚠️ see below. |
-| 9 | **Display Scaler** | Lower render resolution + matching DPI (`wm size` / `wm density`) for more GPU headroom and lower power. Safe presets are computed live from the panel's native resolution (85 / 75 / 67 / 50 %), plus custom and one-tap reset. A separate **UI size (DPI-only)** mode changes element size without touching resolution — a stand-in for the **Smallest width** developer option that some OEMs (e.g. Huawei EMUI/HarmonyOS) disable. Reversible, no root, persists across reboot. |
+| 9 | **Display Scaler** | Lower render resolution + matching DPI (`wm size` / `wm density`) for more GPU headroom and lower power. Safe presets are computed live from the panel's native resolution (85 / 75 / 67 / 50 %), plus custom and one-tap reset. A separate **UI size (DPI-only)** mode changes element size without touching resolution — a stand-in for the **Smallest width** developer option that some OEMs (e.g. Huawei EMUI/HarmonyOS) disable. Reversible, no root, persists across reboot; **included in Backup/Restore** (override or `wm size`/`wm density` reset). |
 | 10 | **Back** | — |
 
 > **⚠️ Two of these are device-dependent (from real-world testing):**
@@ -150,7 +148,7 @@ Two pages.
 | 1 | **Toggle Log (For User Apps)** | Silence logging for third-party apps. |
 | 2 | **Universal Toggle Logs/etc** | Sets/clears every `log.tag*` prop (`S` = Off; On clears them). |
 | 3 | **Toggle Deviceidle Whitelist** | Add/remove Doze-whitelist apps (system-app removal is guarded with a protected list). |
-| 4 | **Hibernate App** | Hibernate a specific package. |
+| 4 | **Hibernate App** | Hibernate a specific package. **Android 14+ (API 34+) only** — earlier APIs are refused in-menu. |
 | 5 | **Refresh Rate Lock** | Lock 60/90/120 Hz, adaptive (1–120), or restore. |
 | 6 | **Force Doze Now** | Force deep idle now; unforce; or show state. |
 | 7 | **App Hibernation (system-wide)** | Enable/disable Android 12+ system-wide hibernation. |
@@ -158,6 +156,7 @@ Two pages.
 | 9 | **Voice Hotword Toggle** | Disable the always-on "Hey Google" pipeline. |
 | A | **Wake-Lock Audit** | Battery-drain diagnostic (below). |
 | B | **Toggle Finish Activities** | toggles `always_finish_activities` via ADB (many Android builds report the value correctly but only fully honor it when enabled through Developer Options). |
+| C | **Per-app battery restrict** | One screen for a package: show inactive / standby-bucket / hibernation, then Light / Medium / Heavy / Unrestrict. Lighter than **Hibernate App** (no appops flood). Heavy needs API 34+. |
 | 0 | **Back** | — |
 
 **Wake-Lock Audit** collects the key battery dumps into one `%TEMP%` report —
@@ -225,8 +224,9 @@ model), software (version, patch, build), memory, storage, live state (uptime,
 CPU, battery level/temp/voltage/health), display, **current values of the
 tweaks DCX neo can change** (including `master_sync_status` labelled as placebo
 and DeviceConfig `sync_disabled_for_tests`), network mode, Doze whitelist and
-top RAM consumers. Open it in Notepad, paginate with `MORE`, or show an inline
-summary.
+top RAM consumers. Open it in Notepad, paginate with `MORE`, show an inline
+summary, or **Diff vs previous report** (`fc` against the last CheckSetting run;
+path remembered in `%TEMP%\dcx_last_report_path.txt`).
 
 ---
 
@@ -238,8 +238,10 @@ permission those apps ask you to grant them.
 
 **Every write here is undo-protected**: the previous value is captured to
 `%USERPROFILE%\dcx_backups\dcx_explorer_undo_<timestamp>.bat` before anything
-changes, and all of these keys are also covered by
-[Backup](#backup--restore).
+changes, and all of these keys are also covered by [Backup](#backup--restore).
+The Tweaks menu shows the session/last undo and last backup paths; **[14] Undo /
+backups hub** opens them in Notepad, runs undo/restore (DCX stays open), or
+opens the backups folder.
 
 | # | Option | What it does |
 |---|---|---|
@@ -256,7 +258,8 @@ changes, and all of these keys are also covered by
 | 11 | **Night** | Two different features share the name: **dark theme** (`cmd uimode night`) and **night light**, the warm blue-light filter (`night_display_*`). Both live here, labelled apart. |
 | 12 | **More device tweaks** | Camera gestures (double-tap power, twist to flip), charging sounds/vibration, storage low-space warning, battery-saver auto-trigger, freeform windows (needs a reboot), default install location. |
 | 13 | **DeviceConfig server sync** | `device_config set_sync_disabled_for_tests` — freezes **remote DeviceConfig flag updates**, not Google/account sync. Modes: `none` (default), `until_reboot`, `persistent` (survives reboot; confirm). Previously a silent side effect of Battery → Logs Off. |
-| 14 | **Back** | — |
+| 14 | **Undo / backups hub** | Open or run the session/last undo `.bat` (DCX stays open), open the backups folder, or open the last Backup file. Paths are shown on the Tweaks menu itself. |
+| 15 | **Back** | — |
 
 > **⚠️ Volume cap — what it is, and what it isn't.** It lifts the **software**
 > cap and the *"raise above safe level?"* nag (the EU hearing-safety rule) by
@@ -278,28 +281,56 @@ changes, and all of these keys are also covered by
 
 ### Backup & Restore
 
-**Backup** reads every Settings.Global/System key, `device_config` flag,
-property, and DeviceConfig sync mode DCX neo can toggle — **48 targets**,
-including every [Tweaks](#tweaks) key — and writes a **stand-alone restore
-`.bat`** to `%USERPROFILE%\dcx_backups\dcx_backup_<timestamp>.bat`:
+**Backup** reads the first-class Settings / `device_config` / props / Display
+Scaler (`wm`) / DeviceConfig sync targets DCX neo toggles — **62 capture helpers**,
+including every [Tweaks](#tweaks) key and the main Battery/Gaming switches
+(not every Logs Off metric key) — and writes a **stand-alone restore
+`.bat`** to `%USERPROFILE%\dcx_backups\dcx_backup_<timestamp>.bat`.
+
+**ADB path:** those `.bat` files live under `%USERPROFILE%\dcx_backups` — *not*
+next to DCX’s local `adb\` folder. New backup/undo scripts:
+
+- **Embed** the full `adb.exe` path DCX was using, also write
+  `%USERPROFILE%\dcx_backups\dcx_adb_path.txt`, and fall back to `PATH`.
+- **Stop with an error** (and wait for a key) if adb still can’t be found —
+  they no longer silently no-op.
+- Accept **`/nopause`** when DCX launches them from the menu so control returns
+  to Tweaks / Restore without closing the shared console. Double-clicking a
+  `.bat` still pauses with *Press any key to close this window*.
+- Put helpers (`:dcx_do`, `:dcx_hold`, `:dcx_report`) **before** `:dcx_main` so
+  restore lines stay in the main body and the hold always runs.
+
+Re-run **Backup** (or any Tweaks write) once under this DCX to refresh older
+scripts that still call bare `adb`, use `1) Add …` help text inside an `if`
+block, or append restores after `:dcx_hold`.
 
 ```bat
 @echo off
-:: DCX neo Settings Backup created ...
-set "DCX_OK=0" & set "DCX_FAIL=0"
-call :dcx_do settings put global window_animation_scale "1.0"
-call :dcx_do settings put system min_refresh_rate "60"
-call :dcx_do settings delete global angle_gl_driver_all_angle
-call :dcx_do setprop debug.hwui.renderer "skiagl"
-:: prop persist.log.tag was unset at backup time - not restoring
+setlocal
+set "DCX_NOPAUSE="
+if /i "%~1"=="/nopause" set "DCX_NOPAUSE=1"
+set "ADB=C:\...\DCX\adb\adb.exe"   :: embedded by DCX
 ...
+echo Using adb: %ADB%
+goto :dcx_main
+:dcx_do
+"%ADB%" shell %* >nul 2>&1
+...
+:dcx_hold
+if defined DCX_NOPAUSE exit /b 0
+pause
+...
+:dcx_main
+set "DCX_OK=0" & set "DCX_FAIL=0"
+call :dcx_do "settings put global window_animation_scale '1.0'"
+goto :dcx_report
 :: -> [OK] Restored n settings, none failed.
 ::    or [WARN] n restored, m FAILED - listed above.
 ```
 
-Captured values are quoted; any key unset at backup time becomes a `delete`
-(or, for a property, a comment) — so a restore returns you to the exact prior
-state and never pins a property to an empty string.
+Captured values are quoted; any settings/`device_config` key unset at backup
+time becomes a `delete` (properties still become a comment) — so a restore
+returns you to the exact prior state and never pins a property to an empty string.
 
 **Backup refuses to run without the device attached, on purpose.** Reading a key
 that the device doesn't answer for looks *identical* to a key that's genuinely
@@ -312,17 +343,17 @@ there first and declines rather than write that.
 there** with real content in it. `%USERPROFILE%\dcx_backups` is exactly the sort
 of folder antivirus and Controlled Folder Access guard; if the writes are
 blocked, you get a clear failure and how to fix it — not a backup you *think*
-you have and find out about later. **Restore reports what actually happened.** It's a long run of ADB writes — if
-the cable is pulled, wireless ADB drops or authorisation expires part-way, the
-rest silently do nothing. Newer backup files count every write and end with
-`[OK] n restored` or `[WARN] n restored, m FAILED` naming the failures; DCX also
-re-checks the device is still connected afterwards, which covers backup files
-made before this existed. Restoring twice is harmless.
+you have and find out about later. **Restore reports what actually happened.** 
+It's a long run of ADB writes — if the cable is pulled, wireless ADB drops or 
+authorisation expires part-way, the rest silently do nothing. Newer backup files 
+count every write and end with `[OK] n restored` or `[WARN] n restored, m FAILED`
+naming the failures; DCX also re-checks the device is still connected afterwards, 
+which covers backup files made before this existed. Restoring twice is harmless.
 
-Because it's a normal batch
-file you can run it directly without DCX neo, edit out lines you don't want, or
-share it to reproduce settings elsewhere. **Restore** lists backups (newest
-first), confirms, then applies the chosen one. Both can open the backups folder
+Because it's a normal batch file you can run it directly without DCX neo (double-click 
+holds the window until you press a key), edit out lines you don't want, or share it to 
+reproduce settings elsewhere. **Restore** lists backups (newest first), confirms, then 
+applies the chosen one with `/nopause` so DCX stays open. Both can open the backups folder 
 in Explorer.
 
 ---
@@ -331,15 +362,13 @@ in Explorer.
 
 A quick, repeatable micro-benchmark (lower is better): a timed CPU loop, a
 ~10 MB random write and a ~10 MB sequential read (both via `dd`). Run it before
-and after optimising to compare. Uses a portable shell loop, so it works on
-devices that lack `seq`.
+and after optimising to compare. Uses a portable shell loop, so it works on devices that lack `seq`.
 
 ---
 
 ### App Manager
 
-App-level controls (background restriction + debloat), main menu **14**.
-**Everything here is reversible.**
+App-level controls (background restriction + debloat), main menu **14**. **Everything here is reversible.**
 
 | # | Option | What it does |
 |---|---|---|
@@ -351,19 +380,17 @@ App-level controls (background restriction + debloat), main menu **14**.
 | 6 | **Restore a removed app** | Bring a debloated app back (`pm install-existing`). |
 | 7 | **Back** | — |
 
-**How removal works (and why it's safe).** Debloat uses
-`pm uninstall -k --user 0`: the app is removed only for the current user and
-its data is **kept** (`-k`). The APK stays in `/system`, so you can restore it
-any time via **option 6** or a **factory reset**. OTA updates may also bring
-packages back.
+**How removal works (and why it's safe).** Debloat uses `pm uninstall -k --user 0`: 
+the app is removed only for the current user and its data is **kept** (`-k`). 
+The APK stays in `/system`, so you can restore it any time via **option 6** or 
+a **factory reset**. OTA updates may also bring packages back.
 
 > **⚠️ Debloat warnings**
 > - Only remove apps you recognise — removing a critical package can cause a
 >   **bootloop**. DCX neo hard-blocks known offenders, including
 >   **`com.hoffnung`** (looks like bloat on Transsion Tecno/Infinix/itel
 >   phones but bootloops them), plus system UI, phone, settings, telephony
->   providers, and Huawei core services (`com.huawei.hwid`, push, FIDO/`hwasm`,
->   OTA).
+>   providers, and Huawei core services (`com.huawei.hwid`, push, FIDO/`hwasm`, OTA).
 > - The **Suggested** lists only ever show packages that are both
 >   community-vetted as safe *and* installed, and every removal asks for
 >   confirmation. Lists are sourced from UAD-NG and community debloat guides.
@@ -374,8 +401,7 @@ packages back.
 
 ### Wireless ADB
 
-Run DCX over Wi-Fi with no cable. Reachable from the main menu (**13**) or from
-the startup screen when no USB device is found (**[W]**).
+Run DCX over Wi-Fi with no cable. Reachable from the main menu (**13**) or from the startup screen when no USB device is found (**[W]**).
 
 | # | Option | What it does |
 |---|---|---|
@@ -386,8 +412,7 @@ the startup screen when no USB device is found (**[W]**).
 | 5 | **Back to USB** | `adb usb` for devices switched with option 3. |
 | 6 | **Help** | Where to find the ports/code, per-version notes (incl. Huawei EMUI/HarmonyOS builds that hide the pairing dialog — option 3 works there). |
 
-> **Security note:** while Wireless debugging is on, any PC paired with the
-> phone on the same network can run adb commands. Turn it off when done.
+> **Security note:** while Wireless debugging is on, any PC paired with the phone on the same network can run adb commands. Turn it off when done.
 
 The old standalone `wirelessadb.bat` is **removed** — this menu replaces it
 (that script only did `adb connect`, with no Android 11+ pairing support).
@@ -405,7 +430,7 @@ one isn't. Reachable from the main menu (**15**).
 |---|---|---|
 | 1 | **Settings explorer** | `list` / `get` / `put` / `delete` across `system`, `secure` and `global`. Every write echoes the exact command, asks to confirm, shows a read-back, and saves the old value to an undo script first. Keys and values are whitelist-validated — anything with spaces or shell metacharacters is declined toward **Shell** rather than mangled. |
 | 2 | **Snapshot & diff** | Dump all three tables to `%USERPROFILE%\dcx_snapshots\`, flip a toggle in the device's own UI, dump again, diff. This tells you **exactly which key that toggle writes** — the fastest way to find OEM-specific settings DCX doesn't know about. |
-| 3 | **Profiles** | A plain text file in `%USERPROFILE%\dcx_profiles\`, one key per line: `namespace`\|`key`\|`value`, or `DELETE` as the value to remove a key. Save the current tweak keys, then apply the profile to re-write them all in one pass — this is the answer to the volume cap's per-boot re-arm. Lines starting with `#` are ignored, and every line is re-validated on the way in, so a hand-edited typo is skipped with a reason rather than executed. |
+| 3 | **Profiles** | Plain text in `%USERPROFILE%\dcx_profiles\`: `namespace`\|`key`\|`value` (or `DELETE`). **Save Tweaks-only** or **Save full stack** (Tweaks + Battery/Gaming keys: animation, refresh, ANGLE, low_power, zram, scan-always, hotword, etc.). Optional friendly filename. Apply re-writes every listed key in one pass — re-arm the volume cap or a whole stack after reboot. Comments (`#`) ignored; each line re-validated on apply. |
 | 4 | **Watch a key** | Poll one known `namespace`/`key` once per second while you flip a toggle on the phone. Auto-stops when the value changes (or press **Q**). Faster than snapshot/diff when you already know which table to watch. |
 | 5 | **Back** | — |
 
@@ -447,7 +472,7 @@ reads** — they're stored but do nothing. DCX neo focuses on commands with a
 > (`adb shell dumpsys content` → *Auto sync*), unreachable via `settings`
 > without root (on Android 17, writing `master_sync_status 0` left *Auto sync:
 > true* unchanged). It's kept only so Backup/Restore round-trips the value.
->
+
 > **Other honesty labels (Battery / Gaming / Optimize):** Samsung **Motion**
 > is OEM-only; **ZRAM** is a boot preference (may no-op); **Wi-Fi/BT scan**
 > is not an OEM “auto Wi-Fi” switch; SurfaceFlinger profiles are experimental
@@ -521,6 +546,9 @@ reads** — they're stored but do nothing. DCX neo focuses on commands with a
 | **Clock seconds / battery percent did nothing** | Heavily skinned status bars (some OneUI, EMUI) don't read the AOSP keys. The key is set; the skin ignores it. Nothing to fix. |
 | **Freeform windows did nothing** | It needs a **reboot** — it's a developer-options key. The screen offers one. |
 | **A profile line was skipped when I applied it** | Deliberate. Profiles are hand-editable, so every line is re-validated: a bad namespace, key or value prints `skip - …` and the rest of the profile still runs. |
+| **Backup/undo `.bat` flashes and closes / says `Add was unexpected at this time.`** | Fixed — help text used `1) Add …` inside an `if ( )` block (cmd treated `1)` as the end of the block), and undo lines could land *after* `:dcx_hold` so a double-click exited before any restores. New scripts use `[1]`/`[2]`/`[3]`, put helpers before `:dcx_main`, and always pause unless `/nopause`. Re-run **Backup** or a Tweaks write to regenerate; or use Tweaks → **[14]** on the repaired session undo. |
+| **Running undo/restore from DCX closed the whole DCX window** | Fixed — DCX now launches those scripts with `cmd /c … /nopause` so the child cannot take over (or kill) the menu console. |
+| **Standalone backup/undo can’t find adb / restores nothing** | Fixed — scripts embed DCX’s `adb.exe` path (plus `dcx_adb_path.txt` / PATH). If adb is still missing they print `[ERROR]` and wait. Regenerate under current DCX if an old file still calls bare `adb`. |
 | **Want to undo everything** | **Restore** a backup, or run the undo script a Tweaks/Explorer write left in `dcx_backups\`, or reboot for non-persistent changes. |
 | **Colours / alignment look wrong** | Use Windows Terminal or a recent `cmd.exe`; very old consoles don't render ANSI colours or box characters. |
 
@@ -531,8 +559,7 @@ reads** — they're stored but do nothing. DCX neo focuses on commands with a
 - **AnOrmaluser12** — original author ([@AnOrmaluser12](https://github.com/AnOrmaluser12))
 - **S1nt3r** — updates and fixes
 
-DCX is provided **as-is, with no warranty**. You are responsible for any
-changes you apply to your device.
+DCX is provided **as-is, with no warranty**. You are responsible for any changes you apply to your device.
 
 ---
 
@@ -542,5 +569,4 @@ This project's source code is licensed under the **GNU GPLv3**.
 
 Exception: the image file [4152900.jpg] is excluded from the GPL-3.0 license.
 It is owned by its respective creator and is included strictly for personal,
-non-commercial display. If you fork or reuse this project, you must remove or
-replace this image.
+non-commercial display. If you fork or reuse this project, you must remove or replace this image.
