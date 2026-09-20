@@ -80,8 +80,8 @@ Battery and Optimize screens show a live header with **uptime** and **CPU load**
 | 4 | **Auto** | Applies a batch of safe optimisations in one go. |
 | 5 | **CheckSetting** | Full device diagnostic report. |
 | 6 | **Tweaks** | Status bar, quick-settings tiles, volume cap, font scale, night modes, DeviceConfig sync and more — the SystemUI-Tuner-style toggles. |
-| 7 | **Reboot** | Reboots the device. |
-| 8 | **Exit** | Closes DCX neo (stops the ADB server when appropriate). |
+| 7 | **Reboot** | Reboots the device — asks for confirmation first. |
+| 8 | **Exit** | Closes DCX neo. The adb server is left running: it is shared with Android Studio, scrcpy and any other terminal, and killing it would drop their sessions and every Wi-Fi connection along with them. |
 | 9 | **Shell** | Interactive `adb shell`. |
 | 10 | **Benchmark** | Quick CPU + storage micro-benchmark. |
 | 11 / 12 | **Backup / Restore** | Save / re-apply toggleable settings. |
@@ -96,14 +96,14 @@ Battery and Optimize screens show a live header with **uptime** and **CPU load**
 | # | Option | What it does |
 |---|---|---|
 | 1 | **Toggle GMS** | Full disable/enable of Google Mobile Services (warns + confirms — disabling breaks push, Maps, sign-in, Pay…). Does **not** change Do Not Disturb / `zen_mode`. Also offers a **safe subset**: disable ads/telemetry-adjacent packages only (`adservices`, `as.oss`, mainline telemetry, federatedcompute, partnersetup, feedback, turbo) while keeping Play Services running. Reversible. |
-| 2 | **Thermal override (temporary)** | `cmd thermalservice override-status` (0–6) to relax throttling. Usually clears on reboot — not a permanent cooling profile. Validated input. |
+| 2 | **Thermal override (temporary)** | `cmd thermalservice override-status` (0–6). This does **not** relax throttling: it makes the framework *report* the status you pick and stop reporting the real one, so even `0 = NONE` is a lock rather than "throttling off". Option **7** clears the override and hands the reporting back to the device; a reboot clears it too. Validated input. |
 | 3 | **Toggle Package Verifier** | Play Protect package verification on/off. |
 | 4 | **Toggle Game-Overlay** | Game Manager downscale + optional `game_overlay` DeviceConfig (14+ may need root). |
-| 5 | **Performance props (debug/OEM dump)** | Large dump of debug/OEM `setprop`s — volatile and mixed; not a guaranteed FPS mode. Lasting bits are mainly `low_power` off + thermal reset. No longer switches off SQLite durability — [that trade isn't worth making](#what-actually-works-vs-placebo). |
+| 5 | **Performance props (debug/OEM dump)** | Large dump of debug/OEM `setprop`s — volatile and mixed; not a guaranteed FPS mode. The lasting parts are more than they look: besides `low_power` off, **On** writes ten persistent keys including `activity_manager_constants`, `device_idle_constants` and six `device_config` flags, and **pins the thermal status at NONE** — only **Off** runs `thermalservice reset`. `activity_manager_constants` is captured to the session undo file before it is replaced. No longer switches off SQLite durability, and the two vsync-disabling props are gone as well — [neither trade is worth making](#what-actually-works-vs-placebo). |
 | 6 | **TCP / DNS / network mode** | TCP receive-window hint, **Private DNS** (Cloudflare / Google / AdGuard / Quad9 / your own DoT hostname / back to automatic), preferred network mode (LTE/5G), full revert. ⚠️ see below. |
 | 7 | **GPU Renderer** | Switch HWUI renderer: `skiagl` (default) / `skiavk` (Skia Vulkan) / clear. |
 | 8 | **Force ANGLE for All Apps** | Route all GLES apps through ANGLE. ⚠️ see below. |
-| 9 | **Display Scaler** | Lower render resolution + matching DPI (`wm size` / `wm density`) for more GPU headroom and lower power. Safe presets are computed live from the panel's native resolution (85 / 75 / 67 / 50 %), plus custom and one-tap reset. A separate **UI size (DPI-only)** mode changes element size without touching resolution — a stand-in for the **Smallest width** developer option that some OEMs (e.g. Huawei EMUI/HarmonyOS) disable. Reversible, no root, persists across reboot; **included in Backup/Restore** (override or `wm size`/`wm density` reset). |
+| 9 | **Display Scaler** | Lower render resolution + matching DPI (`wm size` / `wm density`) for more GPU headroom and lower power. Safe presets are computed live from the panel's native resolution (85 / 75 / 67 / 50 %), plus custom and one-tap reset. A separate **UI size (DPI-only)** mode changes element size without touching the resolution — a stand-in for the **Smallest width** developer option that some OEMs (e.g. Huawei EMUI/HarmonyOS) disable. Its percentages are relative to the resolution you are actually on: if a resolution override is active (say the 50 % preset), the 100 % baseline is scaled to match it, so "100 % UI" means the same size on screen instead of doubling it. Reversible, no root, persists across reboot; **included in Backup/Restore** (override or `wm size`/`wm density` reset). |
 | 10 | **Back** | — |
 
 > **⚠️ Two of these are device-dependent (from real-world testing):**
@@ -133,14 +133,14 @@ Two pages.
 |---|---|---|
 | 1 | **Toggle Power Saver** | `low_power` / `low_power_sticky` — real battery saver. |
 | 2 | **Toggle Animation** | Animation scales + related accessibility/blur flags. Off also pins long-press timeouts (see Tweaks). |
-| 3 | **Wi-Fi/BT scan and related** | `wifi_scan_always_enabled`, BT scan-always, scoring/netstats — not an OEM “auto Wi-Fi” switch. |
+| 3 | **Wi-Fi/BT scan and related** | `wifi_scan_always_enabled`, `ble_scan_always_enabled` (the key Android actually reads for "Bluetooth scanning" — earlier versions wrote `bluetooth_scan_always_enabled`, which is not an AOSP key and did nothing), scoring/netstats — not an OEM “auto Wi-Fi” switch. |
 | 4 | **Toggle Sync (placebo key)** | Writes `master_sync_status` only — placebo on modern Android; kept for Backup round-trip. |
 | 5 | **Samsung motion (OEM)** | OneUI motion-gesture keys. Placebo on non-Samsung devices. |
 | 6 | **ZRAM preference (reboot)** | `zram_enabled` StorageManager preference; needs reboot; may no-op if the OEM has no zram toggle. |
 | 7 | **Aggressive saver constants** | Not OEM “Extreme power saving” — tweaks `battery_saver_constants`, power mode, related flags. |
 | 8 | **Toggle Send Error** | Crash/diagnostic reporting keys (`send_action_app_error` + OEM extras). |
 | 9 | **ART lock profiling (dev)** | `device_config … disable_lock_profiling` — developer/debug only, not battery/FPS. |
-| 10 | **Toggle Logs/etc** | Broad log/metric silencing. Does **not** freeze DeviceConfig server sync (that lives under Tweaks), no longer switches off SQLite durability ([why](#what-actually-works-vs-placebo)), and no longer deletes your `gpu_debug_layers` value. **On** now reverts everything **Off** sets, including `persist.*` props that survive reboot. |
+| 10 | **Toggle Logs/etc** | Broad log/metric silencing. **On** is a real revert, not a second pass of Off: it runs `cmd dropbox restore-defaults` (which re-reads the low-priority tag list and rate limit from framework resources) rather than re-applying the low-priority list, and it deletes the device_config flags it changed instead of writing a guessed value back. Does **not** freeze DeviceConfig server sync (that lives under Tweaks), no longer switches off SQLite durability ([why](#what-actually-works-vs-placebo)), and no longer deletes your `gpu_debug_layers` value. **On** now reverts everything **Off** sets, including `persist.*` props that survive reboot. |
 | 11 | **Next Page** | — |
 | 12 | **Back** | — |
 
@@ -150,7 +150,7 @@ Two pages.
 |---|---|---|
 | 1 | **Toggle Log (For User Apps)** | Silence logging for third-party apps. |
 | 2 | **Universal Toggle Logs/etc** | Sets/clears every `log.tag*` prop (`S` = Off; On clears them). |
-| 3 | **Toggle Deviceidle Whitelist** | Add/remove Doze-whitelist apps (system-app removal is guarded with a protected list). |
+| 3 | **Toggle Deviceidle Whitelist** | Bulk-remove apps from the Doze whitelist, or reset it. There is no add-one / remove-one entry here; system-app removal is guarded with a protected list. |
 | 4 | **Hibernate App** | Hibernate a specific package. **Android 14+ (API 34+) only** — earlier APIs are refused in-menu. |
 | 5 | **Refresh Rate Lock** | Lock 60/90/120 Hz, adaptive (1–120), or restore. |
 | 6 | **Force Doze Now** | Force deep idle now; unforce; or show state. |
@@ -181,7 +181,7 @@ progress shown; **0** or **Q** also work as Back on the report menu.
 | 4 | **Run Compile App** | Compile a single package — pick a mode (`speed` / `speed-profile` / `verify` / `quicken` / `everything` / `everything-profile`) and name; both are validated and the package must be installed. |
 | 5 | **Run Clear Cache** | Trim or wipe app caches (wipe needs root). |
 | 6 | **Run Tweak SurfaceFlinger** | Refresh-rate-specific SF timing tweaks (below). |
-| 7 | **Run Clear Last Used** | Reset app usage stats. |
+| 7 | **Run Clear Last Used** | Reset app usage timestamps. Needs Android 13 (API 33) or newer — below that the per-app command does not exist and the screen says so up front instead of printing a page of ticks. It no longer runs `blob_store clear-all-blobs`, which deleted every app's shared BlobStore data and had nothing to do with usage stats. |
 | 8 | **Compile All Apps** | Recompile **every** app (modes below). |
 | 9 | **Animation Speed** | Set all three animation scales (0 / 0.5 / 0.75 / 1.0 / custom). Custom input is validated to the documented 0–2 range (comma decimals like `1,5` accepted). |
 | 0 | **Back** | — |
@@ -211,9 +211,20 @@ silently did nothing — see [Troubleshooting](#troubleshooting).)*
 ### Auto Setup
 
 Runs a curated batch in one pass: logging cleanup (WindowManager trace
-channels, dropbox rate limits), dexopt, a temporary thermal override, the
-universal log silencer, and experimental SurfaceFlinger phase offsets (volatile;
-**not** a refresh-rate lock — see Optimize). Fastest way to a sensible baseline.
+channels, dropbox rate limits), dexopt, `fstrim`, `am kill-all`, the
+phantom-process flag, `binder_calls_stats`, autofill logging off, `logcat -c`,
+and experimental SurfaceFlinger phase offsets (volatile; **not** a refresh-rate
+lock — see Optimize). Fastest way to a sensible baseline.
+
+Two things it used to do and no longer does. It **no longer pins the thermal
+status** at LIGHT: an override stops the phone reporting real heat until
+something clears it, which is a poor trade for a benefit nobody can point at
+(the Thermal screen still offers overrides deliberately, and can now clear
+them). And it no longer sets `persist.log.tag '*:S'` — liblog reads only the
+first character of that property as a level letter and `*` is not one, so the
+value was ignored and nothing was ever silenced. A bare `S` does work, but it
+hides crash logs too, so it is a decision to take rather than something to
+apply behind your back.
 
 > Auto Setup deliberately does **not** enable ANGLE (earlier versions did on
 > Android 12+, which crashed apps on some non-Pixel devices). ANGLE is opt-in
@@ -228,8 +239,10 @@ overwritten, so you can compare before/after). It covers hardware (SoC, ABI,
 model), software (version, patch, build), memory, storage, live state (uptime,
 CPU, battery level/temp/voltage/health), display, **current values of the
 tweaks DCX neo can change** (including `master_sync_status` labelled as placebo
-and DeviceConfig `sync_disabled_for_tests`), network mode, Doze whitelist and
-top RAM consumers. Open it in Notepad, paginate with `MORE`, show an inline
+and DeviceConfig `sync_disabled_for_tests`), network mode, the first 20 Doze
+whitelist entries and the first 40 lines of `dumpsys meminfo --oom`. Properties
+that are not set are listed as `(not set)` rather than dropped from the report,
+so "no line" always means "not covered", never "not set". Open it in Notepad, paginate with `MORE`, show an inline
 summary, or **Diff vs previous report** (`fc` against the last CheckSetting run;
 path remembered in `%TEMP%\dcx_last_report_path.txt`). Generation is ~50 device
 queries (≈8 s) and prints step-by-step progress; the window can't take input
@@ -243,9 +256,15 @@ SystemUI Tuner and SetEdit territory, with no root and no companion app — the
 `adb shell` user already holds `WRITE_SECURE_SETTINGS`, which is exactly the
 permission those apps ask you to grant them.
 
-**Every write here is undo-protected**: the previous value is captured to
+**Every write here is undo-protected**: the value is captured to
 `%USERPROFILE%\dcx_backups\dcx_explorer_undo_<timestamp>.bat` before anything
 changes, and all of these keys are also covered by [Backup](#backup--restore).
+What it records is the value from before your **first** change to that key this
+session, not your most recent one — so changing font scale 1.0 → 1.15 → 1.30 and
+then running the undo puts back 1.0. (It used to append a capture per write and
+replay them in order, which landed you on the middle value.) The dark-theme
+switch is included: it writes `secure ui_night_mode` through the uimode service,
+and that is captured like everything else.
 The Tweaks menu shows the session/last undo and last backup paths; **[14] Undo /
 backups hub** opens them in Notepad, runs undo/restore (DCX stays open), or opens the backups folder.
 
@@ -257,10 +276,10 @@ backups hub** opens them in Notepad, runs undo/restore (DCX stays open), or open
 | 4 | **Demo mode** | Freezes the status bar into a clean fixed state — full signal, no clutter, 12:00 — for screenshots. Purely cosmetic; ends on exit or reboot. |
 | 5 | **QS tile editor** | `secure sysui_qs_tiles`. Add the tiles Android ships but doesn't show: `dream`, `font_scaling`, `qr_code_scanner`, `onehanded`, `reverse`, `hearing_devices`, `notes`, `reduce_brightness`… Add at the end or the front, remove, reset. Applies live. Existing OEM `custom(pkg/cls)` tiles are preserved (paren-aware split); typing a new `custom(...)` spec is still declined toward Shell. |
 | 6 | **Volume cap** | The **software** safe-media-volume cap. ⚠️ see below. |
-| 7 | **Heads-up notifications** | `global heads_up_notifications_enabled` — pop-ups on/off for every app at once. |
+| 7 | **Heads-up notifications** | `global heads_up_notifications_enabled` — pop-ups on/off for every app at once. Deleting the key is **not** a reset to how the phone shipped: SystemUI reads it with a default of *off*, so deleting it is the same as choosing off. Phones ship with the key already written to 1. |
 | 8 | **Font scale** | `system font_scale`, clamped 0.5–2.0 (outside that, layouts clip and dialogs lose buttons). Comma decimals accepted: `1,15` → `1.15`. |
 | 9 | **Long-press timeout** | `secure long_press_timeout`. ⚠️ Battery → Animation → **Off** also pins this key to 250 and **On** deletes it — whichever you run last wins. |
-| 10 | **Stay awake while charging** | `global stay_on_while_plugged_in`, a bitmask: AC=1, USB=2, wireless=4, dock=8 (add them; 0 = off). Rough on an OLED panel over time. |
+| 10 | **Stay awake while charging** | `global stay_on_while_plugged_in`, a bitmask: AC=1, USB=2, wireless=4, dock=8 (add them; 0 = off). Deleting the key gives **AC only**, not off — PowerManagerService reads it with a default of `BATTERY_PLUGGED_AC`. Rough on an OLED panel over time. |
 | 11 | **Night** | Two different features share the name: **dark theme** (`cmd uimode night`) and **night light**, the warm blue-light filter (`night_display_*`). Both live here, labelled apart. |
 | 12 | **More device tweaks** | Camera gestures (double-tap power, twist to flip), charging sounds/vibration, storage low-space warning, battery-saver auto-trigger, freeform windows (needs a reboot), default install location. |
 | 13 | **DeviceConfig server sync** | `device_config set_sync_disabled_for_tests` — freezes **remote DeviceConfig flag updates**, not Google/account sync. Modes: `none` (default), `until_reboot`, `persistent` (survives reboot; confirm). Previously a silent side effect of Battery → Logs Off. Some builds (EMUI 14 among them) implement the setter but **not** the readback; DCX says so rather than displaying a mode it never read, and Backup skips the key instead of guessing. |
@@ -287,10 +306,49 @@ backups hub** opens them in Notepad, runs undo/restore (DCX stays open), or open
 ### Backup & Restore
 
 **Backup** reads the first-class Settings / `device_config` / props / Display
-Scaler (`wm`) / DeviceConfig sync targets DCX neo toggles — **62 capture helpers**,
-including every [Tweaks](#tweaks) key and the main Battery/Gaming switches
-(not every Logs Off metric key) — and writes a **stand-alone restore
-`.bat`** to `%USERPROFILE%\dcx_backups\dcx_backup_<timestamp>.bat`.
+Scaler (`wm`) / DeviceConfig sync targets DCX neo toggles — **62 capture calls**
+(56 `settings`, 3 props, 1 `device_config`, 1 `wm`, 1 sync mode), including every
+[Tweaks](#tweaks) key — and writes a **stand-alone restore `.bat`** to
+`%USERPROFILE%\dcx_backups\dcx_backup_<timestamp>.bat`.
+
+**Backup tells you what it got.** The list lives in one routine
+(`:_bk_capture_all`), it prints which group it is on as it goes, and when it
+finishes it says how many values it captured and how many it had to skip:
+
+```
+Backup complete. 62 values captured.
+```
+```
+Backup saved, but incomplete. Captured 41, skipped 21.
+```
+
+A key is skipped either because the device didn't answer for it — a Wi-Fi ADB
+drop, or the settings service still coming up after a reboot — or because its
+value holds a double quote, which no `.bat` line can carry. The file records
+which, and why, on a `:: DCX_SKIP` line. Skipped keys are simply absent, so a
+restore leaves them exactly as they are; it will not delete them.
+
+**What Backup does *not* cover.** It is a curated list, not a snapshot of
+everything DCX writes. Of the persistent keys each feature touches, Backup
+captures: Logs Off 1 of 87, Performance 1 of 11 (`low_power`), Wi-Fi/BT scanning
+2 of the 9 it writes, and **none** of Aggressive saver (5 keys), Send Error
+(10), Samsung motion (4) or Game Overlay. The session undo file written by
+Tweaks, Explorer, profiles, the DNS screens and the saver screens covers what
+you actually changed in a session; Backup covers the curated set. Use both.
+
+**Backups are tied to the phone they came from.** Each file records the device
+serial, and Restore compares it against the phone connected now — if they
+differ it names both and refuses, instead of writing one phone's screen
+resolution, density and delete lines onto another. Files written by older DCX
+versions carry no serial; those still restore, with a line saying the device
+could not be verified.
+
+**A value the file cannot carry is never written as if it could.** If a setting
+contains a double quote — a Material You theme blob, for instance — the restore
+file gets a comment naming the key instead of a mangled command. And a key the
+device did not answer for is recorded as a comment too, not as a `delete`:
+empty output means the read failed, while Android prints the literal word
+`null` for a key that genuinely is not set.
 
 **ADB path:** those `.bat` files live under `%USERPROFILE%\dcx_backups` — *not* next to DCX’s local `adb\` folder. New backup/undo scripts:
 
@@ -359,8 +417,38 @@ which covers backup files made before this existed. Restoring twice is harmless.
 
 Because it's a normal batch file you can run it directly without DCX neo (double-click 
 holds the window until you press a key), edit out lines you don't want, or share it to 
-reproduce settings elsewhere. **Restore** lists backups (newest first), confirms, then 
-applies the chosen one with `/nopause` so DCX stays open. Both can open the backups folder in Explorer.
+reproduce settings elsewhere. **Restore** lists backups (newest first), shows which device the chosen file
+came from, confirms, then applies it with `/nopause` so DCX stays open. To open
+the backups folder in Explorer, use **[14] Undo / backups hub** — Restore itself
+only restores, and the hub only opens files and runs undo scripts.
+
+#### Preview — what would this restore actually change?
+
+At the confirmation prompt, **[P]** re-reads every key the backup covers from
+the phone as it is *now* and compares the two. It writes nothing to the device.
+
+```
+ In the backup : 62 restore commands
+ On the phone  : 62 values readable right now
+ Would change  : 3
+
+Restoring would write these - the phone holds something else today:
+   set "DCX_CMD=settings put system font_scale '1.0'"
+   set "DCX_CMD=settings put secure sysui_qs_tiles 'wifi,custom(com.x/.y:2),bt'"
+   set "DCX_CMD=settings put global heads_up_notifications_enabled '1'"
+```
+
+Nothing to change is a useful answer too — it means the backup and the phone
+already agree and restoring is a no-op. From there you can open the full
+side-by-side (`fc`) in Notepad or page it in the window, then go back to the
+prompt and decide. The reading pass is ~62 adb round trips, about six seconds,
+and the screen says so rather than sitting blank.
+
+Two cases it refuses rather than guessing: a backup written by an **older DCX**
+passes its command to the helper as an argument instead of in a variable, so
+there is nothing to line up — it says so instead of reporting "no differences",
+and such files still restore normally. A file with no `:dcx_main` section is
+truncated or isn't a DCX backup, and it says that too.
 
 ---
 
@@ -378,7 +466,7 @@ App-level controls (background restriction + debloat), main menu **14**. **Every
 
 | # | Option | What it does |
 |---|---|---|
-| 1 | **Restrict app background** | Deny `RUN_IN_BACKGROUND` for a package you name (stops it running in the background; saves battery). |
+| 1 | **Restrict app background** | Deny `RUN_ANY_IN_BACKGROUND` **and** the legacy `RUN_IN_BACKGROUND` for a package you name. Android checks the legacy op only for apps targeting below Android 8, so earlier versions of this screen changed nothing at all on a modern app and still reported success; the op read back afterwards is now the one that decides. |
 | 2 | **Allow app background** | Undo the above for a package. |
 | 3 | **Debloat by package name** | Remove an app for the current user (`pm uninstall -k --user 0`). The name is checked against the Android package-name charset (a letter, then letters/digits/dots/underscores) *before* anything runs, then checked to be installed, then confirmed; data kept. |
 | 4 | **Suggested bloatware** | Auto-detects your brand and lists only **vetted, safe-to-remove** packages that are **actually installed** (cross-vendor Facebook, optional Google apps, plus Xiaomi / Transsion / Samsung / Huawei sets). |
@@ -398,8 +486,10 @@ a **factory reset**. OTA updates may also bring packages back.
 >   phones but bootloops them), plus system UI, phone, settings, telephony
 >   providers, and Huawei core services (`com.huawei.hwid`, push, FIDO/`hwasm`, OTA).
 > - The **Suggested** lists only ever show packages that are both
->   community-vetted as safe *and* installed, and every removal asks for
->   confirmation. Lists are sourced from UAD-NG and community debloat guides.
+>   community-vetted as safe *and* installed. Confirmation is **per list, not
+>   per app**: one `Y` removes the whole group that was printed above the
+>   prompt, so read the list before answering. Sources are UAD-NG and community
+>   debloat guides.
 > - If something breaks after a debloat, use **Restore** (option 6) or reboot;
 >   a factory reset restores everything.
 
@@ -415,7 +505,7 @@ Run DCX over Wi-Fi with no cable. Reachable from the main menu (**13**) or from 
 | 2 | **Connect** | Connect to `ip[:port]`. On Android 11+ use the ip:port from the **main** Wireless-debugging screen — it's a **different port** than the pairing one, and changes after a reboot or re-toggle. Plain IP assumes port 5555. |
 | 3 | **Enable over USB** | Classic method for any Android version: flips adbd to TCP/IP on port 5555 (`adb tcpip 5555`) while the cable is attached, auto-detects the phone's Wi-Fi IP from `ip route`, and offers to connect immediately. Reverts on reboot or via option 5. |
 | 4 | **Disconnect** | Drop all Wi-Fi connections (USB unaffected). |
-| 5 | **Back to USB** | `adb usb` for devices switched with option 3. |
+| 5 | **Back to USB** | `adb usb`, for devices switched with option 3 only. If `adb usb` fails — which it does for an Android 11+ Wireless-debugging connection, where the toggle on the phone is the only way back — it says so rather than reporting Done. |
 | 6 | **Help** | Where to find the ports/code, per-version notes (incl. Huawei EMUI/HarmonyOS builds that hide the pairing dialog — option 3 works there). |
 | 7 | **Select target device** | Pick which attached device DCX talks to when more than one is present. Sets `ANDROID_SERIAL`, so every later adb call follows without any `-s` flags. |
 | 8 | **Back** | — |
@@ -436,7 +526,13 @@ Run DCX over Wi-Fi with no cable. Reachable from the main menu (**13**) or from 
 
 The old standalone `wirelessadb.bat` is **removed** — this menu replaces it
 (that script only did `adb connect`, with no Android 11+ pairing support).
-`opencmd.bat` remains if you want to use ADB separately from DCX neo.
+`opencmd.bat` remains if you want to use ADB separately from DCX neo. It opens a prompt
+already in the bundled `adb` folder, with that folder **on PATH** and the server started,
+then reports what is attached and in what state. The PATH part matters on hardened and
+enterprise Windows images: those set `NoDefaultCurrentDirectoryInExePath`, so cmd does not
+search the current directory for executables. Being *in* the adb folder was not enough
+there — every call failed and the script told you to install the platform-tools sitting
+right next to it. `adb` also keeps working after you `cd` somewhere else.
 
 ---
 
@@ -473,10 +569,13 @@ reads** — they're stored but do nothing. DCX neo focuses on commands with a **
 - **`wm size` / `wm density`** — real logical-resolution and DPI control
   (Display Scaler). Lowering the render resolution is a genuine, no-root way to
   gain GPU headroom and cut power draw; `wm size reset` / `wm density reset` fully revert it.
-- **`deviceidle force-idle`, app hibernation, `hotword_detection_enabled`,
-  `persist.log.tag "*:S"`** — real battery/log switches.
-- **`cmd appops … RUN_IN_BACKGROUND deny`, `pm uninstall -k --user 0`** —
-  background restriction and (reversible) debloat (App Manager).
+- **`deviceidle force-idle`, app hibernation, `hotword_detection_enabled`** —
+  real battery switches.
+- **`cmd appops … RUN_ANY_IN_BACKGROUND deny`, `pm uninstall -k --user 0`** —
+  background restriction and (reversible) debloat (App Manager). It has to be
+  `RUN_ANY_IN_BACKGROUND`: Android checks the older `RUN_IN_BACKGROUND` only for
+  apps targeting below Android 8, so on anything modern denying that one alone
+  changes nothing. DCX sets both.
 - **`clock_seconds`, `icon_blacklist`, `sysui_qs_tiles`** — real SystemUI
   tunables. SystemUI *observes* these keys, so they apply live with no restart:
   the tile list still reads from `sysui_qs_tiles` on current AOSP, content observer and all.
@@ -499,10 +598,18 @@ reads** — they're stored but do nothing. DCX neo focuses on commands with a **
 > `policy_control` (the old immersive-mode key) — the framework class that
 > implemented it is **gone from AOSP**, so it stores fine and does nothing on
 > Android 11+. `sysui_qqs_count` — modern SystemUI no longer reads it.
+> `persist.log.tag "*:S"` was in this list on the wrong side until recently: it
+> looks like a universal log silencer and is not one, because liblog reads only
+> the **first character** of the property as a level letter and `*` is not one of
+> them. The whole value is ignored. A bare `S` does work — and silences crash logs
+> with everything else, which is why DCX does not set it for you.
 > Tethering flags sit behind carrier entitlement checks that `settings` can't
 > touch. All three would look like features and be placebo, so they aren't in
 > the menus. If you want them anyway, **Settings Tools → Explorer** will write
-> any key you like — declining a menu row isn't blocking you.
+> them — declining a menu row isn't blocking you. Explorer accepts key names
+> made of letters, digits and `_ . -`, and values made of letters, digits and
+> `_ . , : / = + -`, so a value containing spaces, `*`, `{` or `"` has to go in
+> through `adb shell settings put` by hand.
 
 > **And some tweaks are removed because they're harmful, not because they're
 > fake.** DCX no longer writes `debug.sqlite.journalmode OFF`,
