@@ -14,11 +14,15 @@ title ADB Console (starting)
 :: `@cmd` alone did none of this: no server, no device check, just a bare prompt.
 :: ---------------------------------------------------------------------------
 
-:: Same adb-location rule as DCX.bat: prefer a bundled .\adb folder, else PATH.
-if exist "adb\adb.exe" (
+:: Same adb-location rule as DCX.bat: prefer the bundled adb folder, else PATH.
+:: FIX: the first test was relative to the CURRENT directory while the cd went to %~dp0adb,
+:: so the two could disagree - and being in the folder is not enough on its own. Windows
+:: images that set NoDefaultCurrentDirectoryInExePath (hardened and enterprise builds) do not
+:: search the current directory for executables, so "adb" failed here with adb.exe sitting
+:: right there, and the script blamed the user for not installing it. Put the folder on PATH.
+if exist "%~dp0adb\adb.exe" (
     cd /d "%~dp0adb"
-) else if exist "%~dp0adb\adb.exe" (
-    cd /d "%~dp0adb"
+    set "PATH=%~dp0adb;%PATH%"
 )
 
 :: Verify adb is runnable before promising anything.
@@ -46,7 +50,8 @@ for /f "delims=" %%v in ('adb version 2^>nul ^| findstr /i /c:"Android Debug Bri
 echo ==========================================================
 echo   ADB Console
 if defined ADBVER echo   %ADBVER%
-echo   Folder: %CD%
+:: quoted: an ^& in the path would otherwise be read as a command separator
+echo   Folder: "%CD%"
 echo ==========================================================
 echo.
 
@@ -68,7 +73,10 @@ for /f "skip=1 tokens=1,2" %%a in ('adb devices 2^>nul') do (
 if "%DEVCOUNT%"=="0" (
     echo   No devices attached.
     echo     - USB: enable USB debugging, plug in, accept the prompt on the phone.
-    echo     - Wi-Fi: run  adb connect ^<IP^>:5555  once pairing is set up.
+    echo     - Wi-Fi, Android 11+: Developer options -^> Wireless debugging shows the
+    echo       ip:port to use -  adb connect ^<IP^>:^<PORT^>  - and it is NOT 5555; the
+    echo       port changes each time. Pair first with  adb pair ^<IP^>:^<PAIRPORT^>.
+    echo     - Wi-Fi, older builds put on Wi-Fi with  adb tcpip 5555 :  adb connect ^<IP^>:5555
 ) else (
     if not "%UNAUTH%"=="0" echo   Note: an "unauthorized" device needs you to accept the RSA prompt on it.
     if not "%OFFLINE%"=="0" echo   Note: an "offline" device usually needs a re-plug or  adb kill-server ^&^& adb start-server.
@@ -100,7 +108,13 @@ echo.
 set "_here=%CD%"
 for /f "delims=" %%d in ("%_here%") do (
     endlocal
-    cd /d "%%d"
-    cmd /k
+    set "_adbdir=%%d"
 )
-
+:: Outside the block on purpose: endlocal discards every variable change made inside the
+:: setlocal scope, so PATH has to be set once we are back out of it. (The ')' in
+:: "Program Files (x86)" is not a problem either way - the quotes around set "PATH=..."
+:: protect it inside a block too; measured, not assumed.)
+cd /d "%_adbdir%"
+set "PATH=%_adbdir%;%PATH%"
+set "_adbdir="
+cmd /k
