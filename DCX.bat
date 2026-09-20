@@ -27,8 +27,13 @@ set g2=%ESC%[102m
 set r2=%ESC%[101m
 set t=%ESC%[40m
 set gold=%ESC%[93m
-:: Safely navigate to adb folder if it exists
-if exist adb\ cd adb
+:: FIX (the bundled adb was missed unless DCX happened to be started from its own folder):
+:: this looked for adb\ in the CURRENT directory, and nothing above changes directory. "Run
+:: as administrator" starts in System32, a shortcut starts in its "Start in" folder and a
+:: prompt starts wherever it is - so the adb\ sitting next to DCX.bat was not found, and DCX
+:: either said "ADB not found" or silently used an older adb from PATH. opencmd.bat has always
+:: used %~dp0adb. /d because %~dp0 can be on another drive.
+if exist "%~dp0adb\" cd /d "%~dp0adb"
 :: Put that folder on PATH explicitly instead of trusting the current directory.
 :: DCX calls bare "adb" ~1500 times and relied on cmd searching the current directory -
 :: which it normally does, but NOT when NoDefaultCurrentDirectoryInExePath=1, a setting
@@ -96,7 +101,7 @@ if "%DEVICE_OK%"=="0" (
     echo    [W] Wireless ADB setup    [R] Retry    [X] Exit
     choice /c WRX /n >nul
     if errorlevel 3 (
-        adb kill-server > nul 2>&1
+        rem Not adb kill-server - see the note at the goodbye screen: the server is shared.
         exit /b
     )
     if errorlevel 2 goto startup_wait
@@ -347,13 +352,25 @@ call :_bk_write_adb_boot "%BAKFILE%"
     echo :dcx_do
     echo :: Runs one restore command and records whether it landed. Uses %%ADB%%
     echo :: from the header ^(not bare adb - this file is not next to adb\^).
-    echo "%%ADB%%" shell %%* ^>nul 2^>^&1
-    echo if errorlevel 1 ^(
-    echo     set /a DCX_FAIL+=1
-    echo     echo   [FAIL] %%*
-    echo ^) else ^(
-    echo     set /a DCX_OK+=1
-    echo ^)
+    echo :: The command arrives in DCX_CMD rather than as an argument: CALL re-expands its
+    echo :: arguments, and that second parse used to eat the phone's own values - a ringtone
+    echo :: URI's %%%%20 became this file's empty second argument ^(Over%%%%20the%%%%20Horizon
+    echo :: restored as Over0the0Horizon^) and a ^^ came back doubled.
+    echo if defined DCX_CMD goto :dcx_do_run
+    echo echo   [FAIL] a restore line is missing its command - this file may be truncated
+    echo set /a DCX_FAIL+=1
+    echo goto :eof
+    echo :dcx_do_run
+    echo "%%ADB%%" shell "%%DCX_CMD%%" ^>nul 2^>^&1
+    echo set "DCX_RC=%%errorlevel%%"
+    echo if not "%%DCX_RC%%"=="0" goto :dcx_do_fail
+    echo set /a DCX_OK+=1
+    echo set "DCX_CMD="
+    echo goto :eof
+    echo :dcx_do_fail
+    echo set /a DCX_FAIL+=1
+    echo echo   [FAIL] "%%DCX_CMD%%"
+    echo set "DCX_CMD="
     echo goto :eof
     echo.
     echo :dcx_hold
@@ -384,68 +401,7 @@ call :_bk_write_adb_boot "%BAKFILE%"
 :: Helper macro for capturing settings (Settings.X namespace)
 :: We capture each key by reading current value and building the
 :: corresponding put or delete line.
-call :_bk_settings global window_animation_scale     "%BAKFILE%"
-call :_bk_settings global transition_animation_scale "%BAKFILE%"
-call :_bk_settings global animator_duration_scale    "%BAKFILE%"
-call :_bk_settings system min_refresh_rate           "%BAKFILE%"
-call :_bk_settings system peak_refresh_rate          "%BAKFILE%"
-call :_bk_settings global angle_gl_driver_all_angle  "%BAKFILE%"
-call :_bk_settings global master_sync_status         "%BAKFILE%"
-call :_bk_settings global hotword_detection_enabled  "%BAKFILE%"
-call :_bk_settings global preferred_network_mode     "%BAKFILE%"
-call :_bk_settings global preferred_network_mode1    "%BAKFILE%"
-call :_bk_settings global private_dns_mode           "%BAKFILE%"
-call :_bk_settings global private_dns_specifier      "%BAKFILE%"
-call :_bk_settings global mobile_data_always_on      "%BAKFILE%"
-call :_bk_settings global tcp_default_init_rwnd      "%BAKFILE%"
-call :_bk_settings global wifi_idle_ms               "%BAKFILE%"
-call :_bk_settings global wifi_sleep_policy          "%BAKFILE%"
-call :_bk_settings global low_power                  "%BAKFILE%"
-call :_bk_settings secure clock_seconds              "%BAKFILE%"
-call :_bk_settings system status_bar_show_battery_percent "%BAKFILE%"
-call :_bk_settings global audio_safe_volume_state    "%BAKFILE%"
-call :_bk_settings secure audio_safe_csd_as_a_feature_enabled "%BAKFILE%"
-call :_bk_settings secure icon_blacklist             "%BAKFILE%"
-call :_bk_settings global heads_up_notifications_enabled "%BAKFILE%"
-call :_bk_settings system font_scale                 "%BAKFILE%"
-call :_bk_settings secure long_press_timeout         "%BAKFILE%"
-call :_bk_settings global stay_on_while_plugged_in   "%BAKFILE%"
-call :_bk_settings secure ui_night_mode              "%BAKFILE%"
-call :_bk_settings secure night_display_activated    "%BAKFILE%"
-call :_bk_settings secure night_display_auto_mode    "%BAKFILE%"
-call :_bk_settings secure night_display_color_temperature "%BAKFILE%"
-call :_bk_settings global sysui_demo_allowed         "%BAKFILE%"
-call :_bk_settings secure sysui_qs_tiles             "%BAKFILE%"
-call :_bk_settings secure camera_gesture_disabled    "%BAKFILE%"
-call :_bk_settings secure camera_double_tap_power_gesture_disabled "%BAKFILE%"
-call :_bk_settings secure camera_double_twist_to_flip_enabled "%BAKFILE%"
-call :_bk_settings global charging_sounds_enabled    "%BAKFILE%"
-call :_bk_settings global charging_vibration_enabled "%BAKFILE%"
-call :_bk_settings global sys_storage_threshold_percentage "%BAKFILE%"
-call :_bk_settings global sys_storage_threshold_max_bytes "%BAKFILE%"
-call :_bk_settings global low_power_trigger_level    "%BAKFILE%"
-call :_bk_settings global default_install_location   "%BAKFILE%"
-call :_bk_settings global enable_freeform_support    "%BAKFILE%"
-call :_bk_settings global force_resizable_activities "%BAKFILE%"
-call :_bk_settings global zram_enabled               "%BAKFILE%"
-call :_bk_settings global wifi_scan_always_enabled   "%BAKFILE%"
-call :_bk_settings global bluetooth_scan_always_enabled "%BAKFILE%"
-call :_bk_settings global always_finish_activities   "%BAKFILE%"
-call :_bk_settings global package_verifier_enable    "%BAKFILE%"
-call :_bk_settings global low_power_sticky           "%BAKFILE%"
-call :_bk_settings global disable_window_blurs       "%BAKFILE%"
-call :_bk_settings global reduce_motion              "%BAKFILE%"
-call :_bk_settings secure reduce_motion              "%BAKFILE%"
-call :_bk_settings secure accessibility_disable_animations "%BAKFILE%"
-call :_bk_settings global enable_back_animation      "%BAKFILE%"
-call :_bk_settings global fancy_ime_animations       "%BAKFILE%"
-call :_bk_settings secure multi_press_timeout        "%BAKFILE%"
-call :_bk_devcfg   app_hibernation app_hibernation_enabled "%BAKFILE%"
-call :_bk_dcfgsync "%BAKFILE%"
-call :_bk_wm       "%BAKFILE%"
-call :_bk_prop     debug.hwui.renderer        "%BAKFILE%"
-call :_bk_prop     debug.renderengine.backend "%BAKFILE%"
-call :_bk_prop     persist.log.tag            "%BAKFILE%"
+call :_bk_capture_all "%BAKFILE%"
 :: Close :dcx_main with goto :dcx_report. Helpers (:dcx_do / :dcx_hold / :dcx_report)
 :: were written ABOVE :dcx_main so this append stays inside the restore body.
 >>"%BAKFILE%" echo goto :dcx_report
@@ -468,8 +424,32 @@ if "%_bkok%"=="0" (
     pause > nul
     goto menu
 )
-echo  %g%Backup complete.%w%
+:: Coverage, not just "a file was written". Every capture helper now records a key it could
+:: not read as a :: DCX_SKIP comment instead of inventing a delete - which is the right thing
+:: to put in the FILE, but until now the screen said "Backup complete." either way, so a
+:: backup taken through a Wi-Fi drop looked exactly like a good one.
+set "_bkn=0" & set "_bks=0"
+for /f %%n in ('findstr /b /x /c:"call :dcx_do" "%BAKFILE%" 2^>nul ^| find /c /v ""') do set "_bkn=%%n"
+for /f %%n in ('findstr /b /c:":: DCX_SKIP" "%BAKFILE%" 2^>nul ^| find /c /v ""') do set "_bks=%%n"
+if not "%_bks%"=="0" goto _backup_partial
+echo  %g%Backup complete.%w% %_bkn% values captured.
 echo    !BAKFILE!
+goto _backup_saved
+
+:_backup_partial
+echo  %y%Backup saved, but incomplete.%w% Captured %_bkn%, skipped %_bks%.
+echo    !BAKFILE!
+echo.
+echo  A key is skipped either because the device did not answer for it - a Wi-Fi ADB
+echo  drop, or the settings service still coming up after a reboot - or because its
+echo  value holds a double quote, which no .bat line can carry. The file says which
+echo  for each one: search it for DCX_SKIP.
+echo.
+echo  Skipped keys are simply absent, so a restore leaves them exactly as they are;
+echo  it will not delete them. If the cause was a dropped connection, re-running
+echo  Backup with the phone settled gives a complete file.
+
+:_backup_saved
 >"%BACKUPDIR%\dcx_last_backup.txt" echo !BAKFILE!
 echo.
 if defined DCX_ADB (
@@ -532,6 +512,14 @@ exit /b 0
 setlocal DisableDelayedExpansion
 set "OUT=%~1"
 set "BAKED=%DCX_ADB%"
+:: FIX (one phone's settings landing on another): record WHICH device this file was taken
+:: from. Restore lists every file in the folder and applied the chosen one to whichever
+:: phone was connected at the time - panel-specific wm size/density and every delete line
+:: included. That is not hypothetical with two phones, or after Wireless ADB re-selects a
+:: target mid-session. get-serialno answers for the device ANDROID_SERIAL already points at.
+set "_bkser="
+for /f "delims=" %%s in ('adb get-serialno 2^>nul') do set "_bkser=%%s"
+if /i "%_bkser%"=="unknown" set "_bkser="
 (
     echo @echo off
     echo setlocal
@@ -552,7 +540,7 @@ set "BAKED=%DCX_ADB%"
     echo if defined ADB if not exist "%%ADB%%" set "ADB="
     echo if not defined ADB ^(
     echo   echo [ERROR] adb.exe not found.
-    echo   echo   This script lives in %%USERPROFILE%%\dcx_backups and does not see
+    echo   echo   This script lives in "%%USERPROFILE%%\dcx_backups" and does not see
     echo   echo   the adb\ folder next to DCX.bat. Fix one of:
     echo   echo     [1] Add platform-tools to PATH
     echo   echo     [2] Re-run Backup / a Tweaks write from DCX - embeds adb path
@@ -568,6 +556,26 @@ set "BAKED=%DCX_ADB%"
     echo ^)
     echo echo Using adb: %%ADB%%
     echo "%%ADB%%" start-server ^>nul 2^>^&1
+    if defined _bkser echo :: DCX_DEVICE %_bkser%
+    if defined _bkser echo set "DCX_WANT=%_bkser%"
+    echo.
+    echo :: These values came off ONE phone. Applying them to another writes that phone's
+    echo :: resolution, density and every delete line onto this one, so the restore stops
+    echo :: unless the device it was taken from is the one attached. Flat, not a ^( ^) block:
+    echo :: a serial is tame, but nothing in a generated file should depend on that.
+    echo if not defined DCX_WANT goto :dcx_dev_ok
+    echo set "DCX_HAVE="
+    echo for /f "tokens=1" %%%%d in ^('"%%ADB%%" devices 2^^^>nul'^) do if /i "%%%%d"=="%%DCX_WANT%%" set "DCX_HAVE=1"
+    echo if defined DCX_HAVE goto :dcx_dev_take
+    echo echo [ERROR] This file was taken from device %%DCX_WANT%%, which is not attached.
+    echo echo         Attached now:
+    echo "%%ADB%%" devices
+    echo echo         Connect that device and run this file again. Nothing was changed.
+    echo call :dcx_hold
+    echo exit /b 1
+    echo :dcx_dev_take
+    echo set "ANDROID_SERIAL=%%DCX_WANT%%"
+    echo :dcx_dev_ok
 ) > "%OUT%"
 endlocal
 exit /b 0
@@ -631,14 +639,23 @@ goto :eof
 :: backup, so restoring it SILENTLY REWRITES the setting to the shortened value. Read the
 :: value with delayed expansion OFF, then turn it on for the substitutions below. Same
 :: split applied to :_bk_devcfg, :_bk_prop and :_tw_prof_add.
+:: FIX (a failed read used to become a DELETE): Android prints the literal word `null`
+:: for a key that is not set, so empty output does not mean "unset" - it means the read
+:: did not happen. Turning empty into `null` therefore wrote `settings delete` for every
+:: key read during a Wi-Fi ADB drop, or while the settings service was still coming up
+:: after a reboot. Record whether the loop ran at all and write a comment when it did not:
+:: a backup that skips a key is recoverable, one that deletes it is not. (A key whose value
+:: really is the empty string also lands here, because for /f skips blank lines; not
+:: restoring it is the same conservative choice.)
 setlocal DisableDelayedExpansion
 set "_ns=%~1"
 set "_key=%~2"
 set "_out=%~3"
 set "_val="
-for /f "delims=" %%v in ('adb shell settings get %_ns% %_key% 2^>nul ^<nul') do set "_val=%%v"
+set "_got="
+for /f "delims=" %%v in ('adb shell settings get %_ns% %_key% 2^>nul ^<nul') do set "_val=%%v" & set "_got=1"
 setlocal EnableDelayedExpansion
-if "!_val!"=="" set "_val=null"
+if not defined _got goto _bk_settings_unread
 :: FIX (found by the new [FAIL] report, on a real restore): adb strips ONE level of
 :: quoting. cmd removes the quotes around the value when building adb's argv, adb
 :: re-joins argv with spaces, and the ANDROID shell then sees the value BARE - so a
@@ -649,11 +666,14 @@ if "!_val!"=="" set "_val=null"
 :: single string) and single-quote the value inside it (the device shell keeps it
 :: whole). Any literal quote in the value is escaped POSIX-style as '\''.
 set "_sv=!_val:'='\''!"
-if /i "!_val!"=="null" (
-    >>"%_out%" echo call :dcx_do "settings delete %_ns% %_key%"
-) else (
-    >>"%_out%" echo call :dcx_do "settings put %_ns% %_key% '!_sv!'"
-)
+if /i "!_val!"=="null" (set "_BKCMD=settings delete %_ns% %_key%") else (set "_BKCMD=settings put %_ns% %_key% '!_sv!'")
+call :_bk_emit "%_out%"
+endlocal
+endlocal
+exit /b
+
+:_bk_settings_unread
+>>"%_out%" echo :: DCX_SKIP %_ns% %_key% - the device did not answer, value not captured
 endlocal
 endlocal
 exit /b
@@ -666,16 +686,21 @@ set "_ns=%~1"
 set "_key=%~2"
 set "_out=%~3"
 set "_val="
-for /f "delims=" %%v in ('adb shell device_config get %_ns% %_key% 2^>nul ^<nul') do set "_val=%%v"
+set "_got="
+for /f "delims=" %%v in ('adb shell device_config get %_ns% %_key% 2^>nul ^<nul') do set "_val=%%v" & set "_got=1"
 setlocal EnableDelayedExpansion
-if "!_val!"=="" set "_val=null"
+:: empty is an unread flag, not "unset" - see the note in :_bk_settings.
+if not defined _got goto _bk_devcfg_unread
 :: single-quote for the device shell - see the note in :_bk_settings.
 set "_sv=!_val:'='\''!"
-if /i "!_val!"=="null" (
-    >>"%_out%" echo call :dcx_do "device_config delete %_ns% %_key%"
-) else (
-    >>"%_out%" echo call :dcx_do "device_config put %_ns% %_key% '!_sv!'"
-)
+if /i "!_val!"=="null" (set "_BKCMD=device_config delete %_ns% %_key%") else (set "_BKCMD=device_config put %_ns% %_key% '!_sv!'")
+call :_bk_emit "%_out%"
+endlocal
+endlocal
+exit /b
+
+:_bk_devcfg_unread
+>>"%_out%" echo :: DCX_SKIP device_config %_ns% %_key% - the device did not answer
 endlocal
 endlocal
 exit /b
@@ -683,24 +708,45 @@ exit /b
 :_bk_wm
 :: Capture Display Scaler overrides (wm size / wm density). No override -> reset
 :: on restore so a later scale does not survive a Restore to "stock panel".
+:: FIX (same class as :_bk_settings): "the panel has no override" and "the device did not
+:: answer" both left _osz empty, and both emitted `wm size reset` - so a backup taken during
+:: a Wi-Fi ADB drop RESET the panel when restored. `wm size` always prints its "Physical
+:: size:" line, so any output at all proves the read happened; that is what is tested now.
+:: Reading both lines from one call also drops the findstr pipe.
 setlocal enabledelayedexpansion
 set "_out=%~1"
 set "_osz="
 set "_odz="
-for /f "tokens=2 delims=:" %%a in ('adb shell wm size ^<nul 2^>nul ^| findstr /C:"Override size"') do set "_osz=%%a"
-for /f "tokens=2 delims=:" %%a in ('adb shell wm density ^<nul 2^>nul ^| findstr /C:"Override density"') do set "_odz=%%a"
-set "_osz=!_osz: =!"
-set "_odz=!_odz: =!"
-if defined _osz (
-    >>"%_out%" echo call :dcx_do "wm size !_osz!"
-) else (
-    >>"%_out%" echo call :dcx_do "wm size reset"
+set "_szok="
+set "_dnok="
+for /f "tokens=1,* delims=:" %%a in ('adb shell wm size ^<nul 2^>nul') do (
+    set "_szok=1"
+    if /i "%%a"=="Override size" set "_osz=%%b"
 )
-if defined _odz (
-    >>"%_out%" echo call :dcx_do "wm density !_odz!"
-) else (
-    >>"%_out%" echo call :dcx_do "wm density reset"
+for /f "tokens=1,* delims=:" %%a in ('adb shell wm density ^<nul 2^>nul') do (
+    set "_dnok=1"
+    if /i "%%a"=="Override density" set "_odz=%%b"
 )
+:: `if defined` first: on an UNDEFINED variable, cmd does not read !_osz: =! as a
+:: substitution at all - it yields the literal text " =", which is defined, so the
+:: "no override -> reset" branch below could never be reached and every backup taken on
+:: a stock panel carried `wm size  =` instead. The same guard is used at :autorefresh.
+if defined _osz set "_osz=!_osz: =!"
+if defined _odz set "_odz=!_odz: =!"
+if not defined _szok goto _bk_wm_nosize
+if defined _osz (set "_BKCMD=wm size !_osz!") else (set "_BKCMD=wm size reset")
+call :_bk_emit "%_out%"
+goto _bk_wm_density
+:_bk_wm_nosize
+>>"%_out%" echo :: DCX_SKIP wm size - the device did not answer
+:_bk_wm_density
+if not defined _dnok goto _bk_wm_nodensity
+if defined _odz (set "_BKCMD=wm density !_odz!") else (set "_BKCMD=wm density reset")
+call :_bk_emit "%_out%"
+endlocal
+exit /b
+:_bk_wm_nodensity
+>>"%_out%" echo :: DCX_SKIP wm density - the device did not answer
 endlocal
 exit /b
 
@@ -715,38 +761,165 @@ setlocal enabledelayedexpansion
 set "_out=%~1"
 call :_dcfgsync_read
 if errorlevel 1 (
-    >>"%_out%" echo :: device_config sync mode was not readable on this device - not restoring
+    >>"%_out%" echo :: DCX_SKIP device_config sync mode - not readable on this device
 ) else (
-    >>"%_out%" echo call :dcx_do "device_config set_sync_disabled_for_tests '!DCS_VAL!'"
+    set "_BKCMD=device_config set_sync_disabled_for_tests '!DCS_VAL!'"
+    call :_bk_emit "%_out%"
 )
 endlocal
 exit /b
 
 :_bk_prop
-:: (1) An UNSET prop makes getprop return empty, and the old code then emitted
+:: (1) An UNSET prop makes getprop return empty, and the old code emitted
 ::     `setprop key ""` as a restore line. That does not set the prop to empty - the
 ::     quotes never reach the phone, so setprop gets one argument and just prints its
-::     usage text (see the note under :_sf_clear_props). Either way it is not a
-::     restore, so emit a comment instead and leave the prop alone.
+::     usage text (see the note under :_sf_clear_props).
 :: (2) Delayed expansion so a metachar value cannot corrupt the generated line, and
 ::     DisableDelayedExpansion on the read so a '!' in the value is not eaten - see
 ::     the note in :_bk_settings.
+:: (3) FIX (restore left DCX's own props behind): an unset prop was recorded as a comment,
+::     so Backup -> Auto Setup -> Restore left persist.log.tag set and still said [OK].
+::     `setprop key ''` - single quotes, the form used at :_sf_clear_props - does unset it.
+::     But getprop, unlike `settings get`, has no marker for "not set": an unset prop and an
+::     unreachable device both answer with nothing, and emitting the unset line on a failed
+::     read would clear a prop that still had a value. So on an empty answer ask the device
+::     one more question first, and only unset when it is demonstrably still there.
 setlocal DisableDelayedExpansion
 set "_key=%~1"
 set "_out=%~2"
 set "_val="
 for /f "delims=" %%v in ('adb shell getprop %_key% 2^>nul ^<nul') do set "_val=%%v"
 setlocal EnableDelayedExpansion
+if "!_val!"=="" goto _bk_prop_empty
 :: single-quote for the device shell - see the note in :_bk_settings.
 set "_sv=!_val:'='\''!"
-if "!_val!"=="" (
-    >>"%_out%" echo :: prop %_key% was unset at backup time - not restoring
+set "_BKCMD=setprop %_key% '!_sv!'"
+call :_bk_emit "%_out%"
+endlocal
+endlocal
+exit /b
+
+:_bk_prop_empty
+:: The echoed text is ours, so this comparison cannot be broken by a device value.
+set "_alive="
+for /f "delims=" %%a in ('adb shell echo _DCXRD ^<nul 2^>nul') do if "%%a"=="_DCXRD" set "_alive=1"
+if not defined _alive (
+    >>"%_out%" echo :: DCX_SKIP prop %_key% - the device did not answer
 ) else (
-    >>"%_out%" echo call :dcx_do "setprop %_key% '!_sv!'"
+    >>"%_out%" echo :: prop %_key% was unset at backup time - restoring it to unset
+    set "_BKCMD=setprop %_key% ''"
+    call :_bk_emit "%_out%"
 )
 endlocal
 endlocal
 exit /b
+:_bk_emit
+:: Writes ONE restore command into the generated file %1, as two lines:
+::     set "DCX_CMD=<command>"
+::     call :dcx_do
+:: In: _BKCMD = the remote command, already built by the caller.
+::
+:: FIX (generated files did not escape the phone's values): the old shape passed the command
+:: as a CALL argument, and CALL re-expands its arguments - that second parse is what turned
+:: a ringtone URI's %%20 into the restore file's empty second argument and doubled every ^.
+:: Handing the command over in a variable removes the second parse, which leaves exactly one
+:: escape to do here: a % must be written %% to survive the `set` line's own expansion pass.
+:: Measured (scratchpad probes): %%20, ^, &, ( ), ;, !, commas and runs of spaces then reach
+:: adb byte-for-byte. Note the generated file uses plain `setlocal`, so ! is literal there.
+:: A double quote cannot survive `set "DCX_CMD=..."` in any form, so a value holding one is
+:: NOT written - a comment naming the key is honest, a silently mangled restore line is not.
+setlocal EnableDelayedExpansion
+set "_e=!_BKCMD!"
+set _eq=!_e:"=!
+if not "!_eq!"=="!_e!" goto _bk_emit_quoted
+set "_e=!_e:%%=%%%%!"
+>>"%~1" echo set "DCX_CMD=!_e!"
+>>"%~1" echo call :dcx_do
+endlocal
+exit /b 0
+
+:_bk_emit_quoted
+>>"%~1" echo :: DCX_SKIP the value below holds a double quote, which cannot survive a .bat:
+>>"%~1" echo ::   !_e!
+endlocal
+exit /b 1
+
+:_bk_capture_all
+:: %1 = the file to append capture lines to. Backup writes a full restore .bat;
+:: the restore preview writes a bare one it only ever reads back. Both go through
+:: here so the two lists cannot drift apart - a preview that checked a different set
+:: of keys than Backup saves would be worse than no preview at all.
+:: ~62 adb round trips, about six seconds. Say where it has got to rather than
+:: leaving the screen blank, and do not promise an abort that does not exist.
+echo    [1/5] display, animation and refresh rate...
+call :_bk_settings global window_animation_scale     "%~1"
+call :_bk_settings global transition_animation_scale "%~1"
+call :_bk_settings global animator_duration_scale    "%~1"
+call :_bk_settings system min_refresh_rate           "%~1"
+call :_bk_settings system peak_refresh_rate          "%~1"
+call :_bk_settings global angle_gl_driver_all_angle  "%~1"
+call :_bk_settings global master_sync_status         "%~1"
+call :_bk_settings global hotword_detection_enabled  "%~1"
+echo    [2/5] network, DNS and Wi-Fi...
+call :_bk_settings global preferred_network_mode     "%~1"
+call :_bk_settings global preferred_network_mode1    "%~1"
+call :_bk_settings global private_dns_mode           "%~1"
+call :_bk_settings global private_dns_specifier      "%~1"
+call :_bk_settings global mobile_data_always_on      "%~1"
+call :_bk_settings global tcp_default_init_rwnd      "%~1"
+call :_bk_settings global wifi_idle_ms               "%~1"
+call :_bk_settings global wifi_sleep_policy          "%~1"
+echo    [3/5] battery, status bar and input...
+call :_bk_settings global low_power                  "%~1"
+call :_bk_settings secure clock_seconds              "%~1"
+call :_bk_settings system status_bar_show_battery_percent "%~1"
+call :_bk_settings global audio_safe_volume_state    "%~1"
+call :_bk_settings secure audio_safe_csd_as_a_feature_enabled "%~1"
+call :_bk_settings secure icon_blacklist             "%~1"
+call :_bk_settings global heads_up_notifications_enabled "%~1"
+call :_bk_settings system font_scale                 "%~1"
+call :_bk_settings secure long_press_timeout         "%~1"
+call :_bk_settings global stay_on_while_plugged_in   "%~1"
+echo    [4/5] night mode, tiles and gestures...
+call :_bk_settings secure ui_night_mode              "%~1"
+call :_bk_settings secure night_display_activated    "%~1"
+call :_bk_settings secure night_display_auto_mode    "%~1"
+call :_bk_settings secure night_display_color_temperature "%~1"
+call :_bk_settings global sysui_demo_allowed         "%~1"
+call :_bk_settings secure sysui_qs_tiles             "%~1"
+call :_bk_settings secure camera_gesture_disabled    "%~1"
+call :_bk_settings secure camera_double_tap_power_gesture_disabled "%~1"
+call :_bk_settings secure camera_double_twist_to_flip_enabled "%~1"
+call :_bk_settings global charging_sounds_enabled    "%~1"
+call :_bk_settings global charging_vibration_enabled "%~1"
+call :_bk_settings global sys_storage_threshold_percentage "%~1"
+call :_bk_settings global sys_storage_threshold_max_bytes "%~1"
+call :_bk_settings global low_power_trigger_level    "%~1"
+call :_bk_settings global default_install_location   "%~1"
+call :_bk_settings global enable_freeform_support    "%~1"
+call :_bk_settings global force_resizable_activities "%~1"
+call :_bk_settings global zram_enabled               "%~1"
+echo    [5/5] scanning, screen size and properties...
+call :_bk_settings global wifi_scan_always_enabled   "%~1"
+call :_bk_settings global ble_scan_always_enabled  "%~1"
+call :_bk_settings global always_finish_activities   "%~1"
+call :_bk_settings global package_verifier_enable    "%~1"
+call :_bk_settings global low_power_sticky           "%~1"
+call :_bk_settings global disable_window_blurs       "%~1"
+call :_bk_settings global reduce_motion              "%~1"
+call :_bk_settings secure reduce_motion              "%~1"
+call :_bk_settings secure accessibility_disable_animations "%~1"
+call :_bk_settings global enable_back_animation      "%~1"
+call :_bk_settings global fancy_ime_animations       "%~1"
+call :_bk_settings secure multi_press_timeout        "%~1"
+call :_bk_devcfg   app_hibernation app_hibernation_enabled "%~1"
+call :_bk_dcfgsync "%~1"
+call :_bk_wm       "%~1"
+call :_bk_prop     debug.hwui.renderer        "%~1"
+call :_bk_prop     debug.renderengine.backend "%~1"
+call :_bk_prop     persist.log.tag            "%~1"
+exit /b 0
+
 :: ===================================================================
 :: Restore from backup file
 :: ===================================================================
@@ -768,6 +941,11 @@ echo  %y%Note:%w% older restore .bats that call bare "adb" need PATH or a
 echo  re-Backup from this DCX ^(new files embed the adb.exe path^).
 echo.
 set "i=0"
+:: FIX (a stale number could pick a file that is no longer listed): these variables live for
+:: the whole session, so after a longer listing the old _bk_n_7 was still set - typing 7 on a
+:: shorter list resolved to a backup that had since been deleted or renamed. Clear them first,
+:: the same way :tw_prof_apply clears its PROF_ list.
+for /f "delims==" %%v in ('set _bk_n_ 2^>nul') do set "%%v="
 :: Numbered listing - newest first
 for /f "delims=" %%f in ('dir /b /o-d "%BACKUPDIR%\dcx_backup_*.bat" 2^>nul') do (
     set /a i+=1
@@ -789,6 +967,18 @@ echo    [0] Cancel
 echo.
 set "ri=" & set /p ri="Pick a backup to restore >> "
 if "!ri!"=="0" goto menu
+:: FIX (typed input reached `call set`, which expands it a second time): a reply of
+:: ["&command] was re-parsed on the way in and the tail ran on the PC. It is the user's own
+:: input so the risk is small, but a picker has no business running anything. Digits only -
+:: then the `call set` below has nothing left to expand. eol is set for the reason given at
+:: :_pkg_ok: without it a reply starting with ';' would skip the check entirely.
+set "_ribad="
+for /f "eol=0 delims=0123456789" %%c in ("!ri!") do set "_ribad=%%c"
+if defined _ribad (
+    echo  %r%Invalid selection.%w%
+    pause > nul
+    goto restore
+)
 :: Look up the chosen filename
 call set "_chosen=%%_bk_n_%ri%%%"
 if "%_chosen%"=="" (
@@ -797,16 +987,167 @@ if "%_chosen%"=="" (
     goto restore
 )
 set "RESTOREFILE=%BACKUPDIR%\%_chosen%"
+
+:restore_confirm
+:: The file records the device it was taken from (:: DCX_DEVICE <serial>). The file guards
+:: itself too, but checking here means the mismatch is explained on THIS screen instead of
+:: scrolling past inside the child window. Files written by older DCX versions carry no
+:: marker; those still restore, with a line saying the device could not be verified.
+set "_rwant="
+for /f "tokens=3" %%s in ('findstr /b /c:":: DCX_DEVICE " "%RESTOREFILE%" 2^>nul') do set "_rwant=%%s"
+set "_rhave="
+for /f "delims=" %%s in ('adb get-serialno 2^>nul') do set "_rhave=%%s"
+if /i "%_rhave%"=="unknown" set "_rhave="
 echo.
 echo  About to apply settings from:
 echo    %RESTOREFILE%
+if not defined _rwant echo  %y%This file predates device tagging%w% - check it is the right phone.
+if defined _rwant echo  Taken from device: %_rwant%
+if defined _rhave echo  Connected now:     %_rhave%
+if defined _rwant if not defined _rhave goto _restore_nodev
+if defined _rwant if /i not "%_rwant%"=="%_rhave%" goto _restore_wrongdev
 echo.
 echo  %y%This will overwrite your current values for every key listed.%w%
 echo.
 echo    [Y] Proceed and restore
+echo    [P] Preview - show what this would change, and change nothing
 echo    [N] Cancel
-choice /c:YN /n > nul
-if errorlevel 2 goto menu
+:: FIX (Ctrl+C read as Yes): answering Ctrl+C and then "N" to "Terminate batch job?" makes
+:: choice return 0, and only `if errorlevel 2` was tested - so 0 fell straight through into
+:: the action. Testing `not errorlevel 1` sends it where "No" goes. Every choice prompt whose
+:: fall-through is the destructive branch now has this line. Test the HIGHEST first: with
+:: three options errorlevel 3 is N, 2 is P, 1 is Y and 0 is Ctrl+C.
+choice /c:YPN /n > nul
+if errorlevel 3 goto menu
+if errorlevel 2 goto restore_preview
+if not errorlevel 1 goto menu
+goto _restore_run
+
+:_restore_nodev
+echo.
+echo  %r%No device is answering%w% - nothing to restore onto.
+echo.
+pause > nul
+goto menu
+
+:_restore_wrongdev
+echo.
+echo  %r%That backup belongs to a different phone.%w% Restoring it would write
+echo  its screen resolution, density and every delete line onto this one.
+echo  Connect %_rwant%, or pick a backup taken from %_rhave%.
+echo.
+pause > nul
+goto menu
+
+:restore_preview
+cls
+title Restore preview - reads only, changes nothing
+call :logo
+echo.
+echo  %g%Preview%w% - comparing %_chosen%
+echo  against the phone as it is right now. %g%Nothing on the device is changed.%w%
+echo.
+:: Files written by an older DCX pass the command to :dcx_do as an ARGUMENT
+:: (call :dcx_do "settings put ...") rather than in DCX_CMD. There is nothing to line
+:: up against, so say so instead of reporting an empty comparison as "no differences".
+findstr /b /c:"call :dcx_do " "%RESTOREFILE%" >nul 2>&1 && goto restore_preview_old
+set "_pvdir=%TEMP%\dcx_preview"
+if not exist "%_pvdir%" mkdir "%_pvdir%" 2>nul
+del "%_pvdir%\backup.txt" "%_pvdir%\now.txt" "%_pvdir%\raw.txt" "%_pvdir%\slice.txt" "%_pvdir%\diff.txt" >nul 2>&1
+:: The saved file's capture lines live after :dcx_main; everything before that is the
+:: header and the helpers. Slice from there rather than parsing the whole file.
+set "_pvsk="
+for /f "tokens=1 delims=:" %%n in ('findstr /n /b /x /c:":dcx_main" "%RESTOREFILE%" 2^>nul') do set "_pvsk=%%n"
+if not defined _pvsk goto restore_preview_bad
+more +%_pvsk% "%RESTOREFILE%" > "%_pvdir%\slice.txt" 2>nul
+findstr /b /c:"set " "%_pvdir%\slice.txt" | findstr /v /c:"DCX_OK" > "%_pvdir%\backup.txt"
+echo  Reading the current values from the phone - about six seconds.
+echo  %y%The window will not accept input until it finishes.%w%
+echo.
+call :_bk_capture_all "%_pvdir%\raw.txt"
+findstr /b /c:"set " "%_pvdir%\raw.txt" > "%_pvdir%\now.txt"
+:: Neither file's contents ever reach a command line: /g: reads the patterns FROM a file,
+:: so a value holding ^& %% ^^ or quotes is compared as data. /x = whole line, /l = literal.
+set "_pvold=0" & set "_pvnew=0" & set "_pvdiff=0"
+for /f %%n in ('find /c /v "" ^< "%_pvdir%\backup.txt"') do set "_pvold=%%n"
+for /f %%n in ('find /c /v "" ^< "%_pvdir%\now.txt"') do set "_pvnew=%%n"
+for /f %%n in ('findstr /l /x /v /g:"%_pvdir%\now.txt" "%_pvdir%\backup.txt" ^| find /c /v ""') do set "_pvdiff=%%n"
+echo  ----------------------------------------------------------------
+echo   In the backup : %_pvold% restore commands
+echo   On the phone  : %_pvnew% values readable right now
+:: Zero compared is not zero different: with no commands in the file there is nothing for
+:: findstr to report, and calling that "nothing would change" would describe a backup that
+:: restores nothing as one that is already applied.
+if "%_pvold%"=="0" goto restore_preview_nothing
+if "%_pvdiff%"=="0" goto restore_preview_same
+echo   %y%Would change  : %_pvdiff%%w%
+echo  ----------------------------------------------------------------
+echo.
+echo  Restoring would write these - the phone holds something else today:
+set "_pvshown=0"
+for /f "delims=" %%L in ('findstr /l /x /v /g:"%_pvdir%\now.txt" "%_pvdir%\backup.txt"') do (
+    set /a _pvshown+=1
+    if !_pvshown! LEQ 12 echo     %%L
+)
+if !_pvshown! GTR 12 (
+    set /a _pvmore=!_pvshown!-12
+    echo     ... and !_pvmore! more - the full side-by-side is below.
+)
+goto restore_preview_menu
+
+:restore_preview_nothing
+echo  ----------------------------------------------------------------
+echo.
+echo  %y%This file holds no restore commands at all%w% - there is nothing to compare
+echo  and nothing it could put back. It was probably written while the device was
+echo  unreachable. Take a fresh Backup.
+goto restore_preview_menu
+
+:restore_preview_same
+echo   %g%Would change  : nothing%w%
+echo  ----------------------------------------------------------------
+echo.
+echo  Every value in this backup already matches the phone. Restoring it
+echo  would be a no-op - which is worth knowing before you run it.
+
+:restore_preview_menu
+echo.
+pushd "%_pvdir%"
+fc /n backup.txt now.txt > diff.txt 2>&1
+popd
+echo  %b%[%w%1%b%]%w% Open the full side-by-side in Notepad
+echo  %b%[%w%2%b%]%w% Show it here (MORE)
+echo  %b%[%w%3%b%]%w% Back to the restore prompt
+set "pvk=" & set /p pvk="Choose An Option >> "
+if "!pvk!"=="1" (start "" notepad "%_pvdir%\diff.txt" & goto restore_preview_menu)
+if "!pvk!"=="2" (cls & title Restore preview  -  SPACE=next page   Q=quit back to menu & more "%_pvdir%\diff.txt" & pause >nul & cls & call :logo & goto restore_confirm)
+cls
+call :logo
+goto restore_confirm
+
+:restore_preview_old
+echo  %y%This backup was written by an older DCX.%w% Its restore lines pass the
+echo  command to the helper as an argument instead of in a variable, so there is
+echo  nothing here to line up against the current values - and reporting that as
+echo  "no differences" would be a lie. Restoring it still works.
+echo.
+echo  Run Backup once on this DCX to get a file this can compare.
+echo.
+pause > nul
+cls
+call :logo
+goto restore_confirm
+
+:restore_preview_bad
+echo  %r%Could not read that backup file.%w% It has no :dcx_main section, so it is
+echo  either truncated or not a DCX backup at all. Restoring it is not advisable.
+echo.
+pause > nul
+cls
+call :logo
+goto restore_confirm
+
+:_restore_run
 cls
 echo  Running restore ^(output below^)...
 echo.
@@ -889,13 +1230,33 @@ echo.
 echo.
 timeout /t 3 /nobreak > nul
 adb shell cmd notification post -S bigtext -t '⚙DCX⚙' 'Tag' 'Restart = Remove All Settings Applied, Please Use This Script At Least Once A Month To Keep Your Device Smooth, Bye^^!^^!' <nul > nul 2>&1
-adb kill-server
+:: REMOVED: adb kill-server. The adb server is shared by everything on the machine - Android
+:: Studio, scrcpy, another terminal - and killing it on the way out dropped their sessions and
+:: every Wi-Fi connection with them, including ones DCX never made. Leaving it running is what
+:: every other adb front-end does; it costs nothing and reconnects instantly next time.
 exit /b
 
 :reboot
-adb reboot
+:: FIX (no confirmation at all): this sat one keypress away on the main menu and rebooted the
+:: phone immediately - next to options that only print things.
+echo.
+echo  %y%This reboots the connected phone now.%w% Anything unsaved on it is lost,
+echo  and any debug property DCX set this session is cleared by the reboot.
+echo.
+echo    [Y] Reboot the phone    [N] Cancel
+:: Ctrl+C makes choice return 0 - see the note at the first Restore prompt.
+choice /c:YN /n >nul
+if errorlevel 2 goto menu
+if not errorlevel 1 goto menu
+adb reboot <nul
 timeout /t 1 /nobreak > nul
-adb disconnect
+:: FIX: a bare `adb disconnect` drops EVERY Wi-Fi device the server knows about, including
+:: phones DCX is not talking to. Only the one that just rebooted needs dropping, and only if
+:: it was on Wi-Fi at all - a USB device has nothing to disconnect. On an undefined variable
+:: !X::=! is not a substitution, so check `defined` before comparing.
+if not defined ANDROID_SERIAL goto menu
+if "!ANDROID_SERIAL!"=="!ANDROID_SERIAL::=!" goto menu
+adb disconnect !ANDROID_SERIAL!
 goto menu
 :: ===================================================================
 :: NEW: Wireless ADB (pair / connect / manage Wi-Fi debugging)
@@ -959,8 +1320,11 @@ call :pick_device
 :: If we arrived from the no-device startup path, the model/API probe
 :: was skipped (SDK defaulted to 0) - run it now that a device may be
 :: attached. Re-probing on a genuine API-0 is harmless.
-if "!SDK!"=="0" goto detect_device
-goto menu
+:: FIX (the new device kept the old device's Android version): this re-probed only when SDK
+:: was 0, so after "Select target device" - or when DCX quietly picked the only phone still
+:: attached on the way out - every later `if %SDK% LSS n` tested the PREVIOUS phone. Re-probe
+:: unconditionally; it is one adb call, and :detect_device ends at the menu anyway.
+goto detect_device
 
 :wadb_pair
 cls
@@ -1036,8 +1400,10 @@ echo  pairing needed. %y%Needs the cable attached for this one step.%w%
 echo  Reverts on reboot, or via option [5].
 echo.
 echo    [Y] Enable    [N] Cancel
+:: Ctrl+C makes choice return 0 - see the note at the first Restore prompt.
 choice /c:YN /n >nul
 if errorlevel 2 goto wirelessadb
+if not errorlevel 1 goto wirelessadb
 adb tcpip 5555
 timeout /t 2 /nobreak >nul
 :: Read the phone's Wi-Fi IP so the user doesn't have to dig through
@@ -1053,8 +1419,10 @@ if defined WDEVIP (
     echo  Phone Wi-Fi IP detected: %g%!WDEVIP!%w%
     echo.
     echo    [Y] Connect to !WDEVIP!:5555 now    [N] Not yet
+    rem Ctrl+C makes choice return 0 - see the note at the first Restore prompt.
     choice /c:YN /n >nul
     if errorlevel 2 goto wirelessadb
+    if not errorlevel 1 goto wirelessadb
     adb connect !WDEVIP!:5555
     echo.
     echo  You can unplug the cable now. If the list shows the device
@@ -1095,8 +1463,18 @@ title Wireless ADB : back to USB
 :: Only meaningful for devices switched with option [3]; for the
 :: Android 11+ mode just turn the Wireless-debugging toggle off.
 adb usb 2>nul
+set "_usbrc=!errorlevel!"
+:: FIX: this said "Done" whatever happened - including on an Android 11+ Wireless-debugging
+:: connection, which `adb usb` cannot switch at all.
+if not "!_usbrc!"=="0" goto wadb_usb_fail
 echo Done - adbd is back on USB; any Wi-Fi connection to it dropped.
 echo (Android 11+ Wireless debugging: turn the toggle off on the phone.)
+goto wadb_usb_end
+:wadb_usb_fail
+echo [%y%WARN%w%] adb usb returned !_usbrc! - nothing was switched.
+echo        This works only for devices put on Wi-Fi with option [3] (adb tcpip).
+echo        For Android 11+ Wireless debugging, turn the toggle off on the phone.
+:wadb_usb_end
 echo Press Any Button To Go Back
 pause > nul
 goto wirelessadb
@@ -1206,7 +1584,7 @@ set "REPORT=%TEMP%\dcx_report_%TS%.txt"
     for /f "delims=" %%i in ('adb shell getprop debug.hwui.renderer 2^>nul ^<nul')   do echo   debug.hwui.renderer        : "%%i" ^(skiagl=default, skiavk=Skia Vulkan, empty=auto^)
     for /f "delims=" %%i in ('adb shell getprop ro.hwui.renderer 2^>nul ^<nul')      do echo   ro.hwui.renderer           : "%%i"
     for /f "delims=" %%i in ('adb shell settings get global angle_gl_driver_all_angle 2^>nul ^<nul') do echo   angle_gl_driver_all_angle  : %%i ^(1=force ANGLE for all GLES apps, 0/null=off^)
-    for /f "delims=" %%i in ('adb shell getprop persist.log.tag 2^>nul ^<nul')       do echo   persist.log.tag            : "%%i" ^(set to "*:S" to silence all logs^)
+    for /f "delims=" %%i in ('adb shell getprop persist.log.tag 2^>nul ^<nul')       do echo   persist.log.tag            : "%%i" ^(a bare S silences all logs - and crash logs^)
     echo.
     echo    [4/6] animation, refresh and saver keys... 1>CON
     echo [Animation / Refresh - current values]
@@ -1230,13 +1608,19 @@ set "REPORT=%TEMP%\dcx_report_%TS%.txt"
     echo.
     echo [Power state]
     for /f "delims=" %%i in ('adb shell settings get global low_power 2^>nul ^<nul') do echo   Battery saver         : %%i
-    adb shell "cmd power get-mode 2>/dev/null" <nul
+    for /f "delims=" %%i in ('adb shell settings get global low_power_sticky 2^>nul ^<nul') do echo   Battery saver sticky  : %%i
+    rem REMOVED: cmd power get-mode. `cmd power` has no get-mode subcommand, so this printed
+    rem an error into the report on every run. The two keys above are the readable state.
     echo.
     echo    [6/6] doze whitelist, RAM and focused app... 1>CON
     echo [Doze whitelist - first 20 entries]
-    adb shell "dumpsys deviceidle whitelist 2>/dev/null" <nul
+    rem the label said 20; the command printed the lot, which on a loaded phone buries the
+    rem rest of the report. head is in toybox on every supported build.
+    adb shell "dumpsys deviceidle whitelist 2>/dev/null | head -20" <nul
     echo.
-    echo [Top 10 RAM consumers]
+    echo [RAM by OOM group - first 40 lines]
+    rem was labelled "Top 10 RAM consumers"; head -40 is roughly the headers plus the top of
+    rem each OOM group, which is not the same thing and is not ten of anything.
     adb shell "dumpsys meminfo --oom 2>/dev/null | head -40" <nul
     echo.
     echo [Currently focused app]
@@ -1382,9 +1766,16 @@ timeout /t 1 /nobreak > nul
 set "refresh_rate="
 :: FIX: match CheckSetting - SurfaceFlinger prints refresh-rate=<n>, so take
 :: tokens=2 delims==. The old tokens=3 delims=space often grabbed "Hz".
-for /f "tokens=2 delims=:=" %%i in ('adb shell "dumpsys SurfaceFlinger 2>/dev/null | grep refresh-rate"') do (
+:: FIX (Auto Setup stopped at step one on older Android): AOSP prints "refresh rate: 60.000002
+:: fps" up to Android 11 and "refresh-rate=120.000000" on newer builds. Matching only the
+:: hyphenated form missed the older one entirely, and since this is the first step, failing to
+:: detect it printed "Auto setup cannot continue" and nothing else ran. grep "refresh.rate"
+:: matches the space and the hyphen; the fps suffix is stripped alongside Hz below.
+for /f "tokens=2 delims=:=" %%i in ('adb shell "dumpsys SurfaceFlinger 2>/dev/null | grep -i refresh.rate"') do (
     set "refresh_rate=%%i"
 )
+if defined refresh_rate set "refresh_rate=!refresh_rate: fps=!"
+if defined refresh_rate set "refresh_rate=!refresh_rate:fps=!"
 if defined refresh_rate set "refresh_rate=!refresh_rate: Hz=!"
 if defined refresh_rate set "refresh_rate=!refresh_rate:Hz=!"
 if defined refresh_rate set "refresh_rate=!refresh_rate: =!"
@@ -1509,11 +1900,19 @@ adb shell cmd looper_stats disable <nul
 call :dropbox_lowprio
 adb shell cmd dropbox set-rate-limit 20000000000000 <nul
 adb shell cmd autofill set log_level off <nul
-adb shell cmd thermalservice override-status 1 <nul
+:: REMOVED: cmd thermalservice override-status 1. An override does not stop throttling - it
+:: makes the framework REPORT that status and stop reporting the real one until something
+:: clears it, and only Performance Off ever did. Pinning it at LIGHT on every Auto Setup left
+:: the phone unable to signal real heat, which is a safety signal, for a benefit nobody can
+:: point at. The Thermal screen still offers overrides deliberately, and can now clear them.
 :: ----- NEW SAFE OPTIMIZATIONS (from the .sh script, vetted) -----
-:: Universal log silencer (REAL, persists across reboots)
-adb shell setprop persist.log.tag '*:S' <nul > nul 2>&1
-adb shell setprop log.tag '*:S' <nul > nul 2>&1
+:: REMOVED (it never did anything): setprop persist.log.tag '*:S', and log.tag likewise.
+:: liblog reads only the FIRST character of these properties as a level letter - V D I W E F S
+:: - and '*' is not one, so the whole value was ignored and no tag was ever silenced. The
+:: value that does work is a bare 'S', but that silences everything including crash logs,
+:: which is a decision to take deliberately rather than a free speed-up to apply behind the
+:: user's back. The per-tag log.tag.<TAG> S lines elsewhere are unaffected: there the name is
+:: a real tag and the single letter is a real level.
 :: NOTE: ANGLE-for-all-apps is intentionally NOT applied here.
 :: It is device/GPU dependent and is known to crash many apps on
 :: non-Pixel hardware (e.g. MediaTek GPUs). It remains available as a
@@ -1668,8 +2067,10 @@ echo  Make sure you have free space and the device is charging.
 echo.
 echo    [Y] Start
 echo    [N] Back
+:: Ctrl+C makes choice return 0 - see the note at the first Restore prompt.
 choice /c:YN /n > nul
 if errorlevel 2 goto compileall
+if not errorlevel 1 goto compileall
 cls
 title Compile All Apps : Heaviest (running)
 echo [1/3] Full compilation of all apps...
@@ -1686,15 +2087,33 @@ echo [2/3] Compiling layout resources (if supported)...
 :: Android 12+, and is handled by ART Service from 14+. So we run it on
 :: its own and detect non-support.
 adb shell pm compile -a --compile-layouts <nul > "%TEMP%\dcx_layouts.txt" 2>&1
-findstr /I /C:"Unknown option" /C:"Error:" /C:"Usage:" "%TEMP%\dcx_layouts.txt" > nul
-if errorlevel 1 (
-    echo   Layout resources compiled.
-) else (
-    echo   [skipped] --compile-layouts is not supported on this device.
-    echo   That's expected on Android 12+ - the view compiler was removed
-    echo   and ART Service handles layout optimization during normal dexopt.
-)
+:: FIX ("compiled." was printed for any output that was not one of three strings): pm can
+:: also answer with a plain "Failure", which matched none of them and so read as success.
+:: Unsupported and failed are different answers and now get different lines - and on a failure
+:: the output file is kept rather than deleted, so there is something to look at. pm's own
+:: text is never echoed back: it is untrusted, and an ^& in it would run on this PC.
+findstr /I /C:"Unknown option" /C:"Usage:" "%TEMP%\dcx_layouts.txt" > nul
+if not errorlevel 1 goto _hc_unsupported
+findstr /I /C:"Error:" /C:"Failure" /C:"Exception" "%TEMP%\dcx_layouts.txt" > nul
+if not errorlevel 1 goto _hc_failed
+echo   Layout resources compiled.
+goto _hc_done
+
+:_hc_unsupported
+echo   [skipped] --compile-layouts is not supported on this device.
+echo   That's expected on Android 12+ - the view compiler was removed
+echo   and ART Service handles layout optimization during normal dexopt.
+goto _hc_done
+
+:_hc_failed
+echo   [%y%WARN%w%] pm reported a failure while compiling layouts - nothing was
+echo             compiled. The full output is kept at:
+echo             %TEMP%\dcx_layouts.txt
+goto _hc_kept
+
+:_hc_done
 del "%TEMP%\dcx_layouts.txt" > nul 2>&1
+:_hc_kept
 echo.
 echo [3/3] Running background dexopt job...
 call :run_bgdexopt
@@ -1791,8 +2210,22 @@ title Clear Last Used Is Running^^!
 :: redirects are ">/dev/null 2>/dev/null", never "2>&1" - an "&" inside a quoted adb
 :: argument inside a for /f IN clause is exactly the nested-quoting boundary that has
 :: bitten this script before, and "2>/dev/null" needs no "&" to do the same job.
+:: The per-package result is not visible from here - the shell loop throws each command's
+:: output away and echoes the package name either way - so this lists what was ATTEMPTED and
+:: does not claim each one worked. cmd usagestats clear-last-used-timestamps arrived in
+:: Android 13 (API 33); below that every call fails silently, which is worth saying up front
+:: rather than printing a full page of ticks for nothing.
+set "_cl_hi="
+for /f "eol=0 delims=0123456789" %%n in ("%SDK%") do set "_cl_hi=%%n"
+if defined _cl_hi goto _clearlast_run
+if %SDK% GEQ 33 goto _clearlast_run
+echo  [%y%NOTE%w%] This device reports Android SDK %SDK%. The per-app command needs SDK 33
+echo         ^(Android 13^) or newer, so the list below will scroll past without
+echo         clearing anything. The cleanup commands after it still run.
+echo.
+:_clearlast_run
 for /f "delims=" %%a in ('adb shell "pm list packages | while read p; do p=${p#package:}; cmd usagestats clear-last-used-timestamps $p >/dev/null 2>/dev/null; echo $p; done" ^<nul') do (
-echo %%a ━ clear last used^^!
+echo %%a ━ attempted
 )
 echo.
 echo.
@@ -1801,7 +2234,10 @@ adb shell cmd activity clear-debug-app <nul
 adb shell cmd activity clear-exit-info <nul
 adb shell cmd activity clear-watch-heap all <nul
 adb shell cmd blob_store clear-all-sessions <nul
-adb shell cmd blob_store clear-all-blobs <nul
+:: REMOVED: cmd blob_store clear-all-blobs. This screen clears usage timestamps; that line
+:: deleted every app's committed BlobStore data - shared blobs apps rely on and will have to
+:: download or rebuild - which is nothing to do with "last used" and is not recoverable.
+:: clear-all-sessions above only drops in-progress, uncommitted sessions, so it stays.
 echo.
 echo Done. Press any key to return to Optimize.
 pause > nul
@@ -2394,15 +2830,19 @@ echo  Optimize - SurfaceFlinger write. Empty setprop resets them for this boot;
 echo  a reboot also clears any leftovers.
 echo.
 echo  [%g%Y%w%] Clear now    [%g%N%w%] Cancel
+:: Ctrl+C makes choice return 0 - see the note at the first Restore prompt.
 choice /c:YN /n >nul
 if errorlevel 2 goto sftmenu
+if not errorlevel 1 goto sftmenu
 echo.
 call :_sf_clear_props
 echo.
 echo  Cleared. Optional reboot finishes any stuck SF state.
 echo  [%g%R%w%] Reboot now    [%g%B%w%] Back without reboot
+:: Ctrl+C makes choice return 0 - see the note at the first Restore prompt.
 choice /c:RB /n >nul
 if errorlevel 2 goto sftmenu
+if not errorlevel 1 goto sftmenu
 adb reboot <nul
 goto sftmenu
 
@@ -2431,8 +2871,10 @@ for %%P in (
     debug.sf.late.app.duration
     debug.sf.late.sf.duration
 ) do (
+    rem FIX: this printed "cleared" for all 21 properties without looking. A read-only or
+    rem OEM-protected prop makes setprop fail, and the screen said it was cleared anyway.
     adb shell setprop %%P '' <nul >nul 2>&1
-    echo  cleared %%P
+    if errorlevel 1 (echo  [%y%WARN%w%] %%P - the device refused this one) else (echo  cleared %%P)
 )
 exit /b
 :: ===========================================================================
@@ -2851,9 +3293,21 @@ goto appbattery_done
 :appbattery_med
 adb shell am set-inactive !BPKG! true <nul
 adb shell am set-standby-bucket !BPKG! restricted <nul
-adb shell cmd activity set-bg-restriction-level --user 0 !BPKG! restricted <nul
+:: FIX (the level was rejected and DCX said it applied): "restricted" is a standby-BUCKET
+:: name, which is why the line above it is correct; the restriction LEVELS are unrestricted,
+:: exempted, adaptive_bucket, restricted_bucket, background_restricted and hibernation. The
+:: bucket half of Medium always worked, so this only ever lost the restriction half - and the
+:: flat "Applied Medium restrict." hid that, which is the part worth fixing either way.
+adb shell cmd activity set-bg-restriction-level --user 0 !BPKG! restricted_bucket <nul
+set "_bgrc=!errorlevel!"
 echo.
+if not "!_bgrc!"=="0" goto appbattery_med_warn
 echo  Applied Medium restrict.
+goto appbattery_done
+
+:appbattery_med_warn
+echo  [%y%WARN%w%] The device refused the restriction level ^(exit !_bgrc!^).
+echo         The standby bucket was still set, so the app is restricted, just less so.
 goto appbattery_done
 
 :appbattery_heavy
@@ -3532,8 +3986,10 @@ echo  %r%=========================================================%w%
 echo.
 echo  [%g%Y%w%] Continue
 echo  [%g%N%w%] Cancel
+:: Ctrl+C makes choice return 0 - see the note at the first Restore prompt.
 choice /c:YN /n > nul
 if errorlevel 2 goto Deviceidle
+if not errorlevel 1 goto Deviceidle
 cls
 call :logo
 title Removing system apps from Doze whitelist...
@@ -3847,12 +4303,11 @@ adb shell setprop debug.sf.show_msync2_trace false <nul
 cls
 call :_dcfg_warn
 ::if something is wrong , revert this prop by reboot
-:: NEW: universal log silencer (real, persistent across reboots).
-:: This is what `persist.log.tag "*:S"` from the user's .sh actually
-:: does - silences ALL logcat tags at the "Silent" level. The
-:: existing per-tag setprops below remain as a belt-and-braces.
-adb shell setprop persist.log.tag '*:S' <nul > nul 2>&1
-adb shell setprop log.tag '*:S' <nul > nul 2>&1
+:: REMOVED (it never did anything): setprop persist.log.tag '*:S', and log.tag likewise.
+:: The .sh this came from was wrong: liblog reads only the FIRST character of the property as
+:: a level letter, and '*' is not one, so the value was ignored and nothing was silenced. A
+:: bare 'S' does work, but it hides crash logs too, so it is not applied automatically. The
+:: per-tag setprops below are the ones that actually silence anything.
 adb shell setprop debug.vendor.gpu.record_sbwc false <nul
 adb shell setprop debug.egl.blobcache.multifile false <nul
 adb shell setprop debug.tracefpunwindoff 1 <nul
@@ -4211,7 +4666,10 @@ adb shell settings delete global settings_enable_spa_metrics <nul > nul 2>&1
 adb shell device_config put device_personalization_services SpeechRecognitionService__clear_logging_events_if_too_much_memory false <nul
 adb shell settings delete global netstats_augment_enabled <nul > nul 2>&1
 adb shell settings delete global netstats_combine_subtype_enabled <nul > nul 2>&1
-adb shell device_config put interaction_jank_monitor enabled true <nul
+:: FIX (restore by deleting, not by guessing): Off wrote false here, so On wrote true -
+:: but true is this build's value only if that is what the framework default happens to be.
+:: Deleting the flag hands it back to whatever the platform sets, which is what "On" means.
+adb shell device_config delete interaction_jank_monitor enabled <nul > nul 2>&1
 adb shell device_config delete systemui enable_notification_memory_monitoring <nul > nul 2>&1
 adb shell settings delete global sys_uidcpupower <nul > nul 2>&1
 adb shell settings delete global contacts_database_wal_enabled <nul > nul 2>&1
@@ -4270,7 +4728,9 @@ adb shell settings delete global enable_gnss_raw_meas_full_tracking <nul > nul 2
 adb shell settings delete global force_enable_pss_profiling <nul > nul 2>&1
 adb shell settings delete global verbose_logging_level_disabled <nul > nul 2>&1
 adb shell settings delete global enable_gpu_debug_layers <nul > nul 2>&1
-adb shell cmd autofill set max_visible_datasets 10 <nul
+:: FIX: Off and Auto Setup both set 0, which means "use the framework default". Setting 10
+:: on the way back did not restore anything - it pinned a number nobody chose.
+adb shell cmd autofill set max_visible_datasets 0 <nul
 adb shell settings delete global sys_traced <nul > nul 2>&1
 adb shell settings delete system user_log_enabled <nul > nul 2>&1
 adb shell settings delete system window_orientation_listener_log <nul > nul 2>&1
@@ -4295,8 +4755,12 @@ adb shell settings delete global persist.sampling_profiler <nul > nul 2>&1
 adb shell settings delete system Logcat.live <nul > nul 2>&1
 adb shell settings delete system remote_control <nul > nul 2>&1
 adb shell settings delete system log.closeguard.Animation <nul > nul 2>&1
-call :dropbox_lowprio
-adb shell cmd dropbox set-rate-limit 2000 <nul
+:: FIX (this re-APPLIED the Off state instead of undoing it): :dropbox_lowprio adds eight
+:: tags to dropbox's low-priority list and set-rate-limit changes the broadcast period -
+:: calling them again on the "On" path just did Off's work twice. AOSP's own undo is
+:: restore-defaults, which re-reads config_dropboxLowPriorityTags and the rate-limit period
+:: from framework resources, i.e. exactly the state those two moved away from.
+adb shell cmd dropbox restore-defaults <nul > nul 2>&1
 adb shell setprop persist.traced_perf.enable 1 <nul > nul 2>&1
 :: FIX: copy-paste bug - this is the On/restore path so it must re-ENABLE
 :: (true). It was `false`, identical to :offlogss, so the key never reverted.
@@ -4375,6 +4839,23 @@ adb shell settings put global low_power_sticky 0 <nul
 call :_act_reset
 call :_settings_verify global low_power 1
 call :_act_summary
+:: FIX (the [OK] above means the key was written, not that the saver is running): Android
+:: refuses to engage battery saver while the device is powered, and over USB it always is -
+:: low_power still reads back 1, so the verify passed and the screen looked like success.
+:: No dumpsys parsing needed to say this: a serial with a ':' in it is a Wi-Fi connection,
+:: anything else is the cable DCX is talking over.
+echo.
+:: guard first: on an UNDEFINED variable !X::=! is not a substitution at all
+if not defined ANDROID_SERIAL goto _onsv_wifi
+if not "!ANDROID_SERIAL!"=="!ANDROID_SERIAL::=!" goto _onsv_wifi
+echo  %y%Note:%w% the phone is on USB, so it is charging - Android will not actually
+echo  turn battery saver on until you unplug it. The setting is stored and takes
+echo  effect then.
+goto _onsv_done
+:_onsv_wifi
+echo  %y%Note:%w% if the phone is charging, Android will not turn battery saver on
+echo  until it is unplugged. The setting is stored either way.
+:_onsv_done
 echo Press Any Button To Go Back
 pause > nul
 goto Battery
@@ -4519,14 +5000,20 @@ adb shell settings put global wifi_networks_available_notification_on 0 <nul
 adb shell settings put global wifi_watchdog_on 0 <nul
 adb shell settings put global wifi_watchdog_poor_network_test_enabled 0 <nul
 adb shell settings put global wifi_scan_always_enabled 0 <nul > nul 2>&1
-adb shell settings put global bluetooth_scan_always_enabled 0 <nul > nul 2>&1
+:: FIX (the toggle wrote a key Android does not read): the Bluetooth-scanning setting is
+:: Settings.Global.BLE_SCAN_ALWAYS_AVAILABLE = "ble_scan_always_enabled". There is no
+:: "bluetooth_scan_always_enabled" in AOSP - it looks like the wifi_ name with the prefix
+:: swapped - so the write landed on an invented key, the verify read that same invented key
+:: back and DCX printed [OK] for a setting it had never touched. Any leftover copy of the old
+:: key is inert and is left alone rather than deleted, in case an OEM does read it.
+adb shell settings put global ble_scan_always_enabled 0 <nul > nul 2>&1
 adb shell settings put global network_recommendations_enabled 0 <nul > nul 2>&1
 adb shell settings put global netstats_enabled 0 <nul > nul 2>&1
 adb shell settings put global network_scoring_ui_enabled 0 <nul > nul 2>&1
 adb shell settings put global wifi_watchdog_poor_network_test_enabled 0 <nul > nul 2>&1
 call :_act_reset
 call :_settings_verify global wifi_scan_always_enabled 0
-call :_settings_verify global bluetooth_scan_always_enabled 0
+call :_settings_verify global ble_scan_always_enabled 0
 call :_act_summary
 echo Press Any Button To Go Back
 pause > nul
@@ -4541,14 +5028,14 @@ adb shell settings delete global wifi_networks_available_notification_on <nul > 
 adb shell settings delete global wifi_watchdog_on <nul > nul 2>&1
 adb shell settings delete global wifi_watchdog_poor_network_test_enabled <nul > nul 2>&1
 adb shell settings put global wifi_scan_always_enabled 1 <nul > nul 2>&1
-adb shell settings put global bluetooth_scan_always_enabled 1 <nul > nul 2>&1
+adb shell settings put global ble_scan_always_enabled 1 <nul > nul 2>&1
 adb shell settings delete global network_recommendations_enabled <nul > nul 2>&1
 adb shell settings put global netstats_enabled 1 <nul > nul 2>&1
 adb shell settings put global network_scoring_ui_enabled 1 <nul > nul 2>&1
 adb shell settings delete global wifi_watchdog_poor_network_test_enabled <nul > nul 2>&1
 call :_act_reset
 call :_settings_verify global wifi_scan_always_enabled 1
-call :_settings_verify global bluetooth_scan_always_enabled 1
+call :_settings_verify global ble_scan_always_enabled 1
 call :_act_summary
 echo Press Any Button To Go Back
 pause > nul
@@ -4716,7 +5203,12 @@ adb shell cmd power set-adaptive-power-saver-enabled false <nul
 adb shell cmd power set-mode 0 <nul
 adb shell settings put global battery_tip_constants app_restriction_enabled=true <nul
 adb shell settings delete global battery_saver_constants <nul > nul 2>&1
-adb shell settings delete global protect_battery <nul > nul 2>&1
+:: REMOVED: settings delete global protect_battery. Grep the file - DCX never writes that key,
+:: so "Off" was not undoing anything of its own. On Samsung it is the user's own charge limit
+:: (the 85%% cap in Settings), and this quietly turned it off for them.
+:: activity_manager_constants IS ours to clear, but it is one whole list rather than a single
+:: value, so capture it first - the undo file can then put back whatever was there.
+call :_tw_undo_add global activity_manager_constants
 adb shell settings delete global activity_manager_constants <nul > nul 2>&1
 :: FIX (revert-completeness): :onsvpp forces the device into low-RAM mode
 :: (debug.force_low_ram true), which persists until reboot and degrades
@@ -4747,6 +5239,7 @@ call :_dcfg_warn
 adb shell dumpsys battery reset <nul
 adb shell device_config put activity_manager bg_current_drain_auto_restrict_abusive_apps_enabled true <nul
 adb shell device_config put activity_manager bg_auto_restrict_abusive_apps 1 <nul
+call :_tw_undo_add global activity_manager_constants
 adb shell settings put global activity_manager_constants power_check_interval=990000,power_check_max_cpu_1=2,power_check_max_cpu_2=2,power_check_max_cpu_3=2,power_check_max_cpu_4=2 <nul
 adb shell settings put global battery_saver_constants advertise_is_enabled=false,enable_datasaver=false,enable_night_mode=true,disable_launch_boost=true,disable_vibration=true,disable_animation=true,disable_soundtrigger=true,defer_full_backup=true,defer_keyvalue_backup=true,enable_firewall=false,location_mode=2,enable_brightness_adjustment=false,adjust_brightness_factor=0.5,force_all_apps_standby=true,force_background_check=true,disable_optional_sensors=true,disable_aod=true,enable_quick_doze=true <nul
 adb shell settings put global battery_tip_constants reduced_battery_enabled=true,battery_saver_tip_enabled=true,high_usage_period_ms=120000,app_restriction_enabled=true,battery_tip_enabled=false,summary_enabled=false,high_usage_enabled=true,high_usage_app_count=1,high_usage_battery_draining=15,reduced_battery_percent=5,low_battery_enabled=true,low_battery_hour=1 <nul
@@ -4982,8 +5475,10 @@ echo  %g%Applied over USB%w% - even if the screen looks wrong you can come
 echo  straight back here and choose Reset.
 echo.
 echo    [Y] Apply    [N] Cancel
+:: Ctrl+C makes choice return 0 - see the note at the first Restore prompt.
 choice /c:YN /n >nul
 if errorlevel 2 goto dispscaler
+if not errorlevel 1 goto dispscaler
 adb shell wm size %NW%x%NH% <nul
 adb shell wm density %ND% <nul
 echo.
@@ -5052,27 +5547,64 @@ set "PDR=" & set "PD=" & set "OVRD="
 for /f "tokens=2 delims=:" %%a in ('adb shell wm density ^<nul 2^>nul ^| findstr /C:"Physical density"') do set "PDR=%%a"
 for /f "tokens=* delims= " %%a in ("%PDR%") do set "PD=%%a"
 for /f "tokens=2 delims=:" %%a in ('adb shell wm density ^<nul 2^>nul ^| findstr /C:"Override density"') do set "OVRD=%%a"
+:: FIX (the presets ignored an active resolution override): they are percentages of the
+:: PHYSICAL density, and the screen promised "resolution stays native". After the 50%%
+:: resolution preset - which halves width, height AND density together - "100%% UI" set the
+:: density back to the physical figure on a half-size panel, doubling the UI. The honest
+:: baseline is the density that matches the resolution actually in use, so scale it by the
+:: override's width. No override, or an unreadable one, leaves the old behaviour untouched.
+if defined OVRD set "OVRD=!OVRD: =!"
+set "PSZ=" & set "OSZ=" & set "PWID=" & set "OWID="
+for /f "tokens=1,* delims=:" %%a in ('adb shell wm size ^<nul 2^>nul') do (
+    if /i "%%a"=="Physical size" set "PSZ=%%b"
+    if /i "%%a"=="Override size" set "OSZ=%%b"
+)
+if defined PSZ set "PSZ=!PSZ: =!"
+if defined OSZ set "OSZ=!OSZ: =!"
+for /f "tokens=1 delims=x" %%a in ("!PSZ!") do set "PWID=%%a"
+for /f "tokens=1 delims=x" %%a in ("!OSZ!") do set "OWID=%%a"
+:: digits-only, without a pipe - see the long note at :_pkg_ok for why not `echo !x!| findstr`
+set "_wbad="
+if defined PWID for /f "eol=0 delims=0123456789" %%c in ("!PWID!") do set "_wbad=%%c"
+if defined _wbad set "PWID="
+set "_wbad="
+if defined OWID for /f "eol=0 delims=0123456789" %%c in ("!OWID!") do set "_wbad=%%c"
+if defined _wbad set "OWID="
+if defined PWID if "!PWID!"=="0" set "PWID="
 if not defined PD goto dispscaler_err
 call :_tw_safechk PD || goto dispscaler_err
 echo !PD!| findstr /r "[^0-9]" >nul && goto dispscaler_err
-set /a U110=PD*110/100, U90=PD*90/100, U85=PD*85/100, U80=PD*80/100
+:: PDB is the 100%% baseline: the physical density, rescaled when a resolution override is
+:: in force so the percentages mean what the labels say on the panel you are actually using.
+set "PDB=!PD!"
+set "SCALED="
+if not defined PWID goto _dsdpi_base
+if not defined OWID goto _dsdpi_base
+if "!PWID!"=="!OWID!" goto _dsdpi_base
+set /a PDB=PD*OWID/PWID
+set "SCALED=1"
+:_dsdpi_base
+set /a U110=PDB*110/100, U90=PDB*90/100, U85=PDB*85/100, U80=PDB*80/100
 echo.
-echo  Changes ONLY the DPI (UI element size); resolution stays native.
+echo  Changes ONLY the DPI (UI element size); the resolution is left as it is.
 echo  This is the reliable replacement for the developer-options
 echo  "Smallest width" entry that some OEMs (e.g. Huawei) disable.
 echo.
-echo  Native density (100%% UI) : %g%%PD% dpi%w%
-if defined OVRD echo  Active override           : %gold%%OVRD% dpi%w%
+echo  Physical density          : %g%%PD% dpi%w%
+if defined OVRD echo  Active density override   : %gold%%OVRD% dpi%w%
+if defined SCALED echo  Resolution override       : %gold%!OSZ! ^(physical !PSZ!^)%w%
+if defined SCALED echo  100%% UI on THAT resolution: %g%!PDB! dpi%w% - the percentages below use this
+if not defined SCALED echo  100%% UI                   : %g%!PDB! dpi%w%
 echo.
 echo  Lower %% = smaller UI, more content fits.
 echo.
 echo                    %g%[%w%1%g%]%w% 110%% UI -^> %U110% dpi   (bigger)
-echo                    %g%[%w%2%g%]%w% 100%% UI -^> %PD% dpi   (native)
+echo                    %g%[%w%2%g%]%w% 100%% UI -^> %PDB% dpi   (matches the current resolution)
 echo                    %g%[%w%3%g%]%w% 90%%  UI -^> %U90% dpi
 echo                    %g%[%w%4%g%]%w% 85%%  UI -^> %U85% dpi   (fix for over-large stock UI)
 echo                    %g%[%w%5%g%]%w% 80%%  UI -^> %U80% dpi   (smallest)
 echo                    %g%[%w%6%g%]%w% Custom dpi
-echo                    %g%[%w%7%g%]%w% Reset to native dpi
+echo                    %g%[%w%7%g%]%w% Reset density to the device default (wm density reset)
 echo                    %g%[%w%8%g%]%w% Back
 
 :dispscaler_dpi_ask
@@ -5103,8 +5635,10 @@ echo  Lower dpi = smaller UI / more content. Fully reversible, no root.
 echo  %g%Applied over USB%w% - if it looks wrong, come back and Reset.
 echo.
 echo    [Y] Apply    [N] Cancel
+:: Ctrl+C makes choice return 0 - see the note at the first Restore prompt.
 choice /c:YN /n >nul
 if errorlevel 2 goto dispscaler_dpi
+if not errorlevel 1 goto dispscaler_dpi
 adb shell wm density %ND% <nul
 echo.
 echo  Done - density is now %ND% dpi. This persists across reboot.
@@ -5231,8 +5765,9 @@ echo To verify after relaunching an app:
 echo   adb shell dumpsys gfxinfo ^<package^> ^| findstr Pipeline
 echo Expected: "Skia (Vulkan)"
 echo.
-echo A reboot - or at least restarting SystemUI - is needed for the
-echo change to take full effect.
+echo %y%Do not reboot to apply this.%w% These are debug.* properties: a reboot CLEARS
+echo them and puts the renderer back to the default. Restart the APPS you want
+echo to test - each one picks up the renderer when its process starts.
 pause > nul
 goto gpurenderer
 
@@ -5315,8 +5850,10 @@ echo  straight back and choose Disable or Delete.
 echo.
 echo    [Y] Enable ANGLE now
 echo    [N] Cancel
+:: Ctrl+C makes choice return 0 - see the note at the first Restore prompt.
 choice /c:YN /n > nul
 if errorlevel 2 goto angleall
+if not errorlevel 1 goto angleall
 adb shell settings put global angle_gl_driver_all_angle 1 <nul
 echo.
 call :_act_reset
@@ -5506,13 +6043,17 @@ if not defined _HCHK exit /b 1
 set "_HCHK=!_HCHK:"=!"
 if not defined _HCHK exit /b 1
 set "_h_bad="
-for /f "delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-" %%c in ("!_HCHK!") do set "_h_bad=%%c"
+:: eol=a, not the default: for /f treats its eol character as the start of a comment, so
+:: "name;anything" passed this check untouched - every character before the ';' is a delimiter,
+:: the ';' was then read as eol and the body never ran. 'a' is already in the list below, so a
+:: leading 'a' is stripped as a delimiter before the eol test can see it.
+for /f "eol=a delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-" %%c in ("!_HCHK!") do set "_h_bad=%%c"
 if defined _h_bad exit /b 1
 :: a DoT server is a domain name - require at least one dot
 if "!_HCHK!"=="!_HCHK:.=!" exit /b 1
 :: must start with a letter or digit, not a dot or a hyphen
 set "_h_bad="
-for /f "delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" %%c in ("!_HCHK:~0,1!") do set "_h_bad=%%c"
+for /f "eol=a delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" %%c in ("!_HCHK:~0,1!") do set "_h_bad=%%c"
 if defined _h_bad exit /b 1
 exit /b 0
 
@@ -5585,6 +6126,11 @@ goto netboost_dns
 :: keys - so undoing one DNS experiment quietly undid four other things too.
 echo.
 echo Restoring automatic DNS . . .
+:: FIX (this threw away a hostname the user typed): private_dns_specifier holds the DoT server
+:: - it is as likely to be one the user set up themselves as one DCX wrote. Capture both keys
+:: into the session undo file first, so "automatic" is reversible from the Undo hub.
+call :_tw_undo_add global private_dns_mode
+call :_tw_undo_add global private_dns_specifier
 adb shell settings put global private_dns_mode opportunistic <nul
 adb shell settings delete global private_dns_specifier <nul
 call :_act_reset
@@ -5599,6 +6145,21 @@ goto netboost_dns
 :netboost_revert
 cls
 title Network Boost : Revert
+:: FIX (Revert deleted keys it had never set): mobile_data_always_on and
+:: tether_offload_disabled are cleaned up here because OLD DCX versions used to write them -
+:: but on a phone that never ran one, they are the user's own Developer-options choices, and
+:: private_dns_specifier is a hostname they typed. Capture everything this screen deletes
+:: before deleting it; the Undo hub can then put the lot back.
+call :_tw_undo_add global tcp_default_init_rwnd
+call :_tw_undo_add global tether_offload_disabled
+call :_tw_undo_add global mobile_data_always_on
+call :_tw_undo_add global wifi_idle_ms
+call :_tw_undo_add global wifi_suspend_optimizations_enabled
+call :_tw_undo_add global wifi_sleep_policy
+call :_tw_undo_add global private_dns_mode
+call :_tw_undo_add global private_dns_specifier
+call :_tw_undo_add global preferred_network_mode
+call :_tw_undo_add global preferred_network_mode1
 adb shell settings delete global tcp_default_init_rwnd <nul > nul 2>&1
 adb shell settings delete global tether_offload_disabled <nul > nul 2>&1
 adb shell settings delete global mobile_data_always_on <nul > nul 2>&1
@@ -5660,8 +6221,10 @@ echo  %r%=============================================================%w%
 echo.
 echo  [%g%Y%w%] Yes, disable GMS now
 echo  [%g%N%w%] No, take me back
+:: Ctrl+C makes choice return 0 - see the note at the first Restore prompt.
 choice /c:YN /n > nul
 if errorlevel 2 goto Gaming
+if not errorlevel 1 goto Gaming
 cls
 title GMS : Off
 adb shell am force-stop com.google.android.gms <nul
@@ -5723,8 +6286,10 @@ echo    adservices.api, as.oss, mainline.telemetry, mainline.adservices,
 echo    federatedcompute, partnersetup, feedback, apps.turbo
 echo.
 echo  [%g%Y%w%] Disable them now    [%g%N%w%] Cancel
+:: Ctrl+C makes choice return 0 - see the note at the first Restore prompt.
 choice /c:YN /n >nul
 if errorlevel 2 goto gms
+if not errorlevel 1 goto gms
 call :_act_reset
 call :_gms_safe_one disable-user com.google.android.adservices.api
 call :_gms_safe_one disable-user com.google.android.as.oss
@@ -5788,7 +6353,9 @@ title Thermal override (temporary)
 echo.
 echo.
 echo  Temporary thermalservice override-status ^(usually clears on reboot^).
-echo  Not a permanent cooling profile.
+echo  Not a permanent cooling profile - and not cooling at all: an override makes
+echo  the framework REPORT that status and stop reporting the real one, so even
+echo  "0 = NONE" is a lock rather than "throttling off". Option 7 clears it.
 echo.
 echo [%r%1%w%] Process To Setting Thermal
 echo [%r%2%w%] Go Back
@@ -5811,18 +6378,28 @@ echo  3 = SEVERE
 echo  4 = CRITICAL
 echo  5 = EMERGENCY
 echo  6 = SHUTDOWN (do not use)
+echo  7 = Clear the override - the device reports its own thermal status again
 echo.
 set "kb=" & set /p kb=">> "
 :: FIX: validate input - previously any garbage was accepted
 set "valid=0"
-for %%v in (0 1 2 3 4 5 6) do if "!kb!"=="%%v" set "valid=1"
+for %%v in (0 1 2 3 4 5 6 7) do if "!kb!"=="%%v" set "valid=1"
 if "%valid%"=="0" (
     echo [%r%^^!%w%] Invalid value. Must be a number between 0 and 6.
     timeout /t 2 /nobreak > nul
     goto thermal
 )
 cls
-adb shell cmd thermalservice override-status %kb% <nul
+if "!kb!"=="7" goto thermal_clear
+adb shell cmd thermalservice override-status !kb! <nul
+echo  Status is now pinned at !kb! until you clear it ^(option 7^) or reboot.
+echo Press Any Button To Go Back.
+pause > nul
+goto Gaming
+
+:thermal_clear
+adb shell cmd thermalservice reset <nul
+echo  Override cleared - the device reports its own thermal status again.
 echo Press Any Button To Go Back.
 pause > nul
 goto Gaming
@@ -6133,8 +6710,12 @@ adb shell setprop debug.rs.precision rs_fp_full <nul
 adb shell setprop debug.hwui.high_performance_mode true <nul
 adb shell settings put system multicore_packet_scheduler 1 <nul
 adb shell settings put global sem_enhanced_cpu_responsiveness 1 <nul
+call :_tw_undo_add global activity_manager_constants
 adb shell settings put global activity_manager_constants max_cached_processes=12,power_check_interval=80000,power_check_max_cpu_1=85,power_check_max_cpu_2=85,power_check_max_cpu_3=60,power_check_max_cpu_4=15 <nul
-adb shell setprop debug.cpurend.vsync false <nul
+:: REMOVED: setprop debug.cpurend.vsync false. The README says the vsync-disabling props
+:: were retired from Performance Mode for the same reason the sqlite ones were - turning off
+:: vsync buys tearing, not frames - and this one was left behind. (debug.egl.swapinterval 0
+:: below went with it.)
 adb shell setprop debug.sf.hw 1 <nul
 adb shell setprop debug.rs.max-threads 8 <nul
 adb shell setprop debug.sf.vsync_reactor_ignore_present_fences true <nul
@@ -6150,7 +6731,7 @@ adb shell setprop debug.hwui.skip_empty_damage true <nul
 adb shell setprop debug.composition.type dyn <nul
 adb shell setprop debug.hwui.use_buffer_age true <nul
 adb shell setprop debug.hwui.use_partial_updates true <nul
-adb shell setprop debug.egl.swapinterval 0 <nul
+:: REMOVED: setprop debug.egl.swapinterval 0 - the other half of the retired vsync pair.
 adb shell setprop debug.gralloc.map_fb_memory 1 <nul
 adb shell setprop debug.gralloc.enable_fb_ubwc 1 <nul
 adb shell setprop debug.sf.swaprect 1 <nul
@@ -6204,7 +6785,7 @@ echo                            %b%[%w% App Manager %b%]%w%
 echo.
 echo   Background control + debloat. Every action here is reversible.
 echo.
-echo                 %g%[%w%1%g%]%w% Restrict app background (deny RUN_IN_BACKGROUND)
+echo                 %g%[%w%1%g%]%w% Restrict app background (deny RUN_ANY_IN_BACKGROUND)
 echo                 %g%[%w%2%g%]%w% Allow app background (revert)
 echo                 %g%[%w%3%g%]%w% Debloat - remove an app by package name
 echo                 %g%[%w%4%g%]%w% Debloat - suggested bloatware (auto-detect brand)
@@ -6227,7 +6808,7 @@ goto appmgr
 cls
 title Restrict Background
 call :logo
-echo  Denies RUN_IN_BACKGROUND for an app so it can't run in the
+echo  Denies RUN_ANY_IN_BACKGROUND (and the legacy RUN_IN_BACKGROUND) so it can't run in the
 echo  background (saves battery). Reversible with "Allow background".
 echo  Tip: use "List installed packages" first if you don't know the name.
 echo.
@@ -6245,10 +6826,16 @@ if errorlevel 1 (
     pause >nul
     goto appmgr_restrict
 )
+:: FIX (this did nothing to a modern app): Android checks RUN_IN_BACKGROUND only for apps
+:: targeting below Android 8; everything since is governed by RUN_ANY_IN_BACKGROUND. Setting
+:: only the old op left the app running in the background while DCX reported it restricted.
+:: The GMS routine has always set both - this is the same pair. The op read back below is the
+:: one that actually decides, so the [OK] now means what it says.
+adb shell cmd appops set !pkg! RUN_ANY_IN_BACKGROUND deny <nul
 adb shell cmd appops set !pkg! RUN_IN_BACKGROUND deny <nul
 echo.
 set "_ao="
-for /f "delims=" %%i in ('adb shell cmd appops get !pkg! RUN_IN_BACKGROUND 2^>nul ^<nul') do set "_ao=%%i"
+for /f "delims=" %%i in ('adb shell cmd appops get !pkg! RUN_ANY_IN_BACKGROUND 2^>nul ^<nul') do set "_ao=%%i"
 echo  Device reports: !_ao!
 set "_aoq=!_ao:deny=!"
 if "!_aoq!"=="!_ao!" (echo [%r%^^!%w%] Restrict may not have landed.) else (echo [%g%+%w%] Background denied for !pkg!.)
@@ -6275,10 +6862,11 @@ if errorlevel 1 (
     pause >nul
     goto appmgr_allow
 )
+adb shell cmd appops set !pkg! RUN_ANY_IN_BACKGROUND allow <nul
 adb shell cmd appops set !pkg! RUN_IN_BACKGROUND allow <nul
 echo.
 set "_ao="
-for /f "delims=" %%i in ('adb shell cmd appops get !pkg! RUN_IN_BACKGROUND 2^>nul ^<nul') do set "_ao=%%i"
+for /f "delims=" %%i in ('adb shell cmd appops get !pkg! RUN_ANY_IN_BACKGROUND 2^>nul ^<nul') do set "_ao=%%i"
 echo  Device reports: !_ao!
 set "_aoq=!_ao:allow=!"
 if "!_aoq!"=="!_ao!" (echo [%r%^^!%w%] Allow may not have landed.) else (echo [%g%+%w%] Background allowed for !pkg!.)
@@ -6325,8 +6913,10 @@ if errorlevel 1 (
 echo.
 echo  About to remove: !pkg!
 echo    [Y] Remove    [N] Cancel
+:: Ctrl+C makes choice return 0 - see the note at the first Restore prompt.
 choice /c:YN /n >nul
 if errorlevel 2 goto appmgr
+if not errorlevel 1 goto appmgr
 adb shell pm uninstall -k --user 0 !pkg! <nul
 echo.
 echo Done. To bring it back: App Manager -^> Restore (or a factory reset).
@@ -6493,8 +7083,10 @@ echo  data). Restore later via App Manager -^> Restore, or a factory reset.
 echo.
 echo    [Y] Remove these now
 echo    [N] Cancel
+:: Ctrl+C makes choice return 0 - see the note at the first Restore prompt.
 choice /c:YN /n >nul
 if errorlevel 2 goto appmgr_suggest
+if not errorlevel 1 goto appmgr_suggest
 echo.
 for %%p in (%_found%) do (
     echo Removing %%p ...
@@ -6684,8 +7276,10 @@ if "!dc!"=="3" (
     echo.
     echo  %y%Warning:%w% persistent stays frozen across reboot until you pick [1].
     echo    [Y] Freeze DeviceConfig sync permanently    [N] Cancel
+    rem Ctrl+C makes choice return 0 - see the note at the first Restore prompt.
     choice /c:YN /n >nul
     if errorlevel 2 goto tw_dcfgsync
+    if not errorlevel 1 goto tw_dcfgsync
     call :_tw_undo_dcfgsync
     adb shell device_config set_sync_disabled_for_tests persistent <nul >nul 2>&1
     call :_dcfgsync_verify persistent
@@ -6997,7 +7591,16 @@ exit /b 0
 :: Lazily create a session undo .bat with :dcx_do / :dcx_report defined UP TOP
 :: and a :dcx_main section that grows. New restore lines are inserted before
 :: the trailing "goto :dcx_report" so the file stays runnable after every write.
-if defined EXP_UNDO exit /b 0
+:: FIX (recording stopped silently): this returned as soon as EXP_UNDO was SET, so if the
+:: file was deleted - easy to do, the Backups hub opens that very folder - every later write
+:: in the session went unrecorded while DCX kept saying changes were undoable. Require the
+:: file to still be there. A fresh one cannot hold what the deleted one held, so say that.
+if defined EXP_UNDO if exist "%EXP_UNDO%" exit /b 0
+if defined EXP_UNDO echo  [%y%WARN%w%] The session undo file is gone - starting a new one.
+if defined EXP_UNDO echo         Changes made before now are no longer undoable from it.
+:: A new file has captured nothing yet, so forget what the old one held - otherwise the
+:: first write to each key after this point would be skipped as "already recorded".
+for /f "delims==" %%v in ('set _TWSEEN_ 2^>nul') do set "%%v="
 set "BACKUPDIR=%USERPROFILE%\dcx_backups"
 if not exist "%BACKUPDIR%" mkdir "%BACKUPDIR%"
 set "TS=%date%_%time%"
@@ -7016,13 +7619,27 @@ call :_bk_write_adb_boot "%EXP_UNDO%"
     echo goto :dcx_main
     echo.
     echo :dcx_do
-    echo "%%ADB%%" shell %%* ^>nul 2^>^&1
-    echo if errorlevel 1 ^(
-    echo     set /a DCX_FAIL+=1
-    echo     echo   [FAIL] %%*
-    echo ^) else ^(
-    echo     set /a DCX_OK+=1
-    echo ^)
+    echo :: Runs one restore command and records whether it landed. Uses %%ADB%%
+    echo :: from the header ^(not bare adb - this file is not next to adb\^).
+    echo :: The command arrives in DCX_CMD rather than as an argument: CALL re-expands its
+    echo :: arguments, and that second parse used to eat the phone's own values - a ringtone
+    echo :: URI's %%%%20 became this file's empty second argument ^(Over%%%%20the%%%%20Horizon
+    echo :: restored as Over0the0Horizon^) and a ^^ came back doubled.
+    echo if defined DCX_CMD goto :dcx_do_run
+    echo echo   [FAIL] a restore line is missing its command - this file may be truncated
+    echo set /a DCX_FAIL+=1
+    echo goto :eof
+    echo :dcx_do_run
+    echo "%%ADB%%" shell "%%DCX_CMD%%" ^>nul 2^>^&1
+    echo set "DCX_RC=%%errorlevel%%"
+    echo if not "%%DCX_RC%%"=="0" goto :dcx_do_fail
+    echo set /a DCX_OK+=1
+    echo set "DCX_CMD="
+    echo goto :eof
+    echo :dcx_do_fail
+    echo set /a DCX_FAIL+=1
+    echo echo   [FAIL] "%%DCX_CMD%%"
+    echo set "DCX_CMD="
     echo goto :eof
     echo.
     echo :dcx_hold
@@ -7053,16 +7670,32 @@ exit /b 0
 
 :_tw_undo_add
 :: Capture settings namespace/key into the session undo script before a write.
+:: FIX (undo restored the value from before your LAST change, not the original): every write
+:: appended another capture and the file replays top to bottom, so a key changed twice ended
+:: at the middle value - font scale 1.0 -> 1.15 -> 1.30 undid to 1.15, and the status-bar icon
+:: editor hit it on every second toggle because it re-captures icon_blacklist each time. The
+:: FIRST capture is the one that restores what you started with, so a key already recorded in
+:: this session is left alone. What has been captured is remembered in _TWSEEN_<ns>_<key>
+:: rather than re-read out of the file: one variable per key costs nothing, cannot be confused
+:: by a key that is a prefix of another, and has no quoting to get wrong. :_tw_undo_ensure
+:: clears them when it starts a new file, so the two never disagree. The :: DCX_KEY line stays
+:: in the file to say which key the two lines after it restore.
 call :_tw_undo_ensure
+if defined _TWSEEN_%~1_%~2 exit /b 0
 call :_tw_undo_prep || goto _tw_undo_broken
+set "_TWSEEN_%~1_%~2=1"
+>>"%EXP_UNDO%" echo :: DCX_KEY settings %~1 %~2
 call :_bk_settings %~1 %~2 "%EXP_UNDO%"
 call :_tw_undo_finish
 exit /b
 
 :_tw_undo_dcfgsync
-:: Capture DeviceConfig sync mode into the same undo script.
+:: Capture DeviceConfig sync mode into the same undo script. First capture wins, as above.
 call :_tw_undo_ensure
+if defined _TWSEEN_dcfgsync exit /b 0
 call :_tw_undo_prep || goto _tw_undo_broken
+set "_TWSEEN_dcfgsync=1"
+>>"%EXP_UNDO%" echo :: DCX_KEY dcfgsync
 call :_bk_dcfgsync "%EXP_UNDO%"
 call :_tw_undo_finish
 exit /b
@@ -7368,14 +8001,18 @@ for /f "delims=" %%i in ('adb shell settings get global heads_up_notifications_e
 if "!HUV!"=="" set "HUV=null"
 set "HUV=!HUV:"=!"
 echo  heads_up_notifications_enabled (global) = "!HUV!"
-echo    (1/null = pop-ups shown, 0 = notifications go straight to the shade)
+echo    (1 = pop-ups shown; 0 OR UNSET = notifications go straight to the shade)
 echo  Applies to every app at once. Per-app control lives in the device's
 echo  own notification settings, not here.
 echo.
 echo    %g%[%w%1%g%]%w% Enable pop-ups
 echo    %g%[%w%2%g%]%w% Disable pop-ups
-echo    %g%[%w%3%g%]%w% Reset to device default (delete key)
+echo    %g%[%w%3%g%]%w% Delete the key - this turns pop-ups OFF, it is not a reset
 echo    %g%[%w%4%g%]%w% Back
+echo.
+echo  %y%Note:%w% SystemUI reads this key with a default of OFF, so deleting it is the
+echo  same as [2] rather than "back to how the phone shipped" - phones ship with the
+echo  key already written to 1. Use [1] if you want pop-ups back.
 set "hu=" & set /p hu="Choose An Option >> "
 if not defined hu goto tw_headsup
 if "!hu!"=="1" (call :_tw_undo_add global heads_up_notifications_enabled & adb shell settings put global heads_up_notifications_enabled 1 <nul & goto tw_headsup)
@@ -7513,7 +8150,7 @@ echo    %g%[%w%4%g%]%w% AC + USB (3)
 echo    %g%[%w%5%g%]%w% AC + USB + wireless (7)
 echo    %g%[%w%6%g%]%w% Everything incl. dock (15)
 echo    %g%[%w%7%g%]%w% Custom (0 - 15)
-echo    %g%[%w%8%g%]%w% Reset to device default (delete key)
+echo    %g%[%w%8%g%]%w% Delete the key - Android then uses AC only, the same as [2]
 echo    %g%[%w%9%g%]%w% Back
 set "saw=" & set /p saw="Choose An Option >> "
 if not defined saw goto tw_stay
@@ -7581,9 +8218,12 @@ echo    %g%[%w%6%g%]%w% Night light colour temperature
 echo    %g%[%w%7%g%]%w% Back
 set "nm=" & set /p nm="Choose An Option >> "
 if not defined nm goto tw_night
-if "!nm!"=="1" (adb shell cmd uimode night yes <nul & timeout /t 1 /nobreak >nul & goto tw_night)
-if "!nm!"=="2" (adb shell cmd uimode night no <nul & timeout /t 1 /nobreak >nul & goto tw_night)
-if "!nm!"=="3" (adb shell cmd uimode night auto <nul & timeout /t 1 /nobreak >nul & goto tw_night)
+:: FIX: the README promises every Tweaks write is undo-protected, and these three were the
+:: exception. cmd uimode night writes Settings.Secure.ui_night_mode, which Backup already
+:: captures - so the session undo file can capture it the same way everything else does.
+if "!nm!"=="1" (call :_tw_undo_add secure ui_night_mode & adb shell cmd uimode night yes <nul & timeout /t 1 /nobreak >nul & goto tw_night)
+if "!nm!"=="2" (call :_tw_undo_add secure ui_night_mode & adb shell cmd uimode night no <nul & timeout /t 1 /nobreak >nul & goto tw_night)
+if "!nm!"=="3" (call :_tw_undo_add secure ui_night_mode & adb shell cmd uimode night auto <nul & timeout /t 1 /nobreak >nul & goto tw_night)
 if "!nm!"=="4" (call :_tw_undo_add secure night_display_activated & adb shell settings put secure night_display_activated 1 <nul & goto tw_night)
 if "!nm!"=="5" (call :_tw_undo_add secure night_display_activated & adb shell settings put secure night_display_activated 0 <nul & goto tw_night)
 if "!nm!"=="6" goto tw_night_temp
@@ -7788,7 +8428,7 @@ call :_tw_prof_add global low_power "%~1"
 call :_tw_prof_add global low_power_sticky "%~1"
 call :_tw_prof_add global zram_enabled "%~1"
 call :_tw_prof_add global wifi_scan_always_enabled "%~1"
-call :_tw_prof_add global bluetooth_scan_always_enabled "%~1"
+call :_tw_prof_add global ble_scan_always_enabled "%~1"
 call :_tw_prof_add global hotword_detection_enabled "%~1"
 call :_tw_prof_add global always_finish_activities "%~1"
 call :_tw_prof_add global package_verifier_enable "%~1"
@@ -7809,11 +8449,15 @@ exit /b
 :: profile round-trips "this key was not set" instead of losing it.
 :: DisableDelayedExpansion on the read so a '!' in the value is not eaten - see the note
 :: in :_bk_settings. Both goto exits below leave via `exit /b`, which pops the scopes.
+:: FIX (same as :_bk_settings): Android prints the literal `null` for a key that is not set,
+:: so empty output means the read did not happen - and recording that as `null` wrote DELETE
+:: into the profile, which then deletes the key on every later apply. Skip the key instead.
 setlocal DisableDelayedExpansion
 set "PVAL="
-for /f "delims=" %%v in ('adb shell settings get %~1 %~2 2^>nul ^<nul') do set "PVAL=%%v"
+set "PGOT="
+for /f "delims=" %%v in ('adb shell settings get %~1 %~2 2^>nul ^<nul') do set "PVAL=%%v" & set "PGOT=1"
 setlocal EnableDelayedExpansion
-if "!PVAL!"=="" set "PVAL=null"
+if not defined PGOT goto _tw_prof_unread
 set "PVAL=!PVAL:"=!"
 if /i "!PVAL!"=="null" goto _tw_prof_del
 call :_tw_safechk PVAL || goto _tw_prof_skip
@@ -7828,6 +8472,10 @@ exit /b
 
 :_tw_prof_skip
 >>"%~3" echo # %~1^|%~2 skipped - value holds a character DCX will not round-trip
+exit /b
+
+:_tw_prof_unread
+>>"%~3" echo # %~1^|%~2 skipped - the device did not answer, value not captured
 exit /b
 
 :tw_prof_apply
@@ -8039,9 +8687,27 @@ call :_tw_undo_add secure sysui_qs_tiles
 :: `for %%t in (!QSCUR!)` treats those parentheses as block syntax and
 :: aborts or corrupts the list - tokenize paren-aware via :_tw_qs_enum.
 set "QSNEW="
-if "!QSCUR!"=="null" goto _tw_qs_addput
+if "!QSCUR!"=="null" goto _tw_qs_addnull
 call :_tw_qs_enum
 call :_tw_qs_rebuild_skip
+:: explicit: :_tw_qs_addnull sits between here and :_tw_qs_addput, so this must not fall through
+goto _tw_qs_addput
+
+:_tw_qs_addnull
+:: FIX (adding one tile wiped the panel): with sysui_qs_tiles unset the device is showing its
+:: built-in default list, which is not readable from here - so the rebuild below started from
+:: an empty list and the panel became the single tile just added. There is no way to append to
+:: a list we cannot see, and guessing the OEM's default would quietly produce a wrong panel.
+echo.
+echo  %y%The panel is still on the device default%w% - sysui_qs_tiles is not set,
+echo  so there is no list to add to. Adding a tile now would replace the whole
+echo  panel with just that one tile, which is why it is refused.
+echo.
+echo  Edit Quick Settings once on the phone ^(pull down the shade, tap the pencil
+echo  and move any tile^). That makes SystemUI write the real list out, and this
+echo  screen can add to it from then on - the same thing the remove screen asks for.
+timeout /t 6 /nobreak >nul
+goto tw_qs
 
 :_tw_qs_addput
 if /i "!QSPOS!"=="front" (set "QSNEW=,!QSTOK!!QSNEW!") else (set "QSNEW=!QSNEW!,!QSTOK!")
@@ -8104,11 +8770,11 @@ if not defined _PKGCHK exit /b 1
 set "_PKGCHK=!_PKGCHK:"=!"
 if not defined _PKGCHK exit /b 1
 set "_pk_bad="
-for /f "delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._" %%c in ("!_PKGCHK!") do set "_pk_bad=%%c"
+for /f "eol=a delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._" %%c in ("!_PKGCHK!") do set "_pk_bad=%%c"
 if defined _pk_bad exit /b 1
 :: shape: must start with a letter, not a digit or a dot
 set "_pk_bad="
-for /f "delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" %%c in ("!_PKGCHK:~0,1!") do set "_pk_bad=%%c"
+for /f "eol=a delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" %%c in ("!_PKGCHK:~0,1!") do set "_pk_bad=%%c"
 if defined _pk_bad exit /b 1
 exit /b 0
 
@@ -8633,11 +9299,25 @@ exit /b
 if not defined DCX_VOK set "DCX_VOK=0"
 if not defined DCX_VFAIL set "DCX_VFAIL=0"
 echo.
-if "%DCX_VFAIL%"=="0" (
-    echo [%g%OK%w%] %DCX_VOK% check^(s^) passed.
-) else (
-    echo [%y%WARN%w%] %DCX_VOK% passed, %DCX_VFAIL% failed - see above.
-)
+:: FIX (zero checks read as success): with no third branch this printed "[OK] 0 check(s)
+:: passed" when NOTHING had been verified - which is precisely what a dropped connection
+:: produces, since every package then reads "skip (not installed)" and no check runs at all.
+:: Nothing verified is not the same as everything fine, and this is the one routine every
+:: gated action ends through, so saying it here covers all of them.
+if not "%DCX_VFAIL%"=="0" goto _act_summary_warn
+if "%DCX_VOK%"=="0" goto _act_summary_none
+echo [%g%OK%w%] %DCX_VOK% check^(s^) passed.
+exit /b
+
+:_act_summary_warn
+echo [%y%WARN%w%] %DCX_VOK% passed, %DCX_VFAIL% failed - see above.
+exit /b
+
+:_act_summary_none
+echo [%y%WARN%w%] Nothing was verified - no check actually ran.
+echo        If everything above said "skip (not installed)", check the phone is
+echo        still connected: a dropped device looks identical to one that has
+echo        none of these packages.
 exit /b
 
 :_settings_verify
