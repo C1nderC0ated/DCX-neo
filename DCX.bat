@@ -12,7 +12,14 @@ set "BACKUPDIR=%USERPROFILE%\dcx_backups"
 set "SNAPDIR=%USERPROFILE%\dcx_snapshots"
 set "PROFDIR=%USERPROFILE%\dcx_profiles"
 set "PERFDIR=%USERPROFILE%\dcx_perf"
+set "LOGDIR=%USERPROFILE%\dcx_logs"
+:: DCX's own path: the command library reads its ::LIB~ lines from this file.
+set "DCX_SELF=%~f0"
+:: The console's code page before DCX switches it, digits only; every exit path puts it back.
+set "DCX_CPSTART="
+for /f "tokens=2 delims=:." %%a in ('chcp') do for /f %%b in ("%%a") do set "DCX_CPSTART=%%b"
 setlocal EnableDelayedExpansion
+if defined DCX_CPSTART for /f "eol=0 delims=0123456789" %%c in ("!DCX_CPSTART!") do set "DCX_CPSTART="
 chcp 65001 > nul
 mode 100,37
 title DCX Menu
@@ -52,6 +59,7 @@ if %errorlevel% neq 0 (
     echo.
     echo Press any key to exit...
     pause > nul
+    call :_cp_restore
     exit /b
 )
 :: Each window keeps scratch files in its own folder, dcx_ID under TEMP, removed by :_tmp_cleanup.
@@ -182,7 +190,7 @@ exit /b 0
 set "_hdr_suffix="
 if not defined ANDROID_SERIAL exit /b
 set "_hdr_suffix=   via USB"
-if not "!ANDROID_SERIAL!"=="!ANDROID_SERIAL::=!" set "_hdr_suffix=   via Wi-Fi"
+call :_wifi_ser ANDROID_SERIAL && set "_hdr_suffix=   via Wi-Fi"
 exit /b
 
 :_pd_row
@@ -191,7 +199,7 @@ set "_pd_i=%~1"
 set "_pd_via=USB  "
 :: Wi-Fi when the serial holds a colon, tested in this shell: a findstr pipe re-parses phone text.
 set "_pd_x=!_pd_s[%_pd_i%]!"
-if defined _pd_x if not "!_pd_x!"=="!_pd_x::=!" set "_pd_via=Wi-Fi"
+call :_wifi_ser _pd_x && set "_pd_via=Wi-Fi"
 echo     %g%[%w%%_pd_i%%g%]%w% !_pd_via!  !_pd_s[%_pd_i%]!   !_pd_d[%_pd_i%]!
 exit /b
 
@@ -235,7 +243,8 @@ cls
 title Main Menu
 call :logo
 echo          ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul 2^>nul') do echo           [%g%+%w%]Uptime: %%a %%b %%c
+call :_uptime
+if defined _upt echo           [%g%+%w%]Uptime: !_upt!
 :: Read cpucheck late, never with a percent read: dumpsys prints the phone's text.
 set "cpucheck=N/A"
 for /f "tokens=2 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul 2^>nul ^| findstr /C:"Load:"') do set "cpucheck=%%i"
@@ -251,7 +260,7 @@ echo                            %d%Auto%w%       %d%CheckSetting%w%      %d%Twea
 echo                             [4]            [5]            [6]
 echo.
 echo.
-echo                           %b%Reboot%w%          %b%Exit%w%           %b%Shell%w%
+echo                           %b%Reboot%w%          %b%Exit%w%       %b%Shell ^& Tools%w%
 echo                             [7]            [8]            [9]
 echo.
 echo.
@@ -479,6 +488,8 @@ exit /b 0
 :: expansion off. Generated files accept /nopause so DCX can run them without a hold at the end.
 setlocal EnableDelayedExpansion
 set "OUT=!%~1!"
+:: The phone's own serial too: the connection name differs between USB and Wi-Fi.
+call :_phone_sn
 setlocal DisableDelayedExpansion
 set "BAKED=%DCX_ADB%"
 :: Record which device this file came from, so a restore refuses to apply it to another phone.
@@ -540,6 +551,7 @@ if /i "%_bkser%"=="unknown" set "_bkser="
     echo echo Using adb: "%%ADB%%"
     echo "%%ADB%%" start-server ^>nul 2^>^&1
     if defined _bkser echo :: DCX_DEVICE %_bkser%
+    if defined _bkser if defined _psn echo :: DCX_PHONE %_psn%
     if defined _bkser echo set "DCX_WANT=%_bkser%"
     if defined _bkbad echo :: DCX device serial not recorded - it holds characters DCX will not write here.
     if not defined _bkser if not defined _bkbad echo :: DCX device serial not recorded - adb did not report one.
@@ -549,6 +561,8 @@ if /i "%_bkser%"=="unknown" set "_bkser="
     echo :: unless the device it was taken from is the one attached. Flat, not a ^( ^) block:
     echo :: a serial is tame, but nothing in a generated file should depend on that.
     echo if not defined DCX_WANT goto :dcx_dev_ok
+    echo :: DCX sets DCX_RETARGET when this phone is attached under another connection name.
+    echo if defined DCX_RETARGET set "DCX_WANT=%%DCX_RETARGET%%"
     echo set "DCX_HAVE="
     echo :: for /f hands its command to a child cmd: that strips the outer, escaped pair of quotes and reads ADB itself.
     echo for /f "tokens=1" %%%%d in ^('^^^""%%%%ADB%%%%" devices 2^^^>nul^^^"'^) do if /i "%%%%d"=="%%DCX_WANT%%" set "DCX_HAVE=1"
@@ -563,8 +577,9 @@ if /i "%_bkser%"=="unknown" set "_bkser="
     echo set "ANDROID_SERIAL=%%DCX_WANT%%"
     echo :dcx_dev_ok
 ) > "%OUT%"
-:: Sets _bk_untagged to 1 or empty, so a caller that clears the screen next can hold the warning.
-endlocal & endlocal & set "_bk_untagged=%_bkbad%"
+:: Sets _bk_untagged to 1 or empty, so a caller that clears the screen next can hold the warning,
+:: and _bk_ser to the connection name the file was tagged with.
+endlocal & endlocal & set "_bk_untagged=%_bkbad%" & set "_bk_ser=%_bkser%"
 exit /b 0
 
 :_bk_write_hold_footer
@@ -630,15 +645,17 @@ if not defined _got goto _bk_settings_unread
 set "_sv=!_val:'='\''!"
 if /i "!_val!"=="null" (set "_BKCMD=settings delete %_ns% %_key%") else (set "_BKCMD=settings put %_ns% %_key% '!_sv!'")
 call :_bk_emit "%_out%"
+if errorlevel 1 (endlocal & endlocal & exit /b 1)
 endlocal
 endlocal
-exit /b
+exit /b 0
 
 :_bk_settings_unread
+:: errorlevel 1: nothing restorable was written.
 >>"!%_out%!" echo :: DCX_SKIP %_ns% %_key% - the device did not answer, value not captured
 endlocal
 endlocal
-exit /b
+exit /b 1
 
 :_bk_devcfg
 :: device_config twin of :_bk_settings: read with delayed expansion off, value single-quoted.
@@ -656,15 +673,16 @@ if not defined _got goto _bk_devcfg_unread
 set "_sv=!_val:'='\''!"
 if /i "!_val!"=="null" (set "_BKCMD=device_config delete %_ns% %_key%") else (set "_BKCMD=device_config put %_ns% %_key% '!_sv!'")
 call :_bk_emit "%_out%"
+if errorlevel 1 (endlocal & endlocal & exit /b 1)
 endlocal
 endlocal
-exit /b
+exit /b 0
 
 :_bk_devcfg_unread
 >>"!%_out%!" echo :: DCX_SKIP device_config %_ns% %_key% - the device did not answer
 endlocal
 endlocal
-exit /b
+exit /b 1
 
 :_bk_wm
 :: Captures Display Scaler overrides - wm size and wm density; no override restores as reset.
@@ -725,18 +743,22 @@ exit /b
 
 :_bk_dcfgsync
 :: Captures device_config get_sync_disabled_for_tests - none/persistent/until_reboot.
-:: Tweaks owns this toggle. An unreadable answer is a DCX_SKIP comment, never a guessed none.
+:: Tweaks owns this toggle. An unreadable answer is a DCX_SKIP comment, never a guessed none,
+:: and errorlevel 1, as :_bk_settings returns.
 setlocal enabledelayedexpansion
 set "_out=%~1"
 call :_dcfgsync_read
-if errorlevel 1 (
-    >>"!%_out%!" echo :: DCX_SKIP device_config sync mode - not readable on this device
-) else (
-    set "_BKCMD=device_config set_sync_disabled_for_tests '!DCS_VAL!'"
-    call :_bk_emit "%_out%"
-)
+if errorlevel 1 goto _bk_dcfgsync_unread
+set "_BKCMD=device_config set_sync_disabled_for_tests '!DCS_VAL!'"
+call :_bk_emit "%_out%"
+if errorlevel 1 (endlocal & exit /b 1)
 endlocal
-exit /b
+exit /b 0
+
+:_bk_dcfgsync_unread
+>>"!%_out%!" echo :: DCX_SKIP device_config sync mode - not readable on this device
+endlocal
+exit /b 1
 
 :_bk_prop
 :: Read with delayed expansion off; the value is written single-quoted for the device shell.
@@ -886,19 +908,23 @@ echo  Available backups in !BACKUPDIR!:
 echo  %y%Note:%w% older restore .bats that call bare "adb" need PATH or a
 echo  re-Backup from this DCX ^(new files embed the adb.exe path^).
 echo.
-set "i=0"
-:: Clear old _bk_n_ entries first, or a stale number could pick a file no longer listed.
-for /f "delims==" %%v in ('set _bk_n_ 2^>nul') do set "%%v="
-:: Numbered listing, newest first. The folder is passed by name for dir's cmd to expand once.
-for /f "delims=" %%f in ('dir /b /o-d "%%BACKUPDIR%%\dcx_backup_*.bat" 2^>nul') do (
-    set /a i+=1
-    setlocal enabledelayedexpansion
-    set "_idx=  [!i!]"
-    echo    !_idx:~-5! %%f
-    endlocal
-    set "_bk_%%f=defined"
-    call set "_bk_n_%%i%%=%%f"
+:: Numbered listing, newest first. The names stay in a file and are shown and picked with delayed
+:: expansion off, so a name holding ! % or ^ is the file's own name; the pick is the listed line.
+set "_bkl=!DCX_TMP!\bklist.txt"
+dir /b /a-d /o-d "!BACKUPDIR!\dcx_backup_*.bat" >"!_bkl!" 2>nul
+if not exist "!_bkl!" (
+    echo  %r%Could not write the list of backups to !DCX_TMP!.%w%
+    echo.
+    pause > nul
+    goto menu
 )
+setlocal DisableDelayedExpansion
+set "i=0"
+for /f "tokens=1* delims=:" %%a in ('findstr /n /r "." "%%_bkl%%" 2^>nul') do (
+    set "i=%%a"
+    if %%a LSS 10 (echo      [%%a] %%b) else if %%a LSS 100 (echo     [%%a] %%b) else (echo    [%%a] %%b)
+)
+endlocal & set "i=%i%"
 if "%i%"=="0" (
     echo  %r%No backup files found.%w%
     echo.
@@ -920,9 +946,14 @@ if defined _ribad (
     pause > nul
     goto restore
 )
-:: Look up the chosen filename
-call set "_chosen=%%_bk_n_%ri%%%"
-if "%_chosen%"=="" (
+:: Look up the chosen line. set /p takes the name from a file as it is, so ! % and ^ survive.
+del "!DCX_TMP!\bkpick.txt" >nul 2>&1
+setlocal DisableDelayedExpansion
+for /f "tokens=1* delims=:" %%a in ('findstr /n /r "." "%%_bkl%%" 2^>nul') do if "%%a"=="%ri%" >"%DCX_TMP%\bkpick.txt" echo(%%b
+endlocal
+set "_chosen="
+if exist "!DCX_TMP!\bkpick.txt" set /p "_chosen=" <"!DCX_TMP!\bkpick.txt"
+if not defined _chosen (
     echo  %r%Invalid selection.%w%
     pause > nul
     goto restore
@@ -950,7 +981,9 @@ if not defined _rwant if not defined _runrec echo  %y%This file predates device 
 if defined _rwant echo  Taken from device: !_rwant!
 if defined _rhave echo  Connected now:     !_rhave!
 if defined _rwant if not defined _rhave goto _restore_nodev
-if defined _rwant if /i not "!_rwant!"=="!_rhave!" goto _restore_wrongdev
+call :_retarget RESTOREFILE
+if defined DCX_RETARGET echo  %g%Same phone%w% ^(serial !_psn!^) over another connection - the restore goes to it.
+if defined _rwant if not defined DCX_RETARGET if /i not "!_rwant!"=="!_rhave!" goto _restore_wrongdev
 echo.
 echo  %y%This will overwrite your current values for every key listed.%w%
 echo.
@@ -974,9 +1007,10 @@ goto menu
 
 :_restore_wrongdev
 echo.
-echo  %r%That backup belongs to a different phone.%w% Restoring it would write
-echo  its screen resolution, density and every delete line onto this one.
-echo  Connect !_rwant!, or pick a backup taken from !_rhave!.
+echo  %r%That backup was taken over another connection or from another phone.%w% DCX could
+echo  not confirm it is this phone, and restoring it onto another one would write its
+echo  resolution, density and every delete line there. Connect !_rwant! ^(Wireless ADB
+echo  [7] picks between USB and Wi-Fi entries^), or pick a backup taken from !_rhave!.
 echo.
 pause > nul
 goto menu
@@ -1008,22 +1042,31 @@ echo.
 call :_bk_capture_all _pvraw
 findstr /b /c:"set " "!_pvraw!" > "!_pvdir!\now.txt"
 :: Values never reach a command line: /g: reads patterns from a file; /x whole line, /l literal.
-set "_pvold=0" & set "_pvnew=0" & set "_pvdiff=0"
+set "_pvold=0" & set "_pvnew=0" & set "_pvdiff="
 for /f %%n in ('find /c /v "" ^< "%%_pvdir%%\backup.txt"') do set "_pvold=%%n"
 for /f %%n in ('find /c /v "" ^< "%%_pvdir%%\now.txt"') do set "_pvnew=%%n"
-for /f %%n in ('findstr /l /x /v /g:"%%_pvdir%%\now.txt" "%%_pvdir%%\backup.txt" ^| find /c /v ""') do set "_pvdiff=%%n"
+:: Backup lines the phone does not hold now, compared whole in PowerShell: findstr /g: fails on a
+:: line of 512 bytes or more (a long tile list) and an empty pattern file, and then counts 0.
+set "DCX_PVA=!_pvdir!\backup.txt" & set "DCX_PVB=!_pvdir!\now.txt" & set "DCX_PVO=!_pvdir!\changes.txt"
+del "!_pvdir!\changes.txt" >nul 2>&1
+powershell -NoProfile -Command "$ErrorActionPreference='Stop'; try { $u=New-Object Text.UTF8Encoding $false; $n=New-Object 'Collections.Generic.HashSet[string]' (,[string[]][IO.File]::ReadAllLines($env:DCX_PVB,$u)); $d=@([IO.File]::ReadAllLines($env:DCX_PVA,$u) | Where-Object { -not $n.Contains($_) }); [IO.File]::WriteAllLines($env:DCX_PVO,[string[]]$d,$u); exit 0 } catch { exit 1 }" <nul
+chcp 65001 >nul <nul
+set "DCX_PVA=" & set "DCX_PVB=" & set "DCX_PVO="
+if exist "!_pvdir!\changes.txt" for /f %%n in ('find /c /v "" ^< "%%_pvdir%%\changes.txt"') do set "_pvdiff=%%n"
 echo  ----------------------------------------------------------------
 echo   In the backup : %_pvold% restore commands
 echo   On the phone  : %_pvnew% values readable right now
 :: A file with no commands is not a file with no differences - it gets its own message.
 if "%_pvold%"=="0" goto restore_preview_nothing
+if "%_pvnew%"=="0" goto restore_preview_nophone
+if not defined _pvdiff goto restore_preview_nocompare
 if "%_pvdiff%"=="0" goto restore_preview_same
 echo   %y%Would change  : %_pvdiff%%w%
 echo  ----------------------------------------------------------------
 echo.
 echo  Restoring would write these - the phone holds something else today:
 set "_pvshown=0"
-for /f "delims=" %%L in ('findstr /l /x /v /g:"%%_pvdir%%\now.txt" "%%_pvdir%%\backup.txt"') do (
+for /f "usebackq delims=" %%L in ("!_pvdir!\changes.txt") do (
     set /a _pvshown+=1
     if !_pvshown! LEQ 12 echo     %%L
 )
@@ -1039,6 +1082,20 @@ echo.
 echo  %y%This file holds no restore commands at all%w% - there is nothing to compare
 echo  and nothing it could put back. It was probably written while the device was
 echo  unreachable. Take a fresh Backup.
+goto restore_preview_menu
+
+:restore_preview_nophone
+echo  ----------------------------------------------------------------
+echo.
+echo  %y%The phone gave no values just now%w% - did it disconnect? With nothing read there is
+echo  nothing to compare, so this says nothing about what a restore would change.
+goto restore_preview_menu
+
+:restore_preview_nocompare
+echo  ----------------------------------------------------------------
+echo.
+echo  %y%The two lists could not be compared%w% ^(PowerShell did not run^). The side-by-side
+echo  view below still shows both.
 goto restore_preview_menu
 
 :restore_preview_same
@@ -1091,8 +1148,10 @@ echo  Running restore ^(output below^)...
 echo.
 :: Nested cmd so a restore .bat calling plain exit cannot close DCX; /nopause keeps the hold here.
 :: The child expands RESTOREFILE itself - path parsed once; cmd /c strips the outer quote pair.
+call :_retarget RESTOREFILE
 cmd /c ""%%RESTOREFILE%%" /nopause"
 set "_rrc=%errorlevel%"
+set "DCX_RETARGET="
 set "_rdev="
 for /f "delims=" %%d in ('adb get-state 2^>nul') do set "_rdev=%%d"
 echo.
@@ -1107,6 +1166,11 @@ if not "%_rrc%"=="0" (
 ) else (
     echo  %g%Restore complete.%w% Some changes may need a reboot to fully apply.
 )
+:: Android 14+ without root can accept a device_config write and keep nothing; Preview shows it.
+set "_rdcfg="
+if "%_rrc%"=="0" if /i "%_rdev%"=="device" if !SDK! GEQ 34 findstr /c:"DCX_CMD=device_config " "!RESTOREFILE!" >nul 2>&1 && set "_rdcfg=1"
+if defined _rdcfg echo  %y%Note:%w% Android 14+ without root can accept a device_config value without keeping it.
+if defined _rdcfg echo  Restore this file again with [P] Preview to see whether those values now match.
 echo  ----------------------------------------
 echo.
 echo  Press any key to return to the main menu . . .
@@ -1131,10 +1195,14 @@ echo [%b%1/3%w%] CPU loop test (1M iterations)...
 adb shell "time sh -c 'i=0; while [ $i -lt 1000000 ]; do i=$((i+1)); done'" <nul
 echo.
 :: conv=fsync and iflag=direct keep the page cache out; /dev/zero so no generator is timed.
-:: A dd lacking them fails - adb passes its exit code back - and a labelled plain run follows.
+:: A dd lacking them fails and a labelled plain run follows. Android 6 and older report exit 0
+:: anyway, so dd's own summary line, which says "bytes", must be there too.
 echo [%b%2/3%w%] Storage sequential write ^(32 MB, flushed to storage^)...
-adb shell "rm -f /data/local/tmp/_dcx_bench; dd if=/dev/zero of=/data/local/tmp/_dcx_bench bs=1048576 count=32 conv=fsync 2>/data/local/tmp/_dcx_bench.txt; r=$?; tail -1 /data/local/tmp/_dcx_bench.txt; exit $r" <nul
-if errorlevel 1 goto _bench_wplain
+adb shell "rm -f /data/local/tmp/_dcx_bench; dd if=/dev/zero of=/data/local/tmp/_dcx_bench bs=1048576 count=32 conv=fsync 2>/data/local/tmp/_dcx_bench.txt; r=$?; tail -1 /data/local/tmp/_dcx_bench.txt; exit $r" <nul >"!DCX_TMP!\bench.txt" 2>&1
+set "_bnrc=!errorlevel!"
+type "!DCX_TMP!\bench.txt" 2>nul
+if not "!_bnrc!"=="0" goto _bench_wplain
+findstr /i /c:"bytes" "!DCX_TMP!\bench.txt" >nul 2>&1 || goto _bench_wplain
 goto _bench_read
 
 :_bench_wplain
@@ -1145,8 +1213,11 @@ adb shell "dd if=/dev/zero of=/data/local/tmp/_dcx_bench bs=1048576 count=32 2>&
 :_bench_read
 echo.
 echo [%b%3/3%w%] Storage sequential read ^(32 MB, bypassing the cache^)...
-adb shell "dd if=/data/local/tmp/_dcx_bench of=/dev/null bs=1048576 iflag=direct 2>/data/local/tmp/_dcx_bench.txt; r=$?; tail -1 /data/local/tmp/_dcx_bench.txt; exit $r" <nul
-if errorlevel 1 goto _bench_rplain
+adb shell "dd if=/data/local/tmp/_dcx_bench of=/dev/null bs=1048576 iflag=direct 2>/data/local/tmp/_dcx_bench.txt; r=$?; tail -1 /data/local/tmp/_dcx_bench.txt; exit $r" <nul >"!DCX_TMP!\bench.txt" 2>&1
+set "_bnrc=!errorlevel!"
+type "!DCX_TMP!\bench.txt" 2>nul
+if not "!_bnrc!"=="0" goto _bench_rplain
+findstr /i /c:"bytes" "!DCX_TMP!\bench.txt" >nul 2>&1 || goto _bench_rplain
 goto _bench_end
 
 :_bench_rplain
@@ -1165,11 +1236,1264 @@ pause > nul
 goto menu
 
 :shell
-@echo off
+cls
+title Shell and tools
+call :logo
+echo                          %b%[%w% Shell and tools %b%]%w%
+echo.
+echo                 %g%[%w%1%g%]%w% Interactive shell      (adb shell - type exit to come back)
+echo                 %g%[%w%2%g%]%w% Command library        (ready-made commands, each explained)
+echo                 %g%[%w%3%g%]%w% Logcat capture         (crash log, or record one app)
+echo                 %g%[%w%4%g%]%w% Bootloader info        (fastboot, read-only, USB only)
+echo                 %g%[%w%5%g%]%w% Sideload an update     (an official OTA package, through recovery)
+echo                 %g%[%w%6%g%]%w% Back
+set "shm=" & set /p shm="Choose An Option >> "
+call :_noin shm || goto dcx_noinput
+if "!shm!"=="1" goto shell_live
+if "!shm!"=="2" goto cmdlib
+if "!shm!"=="3" goto logcap
+if "!shm!"=="4" goto fbinfo
+if "!shm!"=="5" goto sideload
+if "!shm!"=="6" goto menu
+goto shell
+
+:shell_live
+set "_dvst="
+for /f "delims=" %%d in ('adb get-state 2^>nul ^<nul') do set "_dvst=%%d"
+if /i not "!_dvst!"=="device" goto shell_nodev
 cls
 title Shell
+echo  Interactive adb shell on the phone. Type exit to come back to DCX.
 adb shell
-goto menu
+goto shell
+
+:shell_nodev
+echo  [%r%^^!%w%] No phone answers - check the cable or Wi-Fi ^(adb devices^).
+pause >nul
+goto shell
+:: ===================================================================
+:: Command library: ready-made adb shell commands, each with a note. Read-only ones run at once; a
+:: change asks first and shows its undo, a delete asks in red. Entries are the ::LIB~ lines at the
+:: end of this file: id~category~risk~min API~command~note~undo. Risk r = reads only, c = changes
+:: something (undo given), d = deletes data or cannot be undone. {PKG} and {NUM} in a command are
+:: asked for before it runs. Commands hold no double quote: Windows would strip it before adb.
+:: ===================================================================
+:cmdlib
+call :_lib_load
+if "!_lbn!"=="0" goto cmdlib_noload
+
+:cmdlib_menu
+cls
+title Command library
+call :logo
+echo                          %b%[%w% Command library %b%]%w%
+echo.
+echo  Ready-made commands, each explained before it runs. Anything that changes the phone
+echo  asks first and shows how to undo it. Output can be paged, opened in Notepad or saved.
+echo.
+echo                 %g%[%w%1%g%]%w% !_lbcatn[1]!  !_lbcn1!
+echo                 %g%[%w%2%g%]%w% !_lbcatn[2]!  !_lbcn2!
+echo                 %g%[%w%3%g%]%w% !_lbcatn[3]!  !_lbcn3!
+echo                 %g%[%w%4%g%]%w% !_lbcatn[4]!  !_lbcn4!
+echo                 %g%[%w%5%g%]%w% !_lbcatn[5]!  !_lbcn5!
+echo                 %g%[%w%6%g%]%w% !_lbcatn[6]!  !_lbcn6!
+echo                 %g%[%w%7%g%]%w% !_lbcatn[7]!  !_lbcn7!
+echo                 %g%[%w%8%g%]%w% !_lbcatn[8]!  !_lbcn8!
+echo                 %g%[%w%9%g%]%w% Search by word
+echo                %g%[%w%10%g%]%w% Favourites
+echo                 %g%[%w%0%g%]%w% Back
+set "lbm=" & set /p lbm="Choose An Option >> "
+call :_noin lbm || goto dcx_noinput
+if "!lbm!"=="1" (set "_lbcat=1" & goto cmdlib_cat)
+if "!lbm!"=="2" (set "_lbcat=2" & goto cmdlib_cat)
+if "!lbm!"=="3" (set "_lbcat=3" & goto cmdlib_cat)
+if "!lbm!"=="4" (set "_lbcat=4" & goto cmdlib_cat)
+if "!lbm!"=="5" (set "_lbcat=5" & goto cmdlib_cat)
+if "!lbm!"=="6" (set "_lbcat=6" & goto cmdlib_cat)
+if "!lbm!"=="7" (set "_lbcat=7" & goto cmdlib_cat)
+if "!lbm!"=="8" (set "_lbcat=8" & goto cmdlib_cat)
+if "!lbm!"=="9" goto cmdlib_search
+if "!lbm!"=="10" goto cmdlib_fav
+if "!lbm!"=="0" goto shell
+goto cmdlib_menu
+
+:cmdlib_noload
+echo [%r%^^!%w%] The command list could not be read from DCX.bat - was the file renamed or moved?
+pause >nul
+goto shell
+
+:cmdlib_cat
+:: _lbcat = a category number; _lbv[k] maps list number k to an entry.
+call :_lib_clearv
+for /l %%i in (1,1,!_lbn!) do if "!_lb_c[%%i]!"=="!_lbcat!" (
+    set /a _lbk+=1
+    set "_lbv[!_lbk!]=%%i"
+)
+for /f "delims=" %%c in ("!_lbcat!") do set "_lbtitle=!_lbcatn[%%c]!"
+goto cmdlib_list
+
+:cmdlib_search
+echo.
+set "lbw=" & set /p lbw="Word to look for, such as battery (blank = back) >> "
+call :_noin lbw || goto dcx_noinput
+if not defined lbw goto cmdlib_menu
+:: Letters, digits, dot, dash and underscore only: the word goes into a substitution below.
+set "_lbbad="
+set "_lbwq=!lbw:"=#!"
+for /f "eol=a delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" %%c in ("!_lbwq!") do set "_lbbad=1"
+if defined _lbbad goto cmdlib_search
+call :_lib_clearv
+for /l %%i in (1,1,!_lbn!) do (
+    set "_lbs=#!_lb_d[%%i]! !_lb_x[%%i]!"
+    if not "!_lbs:%lbw%=!"=="!_lbs!" (
+        set /a _lbk+=1
+        set "_lbv[!_lbk!]=%%i"
+    )
+)
+set "_lbtitle=Commands with "!lbw!" in them"
+goto cmdlib_list
+
+:cmdlib_fav
+call :_lib_clearv
+if exist "!PROFDIR!\library_favourites.txt" for /f "usebackq delims=" %%f in ("!PROFDIR!\library_favourites.txt") do (
+    set "_lbf=%%f"
+    call :_lib_favadd
+)
+set "_lbtitle=Favourites - F on a command adds or removes it"
+goto cmdlib_list
+
+:cmdlib_list
+cls
+title Command library
+call :logo
+echo  %b%!_lbtitle!%w%
+echo.
+if "!_lbk!"=="0" echo  Nothing here yet.
+for /l %%k in (1,1,!_lbk!) do call :_lib_row %%k
+echo.
+echo  %y%[change]%w% asks first and shows its undo.   %r%[deletes]%w% loses data or cannot be undone.
+echo.
+set "lbe=" & set /p lbe="Command number (Enter = back) >> "
+call :_noin lbe || goto dcx_noinput
+if not defined lbe goto cmdlib_menu
+call :_lib_num lbe || goto cmdlib_list
+if not defined _lbv[!lbe!] goto cmdlib_list
+for /f "delims=" %%k in ("!lbe!") do set "_lbi=!_lbv[%%k]!"
+
+:cmdlib_show
+cls
+title Command library
+call :logo
+for /f "delims=" %%i in ("!_lbi!") do (
+    set "_lbx=!_lb_x[%%i]!"
+    set "_lbu=!_lb_u[%%i]!"
+    set "_lbrisk=!_lb_r[%%i]!"
+    set "_lbapi=!_lb_a[%%i]!"
+    set "_lbid=!_lb_id[%%i]!"
+    set "_lbnote=!_lb_d[%%i]!"
+)
+set "_lbshow=!_lbx:{PKG}=<package>!"
+set "_lbshow=!_lbshow:{NUM}=<number>!"
+set "_lbushow=!_lbu:{PKG}=<package>!"
+set "_lbushow=!_lbushow:{NUM}=<number>!"
+echo  %b%!_lbnote!%w%
+echo.
+echo  Runs     adb shell !_lbshow!
+if "!_lbrisk!"=="r" echo  Changes  nothing - it only reads.
+if "!_lbrisk!"=="c" echo  Changes  %y%the phone%w%. Undo: !_lbushow!
+if "!_lbrisk!"=="d" echo  Changes  %r%deletes data, or cannot be undone%w%.
+echo  Needs    Android API !_lbapi! or newer. This phone reports API !SDK!.
+if !SDK! GTR 0 if !SDK! LSS !_lbapi! echo  %y%This phone is older than that, so the command may not exist on it.%w%
+set "_lbisfav="
+findstr /x /c:"!_lbid!" "!PROFDIR!\library_favourites.txt" >nul 2>&1 && set "_lbisfav=1"
+echo.
+if defined _lbisfav echo    [R] Run    [F] Remove from favourites    [B] Back
+if not defined _lbisfav echo    [R] Run    [F] Add to favourites    [B] Back
+choice /c:RFB /n >nul
+if errorlevel 3 goto cmdlib_list
+if errorlevel 2 goto cmdlib_favtoggle
+if not errorlevel 1 goto cmdlib_list
+if not "!_lbx:{PKG}=!"=="!_lbx!" goto cmdlib_askpkg
+
+:cmdlib_numcheck
+if not "!_lbx:{NUM}=!"=="!_lbx!" goto cmdlib_asknum
+goto cmdlib_confirm
+
+:cmdlib_askpkg
+echo.
+set "lbp=" & set /p lbp="Package name or part of one (blank = back) >> "
+call :_noin lbp || goto dcx_noinput
+if not defined lbp goto cmdlib_show
+call :_pkg_pick lbp inst || goto cmdlib_show
+set "_PKGCHK=!lbp!"
+call :_pkg_ok || goto cmdlib_badpkg
+:: A storage app (contacts, messages, settings, calendar) holds data the whole phone uses.
+if "!_lbrisk!"=="d" if not "!_PKGCHK:.providers.=!"=="!_PKGCHK!" goto cmdlib_store
+adb shell pm path !_PKGCHK! <nul >nul 2>&1 || goto cmdlib_nopkg
+set "_lbx=!_lbx:{PKG}=%_PKGCHK%!"
+set "_lbu=!_lbu:{PKG}=%_PKGCHK%!"
+goto cmdlib_numcheck
+
+:cmdlib_badpkg
+echo  [%r%x%w%] Invalid package name. Letters, digits, dots and underscores only.
+pause >nul
+goto cmdlib_show
+
+:cmdlib_nopkg
+echo  [%r%^^!%w%] !_PKGCHK! is not installed, or the phone did not answer.
+pause >nul
+goto cmdlib_show
+
+:cmdlib_store
+echo  [%r%x%w%] !_PKGCHK! stores data the whole phone uses, such as contacts, messages or
+echo      settings. DCX will not delete it from here.
+pause >nul
+goto cmdlib_show
+
+:cmdlib_asknum
+set "lbn=" & set /p lbn="Number (blank = back) >> "
+call :_noin lbn || goto dcx_noinput
+if not defined lbn goto cmdlib_show
+call :_lib_num lbn || goto cmdlib_asknum
+if not "!lbn:~6!"=="" goto cmdlib_asknum
+set "_lbx=!_lbx:{NUM}=%lbn%!"
+set "_lbu=!_lbu:{NUM}=%lbn%!"
+
+:cmdlib_confirm
+if "!_lbrisk!"=="r" goto cmdlib_go
+echo.
+echo  It will run: adb shell !_lbx!
+if "!_lbrisk!"=="c" echo  %y%This changes the phone.%w% Undo: !_lbu!
+if "!_lbrisk!"=="d" echo  %r%This deletes data or cannot be undone.%w% Go on only if you are sure.
+:: A settings write shows the value it replaces, so it can be put back by hand.
+set "_lbset="
+if /i "!_lbx:~0,13!"=="settings put " set "_lbset=1"
+if defined _lbset for /f "tokens=3,4" %%a in ("!_lbx!") do adb shell settings get %%a %%b <nul >"!DCX_TMP!\lbnow.txt" 2>nul
+if defined _lbset echo  Its value now, to put back if you want the old one:
+if defined _lbset type "!DCX_TMP!\lbnow.txt" 2>nul
+echo    [Y] Run it    [N] Cancel
+:: Ctrl+C makes choice return 0, so not errorlevel 1 goes where N goes.
+choice /c:YN /n >nul
+if errorlevel 2 goto cmdlib_show
+if not errorlevel 1 goto cmdlib_show
+
+:cmdlib_go
+set "_lbd=!DCX_TMP!\cmdlib"
+if not exist "!_lbd!\" md "!_lbd!" >nul 2>&1
+if not exist "!_lbd!\" goto cmdlib_notmp
+del /q "!_lbd!\*.txt" >nul 2>&1
+echo.
+echo  Running: adb shell !_lbx!
+adb shell !_lbx! <nul >"!_lbd!\out.txt" 2>&1
+set "_lbrc=!errorlevel!"
+:: A redirect that failed sets no errorlevel, so the file itself is the proof the command ran.
+if not exist "!_lbd!\out.txt" goto cmdlib_nofile
+:: find re-terminates adb's LF-only lines, so Notepad and the line count see real lines.
+find /v "" <"!_lbd!\out.txt" >"!_lbd!\view.txt" 2>nul
+set "_lblines=0"
+for /f %%c in ('find /c /v "" ^<"%%DCX_TMP%%\cmdlib\view.txt"') do set "_lblines=%%c"
+echo  -----------------------------------------------------------------------------------------
+if !_lblines! GTR 20 goto cmdlib_long
+type "!_lbd!\view.txt"
+goto cmdlib_result
+
+:cmdlib_long
+echo  !_lblines! lines - more than fits here. P pages through them, N opens them in Notepad.
+
+:cmdlib_result
+echo  -----------------------------------------------------------------------------------------
+:: adb hands back the phone's exit code; Android 6 and older always report 0.
+if "!_lbrc!"=="0" if !SDK! GTR 0 if !SDK! LSS 24 goto cmdlib_noexit
+if "!_lbrc!"=="0" echo  [%g%OK%w%] The phone ran it and reported success ^(exit 0^).
+if not "!_lbrc!"=="0" echo  [%y%WARN%w%] Exit !_lbrc!: the phone refused it, this Android lacks it, or the connection dropped.
+
+:cmdlib_after
+echo.
+echo    [P] Page through it    [N] Open in Notepad    [S] Save to dcx_logs    [B] Back
+choice /c:PNSB /n >nul
+if errorlevel 4 goto cmdlib_show
+if errorlevel 3 goto cmdlib_save
+if errorlevel 2 goto cmdlib_notepad
+if not errorlevel 1 goto cmdlib_show
+more <"!_lbd!\view.txt"
+goto cmdlib_after
+
+:cmdlib_notepad
+start "" notepad "!_lbd!\view.txt"
+goto cmdlib_after
+
+:cmdlib_save
+if not exist "!LOGDIR!\" md "!LOGDIR!" >nul 2>&1
+call :_lib_ts
+set "_lbsave=!LOGDIR!\cmd_!_lbid!_!_lbts!.txt"
+copy /y "!_lbd!\view.txt" "!_lbsave!" >nul 2>&1
+if exist "!_lbsave!" echo  [%g%+%w%] Saved to !_lbsave!
+if not exist "!_lbsave!" echo  [%r%^^!%w%] Could not save to !LOGDIR! - is the folder writable?
+goto cmdlib_after
+
+:cmdlib_noexit
+echo  [%b%i%w%] Android 6 and older do not pass a command's exit code back - read the output above.
+goto cmdlib_after
+
+:cmdlib_nofile
+echo  [%r%^^!%w%] Could not write !_lbd!\out.txt, so the result is unknown.
+pause >nul
+goto cmdlib_show
+
+:cmdlib_notmp
+echo  [%r%^^!%w%] Could not create the scratch folder !_lbd! - nothing was run.
+pause >nul
+goto cmdlib_show
+
+:cmdlib_favtoggle
+if not exist "!PROFDIR!\" md "!PROFDIR!" >nul 2>&1
+set "_lbfav=!PROFDIR!\library_favourites.txt"
+if defined _lbisfav goto cmdlib_favdel
+>>"!_lbfav!" echo !_lbid!
+findstr /x /c:"!_lbid!" "!_lbfav!" >nul 2>&1 && goto cmdlib_show
+echo  [%r%^^!%w%] Could not write !_lbfav!
+pause >nul
+goto cmdlib_show
+
+:cmdlib_favdel
+findstr /v /x /c:"!_lbid!" "!_lbfav!" >"!_lbfav!.tmp" 2>nul
+move /y "!_lbfav!.tmp" "!_lbfav!" >nul 2>&1
+findstr /x /c:"!_lbid!" "!_lbfav!" >nul 2>&1 || goto cmdlib_show
+echo  [%r%^^!%w%] Could not update !_lbfav!
+pause >nul
+goto cmdlib_show
+
+:_lib_load
+:: Fills the _lb_* arrays from this file's ::LIB~ lines; _lbn = entries read. The lines are DCX's
+:: own text, read by a child findstr that names the path variable, so the path is not re-parsed.
+for /f "delims==" %%v in ('set _lb_ 2^>nul') do set "%%v="
+set "_lbn=0"
+for /f "tokens=2-8 delims=~" %%a in ('findstr /b /c:"::LIB~" "%%DCX_SELF%%" 2^>nul') do (
+    set /a _lbn+=1
+    set "_lb_id[!_lbn!]=%%a"
+    set "_lb_c[!_lbn!]=%%b"
+    set "_lb_r[!_lbn!]=%%c"
+    set "_lb_a[!_lbn!]=%%d"
+    set "_lb_x[!_lbn!]=%%e"
+    set "_lb_d[!_lbn!]=%%f"
+    set "_lb_u[!_lbn!]=%%g"
+)
+set "_lbcatn[1]=Device info         "
+set "_lbcatn[2]=Apps and packages   "
+set "_lbcatn[3]=Battery and power   "
+set "_lbcatn[4]=Display             "
+set "_lbcatn[5]=Network             "
+set "_lbcatn[6]=Diagnostics and logs"
+set "_lbcatn[7]=Settings            "
+set "_lbcatn[8]=Installing apps     "
+for /l %%c in (1,1,8) do set "_lbcn%%c=0"
+for /l %%i in (1,1,!_lbn!) do for /f "delims=12345678" %%c in ("x!_lb_c[%%i]!") do if "%%c"=="x" set /a "_lbcn!_lb_c[%%i]!+=1"
+exit /b
+
+:_lib_clearv
+for /f "delims==" %%v in ('set _lbv[ 2^>nul') do set "%%v="
+set "_lbk=0"
+exit /b
+
+:_lib_favadd
+:: _lbf = one favourites line: an entry id, letters and digits only. Unknown ids are skipped.
+if not defined _lbf exit /b
+set "_lbf=!_lbf:"=#!"
+for /f "eol=a delims=abcdefghijklmnopqrstuvwxyz0123456789" %%c in ("!_lbf!") do exit /b
+for /l %%i in (1,1,!_lbn!) do if "!_lb_id[%%i]!"=="!_lbf!" (
+    set /a _lbk+=1
+    set "_lbv[!_lbk!]=%%i"
+)
+exit /b
+
+:_lib_row
+:: %1 = list number. One line: the note, marked when the command changes or deletes something.
+set "_lbj=!_lbv[%~1]!"
+set "_lbtag="
+if "!_lb_r[%_lbj%]!"=="c" set "_lbtag=  %y%[change]%w%"
+if "!_lb_r[%_lbj%]!"=="d" set "_lbtag=  %r%[deletes]%w%"
+set "_lbnum=  %~1"
+echo    %g%[%w%!_lbnum:~-2!%g%]%w% !_lb_d[%_lbj%]!!_lbtag!
+exit /b
+
+:_lib_num
+:: Arg 1 = NAME of a variable: errorlevel 0 if it holds a whole number, with no leading zero
+:: unless it is 0 itself. Pipe-free, so the text is never re-parsed.
+set "_lbq=!%~1!"
+if not defined _lbq exit /b 1
+set "_lbq=!_lbq:"=#!"
+for /f "eol=0 delims=0123456789" %%c in ("!_lbq!") do exit /b 1
+if "!_lbq!"=="0" exit /b 0
+if "!_lbq:~0,1!"=="0" exit /b 1
+exit /b 0
+
+:_lib_ts
+:: _lbts = a file-name-safe timestamp from date and time, as Backup builds it.
+set "_lbts=%date%_%time%"
+set "_lbts=%_lbts::=-%"
+set "_lbts=%_lbts:/=-%"
+set "_lbts=%_lbts:\=-%"
+set "_lbts=%_lbts:.=-%"
+set "_lbts=%_lbts:,=-%"
+set "_lbts=%_lbts: =_%"
+exit /b
+
+:: ===================================================================
+:: Bootloader info: reboots a USB phone into its bootloader, reads the bootloader's own facts with
+:: fastboot getvar (read-only: the protocol defines getvar as reading a variable), shows them and
+:: boots the phone back. fastboot honours FASTBOOT_DEVICE and ANDROID_SERIAL and waits forever for
+:: a serial it cannot see, so every call goes through :_fb_run with -s and both cleared. Values the
+:: phone sends are only ever printed by findstr from a file, never put into a variable.
+:: ===================================================================
+:fbinfo
+cls
+title Bootloader info
+call :logo
+echo                          %b%[%w% Bootloader info %b%]%w%
+echo.
+echo  Reads what the bootloader reports: whether it is unlocked, secure boot, the active slot,
+echo  the bootloader and radio versions. Read-only - nothing is flashed, erased or unlocked.
+echo  The phone leaves Android for its bootloader ^(fastboot mode^); DCX boots it back after.
+echo.
+echo  %y%USB only.%w% Windows needs a driver for the bootloader mode as well: Google's USB Driver for
+echo  a Pixel, the maker's own driver for other phones. Without one, DCX waits and then says so.
+echo.
+set "_fbexe="
+if exist "!DCX_DIR!adb\fastboot.exe" set "_fbexe=!DCX_DIR!adb\fastboot.exe"
+if not defined _fbexe call :_fb_where
+if not defined _fbexe goto fbinfo_noexe
+set "_fbd=!DCX_TMP!\fastboot"
+if exist "!_fbd!\" rd /s /q "!_fbd!" >nul 2>&1
+md "!_fbd!" >nul 2>&1
+if not exist "!_fbd!\" goto fbinfo_notmp
+set "_fbser=" & set "_fbadb=!ANDROID_SERIAL!"
+:: A phone already in fastboot mode needs no reboot.
+call :_fb_list before
+:: Already in fastboot: the adb target may be another phone, so the wait for Android uses this one.
+if !_fbn! GEQ 1 (set "_fbadb=" & goto fbinfo_pick)
+set "_dvst="
+for /f "delims=" %%d in ('adb get-state 2^>nul ^<nul') do set "_dvst=%%d"
+if /i not "!_dvst!"=="device" goto fbinfo_nodev
+:: The bootloader has no Wi-Fi.
+call :_wifi_ser _fbadb && goto fbinfo_wifi
+echo    [Y] Reboot to the bootloader and read it    [N] Back
+:: Ctrl+C makes choice return 0, so not errorlevel 1 goes where N goes.
+choice /c:YN /n >nul
+if errorlevel 2 goto fbinfo_cancel
+if not errorlevel 1 goto fbinfo_cancel
+adb reboot bootloader <nul >nul 2>&1
+if errorlevel 1 goto fbinfo_rebootfail
+echo  Rebooting to the bootloader. Waiting for it to show up - up to 60 s. Q stops waiting.
+set "_fbw=0"
+
+:fbinfo_wait
+call :_fb_list now
+if !_fbn! GEQ 1 goto fbinfo_pick
+set /a _fbw+=2
+if !_fbw! GEQ 60 goto fbinfo_timeout
+choice /c:QN /n /t 2 /d N >nul
+if errorlevel 2 goto fbinfo_wait
+goto fbinfo_stuck
+
+:fbinfo_timeout
+echo.
+echo  [%r%^^!%w%] No phone in fastboot mode after 60 s. Usually Windows has no driver for it:
+echo      Device Manager then lists the phone under Other devices with a yellow mark. Install
+echo      Google's USB Driver ^(Pixel^) or the maker's driver, then try again.
+echo      Some makers' bootloader key combos lead to a download mode that is not fastboot.
+echo    [W] Wait 60 s more    [Q] Stop waiting
+choice /c:WQ /n >nul
+if errorlevel 2 goto fbinfo_stuck
+if not errorlevel 1 goto fbinfo_stuck
+set "_fbw=0"
+goto fbinfo_wait
+
+:fbinfo_stuck
+echo.
+echo  The phone may still be in its bootloader. To start Android: pick Start or Reboot with
+echo  the volume keys and press power, or hold power for about 15 s.
+goto fbinfo_end
+
+:fbinfo_pick
+:: Prefer the serial adb used; else a single listed phone; else ask.
+if defined _fbadb for /l %%i in (1,1,!_fbn!) do if "!_fbs[%%i]!"=="!_fbadb!" set "_fbser=!_fbadb!"
+if not defined _fbser if !_fbn! EQU 1 set "_fbser=!_fbs[1]!"
+if defined _fbser goto fbinfo_read
+echo.
+echo  More than one phone is in fastboot mode:
+for /l %%i in (1,1,!_fbn!) do echo     %g%[%w%%%i%g%]%w% !_fbs[%%i]!
+
+:fbinfo_pick_ask
+set "fbp=" & set /p fbp="Phone number (Enter = back) >> "
+call :_noin fbp || goto dcx_noinput
+if not defined fbp goto fbinfo_end
+call :_lib_num fbp || goto fbinfo_pick_ask
+if not defined _fbs[!fbp!] goto fbinfo_pick_ask
+for /f "delims=" %%k in ("!fbp!") do set "_fbser=!_fbs[%%k]!"
+
+:fbinfo_read
+echo.
+echo  Reading the bootloader of !_fbser!...
+set "_fbargs=-s !_fbser! getvar product getvar variant getvar serialno getvar secure getvar unlocked getvar is-userspace getvar current-slot getvar slot-count getvar version-bootloader getvar version-baseband getvar battery-voltage getvar battery-soc-ok"
+set "_fbout=!_fbd!\vars.txt"
+call :_fb_run 20
+if "!_fbrc!"=="124" goto fbinfo_hung
+findstr /b /c:"Finished." "!_fbout!" >nul 2>&1 || goto fbinfo_readfail
+cls
+title Bootloader info - !_fbser!
+call :logo
+echo  %b%What the bootloader reports%w%   ^("not reported" = this bootloader does not answer it^)
+echo.
+for %%v in (product variant serialno secure unlocked is-userspace current-slot slot-count version-bootloader version-baseband battery-voltage battery-soc-ok) do call :_fb_show %%v
+echo.
+findstr /x /c:"unlocked: yes" "!_fbout!" >nul 2>&1 && echo  %y%Unlocked:%w% this bootloader accepts any image. Locking it again wipes the phone.
+findstr /x /c:"unlocked: no" "!_fbout!" >nul 2>&1 && echo  Locked: only images signed by the maker boot.
+findstr /x /c:"is-userspace: yes" "!_fbout!" >nul 2>&1 && echo  This is fastbootd, Android's own fastboot - not the bootloader itself.
+echo.
+echo    [R] Reboot to Android    [S] Save the full list ^(getvar all^) to dcx_logs    [L] Leave it here
+:: Only R reboots: Ctrl+C makes choice return 0, which leaves the phone where it is.
+choice /c:RSL /n >nul
+if errorlevel 3 goto fbinfo_stuck
+if errorlevel 2 goto fbinfo_saveall
+if errorlevel 1 goto fbinfo_boot
+goto fbinfo_stuck
+
+:fbinfo_saveall
+set "_fbargs=-s !_fbser! getvar all"
+set "_fbout=!_fbd!\all.txt"
+call :_fb_run 30
+if not exist "!LOGDIR!\" md "!LOGDIR!" >nul 2>&1
+call :_lib_ts
+set "_fbsave=!LOGDIR!\bootloader_!_lbts!.txt"
+find /v "" <"!_fbout!" >"!_fbsave!" 2>nul
+if "!_fbrc!"=="124" echo  [%y%WARN%w%] getvar all stopped answering - the file holds what came before that.
+if exist "!_fbsave!" echo  [%g%+%w%] Saved to !_fbsave!
+if not exist "!_fbsave!" echo  [%r%^^!%w%] Could not save to !LOGDIR!
+echo    [R] Reboot to Android    [L] Leave it here
+choice /c:RL /n >nul
+if errorlevel 2 goto fbinfo_stuck
+if errorlevel 1 goto fbinfo_boot
+goto fbinfo_stuck
+
+:fbinfo_boot
+:: A phone found already in fastboot mode has no adb serial yet; its USB serial is normally the same.
+if not defined _fbadb set "_fbadb=!_fbser!"
+echo.
+echo  Rebooting to Android...
+set "_fbargs=-s !_fbser! reboot"
+set "_fbout=!_fbd!\reboot.txt"
+call :_fb_run 15
+findstr /c:"OKAY" "!_fbout!" >nul 2>&1 || goto fbinfo_bootfail
+echo  [%g%+%w%] The bootloader accepted the reboot. Waiting for Android - up to 2 minutes.
+set "_fbw=0"
+
+:fbinfo_back
+set "_dvst="
+for /f "skip=1 tokens=1,2" %%a in ('adb devices ^<nul 2^>nul') do if "%%a"=="!_fbadb!" set "_dvst=%%b"
+if "!_dvst!"=="device" goto fbinfo_backok
+set /a _fbw+=3
+if !_fbw! GEQ 120 goto fbinfo_backslow
+timeout /t 3 /nobreak >nul
+goto fbinfo_back
+
+:fbinfo_backok
+echo  [%g%OK%w%] The phone is back in Android.
+goto fbinfo_end
+
+:fbinfo_backslow
+echo  [%y%WARN%w%] Android has not reconnected after 2 minutes. It may still be booting, or the
+echo         USB debugging prompt is waiting on the phone. Reconnect from the main menu.
+goto fbinfo_end
+
+:fbinfo_bootfail
+echo  [%r%^^!%w%] The bootloader did not accept the reboot. Start the phone with its power key:
+echo      pick Start or Reboot with the volume keys and press power, or hold power for 15 s.
+goto fbinfo_end
+
+:fbinfo_hung
+echo  [%r%^^!%w%] fastboot stopped answering after 20 s and was stopped. The phone is still in
+echo      its bootloader.
+goto fbinfo_boot_offer
+
+:fbinfo_readfail
+echo  [%r%^^!%w%] fastboot did not finish reading:
+type "!_fbout!" 2>nul
+
+:fbinfo_boot_offer
+echo    [R] Try to reboot it to Android    [L] Leave it here
+choice /c:RL /n >nul
+if errorlevel 2 goto fbinfo_stuck
+if not errorlevel 1 goto fbinfo_stuck
+goto fbinfo_boot
+
+:fbinfo_cancel
+if exist "!_fbd!\" rd /s /q "!_fbd!" >nul 2>&1
+goto shell
+
+:fbinfo_noexe
+echo  [%r%^^!%w%] fastboot.exe was not found next to adb.exe or on PATH. It ships in Google's
+echo      SDK Platform-Tools, the same download as adb.
+goto fbinfo_end
+
+:fbinfo_notmp
+echo  [%r%^^!%w%] Could not create the scratch folder !_fbd!
+goto fbinfo_end
+
+:fbinfo_nodev
+echo  [%r%^^!%w%] No phone in Android with USB debugging allowed, and none in fastboot mode.
+goto fbinfo_end
+
+:fbinfo_wifi
+echo  [%r%^^!%w%] The phone is connected over Wi-Fi ^(!_fbadb!^). The bootloader only talks over USB:
+echo      plug in the cable, pick the USB entry under Wireless ADB - Select target, and retry.
+goto fbinfo_end
+
+:fbinfo_rebootfail
+echo  [%r%^^!%w%] The phone refused to reboot to the bootloader, or the connection dropped.
+
+:fbinfo_end
+if exist "!_fbd!\" rd /s /q "!_fbd!" >nul 2>&1
+echo.
+echo Press Any Button To Go Back
+pause >nul
+goto shell
+
+:_fb_list
+:: Fills _fbs[1.._fbn] from fastboot devices: a USB serial, then the state. Returns at once and
+:: exits 0 even with nothing attached. Network entries and the ? placeholder are left out. The
+:: lines are the phone's text: each is read with delayed expansion off and checked before use.
+for /f "delims==" %%v in ('set _fbs[ 2^>nul') do set "%%v="
+set "_fbn=0"
+fastboot devices <nul >"!_fbd!\devices.txt" 2>nul
+type nul >"!_fbd!\devices.ok"
+for /f "usebackq tokens=1,2" %%a in ("!_fbd!\devices.txt") do (
+    setlocal DisableDelayedExpansion
+    set "_fba=%%a"
+    set "_fbb=%%b"
+    call :_fb_take
+    endlocal
+)
+for /f "usebackq delims=" %%s in ("!_fbd!\devices.ok") do (
+    set /a _fbn+=1
+    set "_fbs[!_fbn!]=%%s"
+)
+exit /b
+
+:_fb_take
+:: _fba/_fbb = one fastboot devices line, delayed expansion off. Keeps the serial when the state is
+:: fastboot and the serial is letters, digits, dots, dashes and underscores.
+setlocal EnableDelayedExpansion
+if /i not "!_fbb!"=="fastboot" (endlocal & exit /b)
+if not defined _fba (endlocal & exit /b)
+for /f "eol=a delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" %%c in ("!_fba!") do (endlocal & exit /b)
+>>"!_fbd!\devices.ok" echo(!_fba!
+endlocal
+exit /b
+
+:_fb_show
+:: %1 = a getvar name. Prints the phone's own line for it from the output file, or not reported.
+findstr /b /c:"%~1: " "!_fbout!" 2>nul || echo %~1: not reported
+exit /b
+
+:_fb_run
+:: Runs fastboot with _fbargs, both streams into the file _fbout, under a watchdog of %1 s: on
+:: Windows its USB reads have no timeout, so a stalled bootloader would hang DCX. _fbrc = its exit
+:: code, 124 = stopped by the watchdog. The serial variables are cleared for this call only.
+setlocal
+set "ANDROID_SERIAL="
+set "FASTBOOT_DEVICE="
+set "DCX_FBX=!_fbexe!"
+set "DCX_FBA=!_fbargs!"
+set "DCX_FBO=!_fbout!"
+set "DCX_FBT=%~1"
+powershell -NoProfile -Command "$p = Start-Process -FilePath $env:DCX_FBX -ArgumentList $env:DCX_FBA -NoNewWindow -PassThru -RedirectStandardError ($env:DCX_FBO + '.raw') -RedirectStandardOutput ($env:DCX_FBO + '.out'); $null = $p.Handle; if (-not $p.WaitForExit([int]$env:DCX_FBT * 1000)) { $p.Kill(); exit 124 }; exit $p.ExitCode" <nul
+set "_rc=!errorlevel!"
+:: PowerShell resets the code page. chcp gets its own empty input: it reads a redirected one to the end.
+chcp 65001 >nul <nul
+:: find re-terminates LF-only lines, so the whole-line findstr /x checks above can match.
+find /v "" <"!_fbout!.raw" >"!_fbout!" 2>nul
+endlocal & set "_fbrc=%_rc%"
+exit /b
+
+:_fb_where
+:: _fbexe = fastboot.exe, the bare name, when one is on PATH; Start-Process finds it there. Not the
+:: path: carried out through endlocal & set, it would lose a ! to the caller's delayed expansion.
+for %%f in (fastboot.exe) do if not "%%~$PATH:f"=="" set "_fbexe=fastboot.exe"
+exit /b
+
+:: ===================================================================
+:: Sideload an update: sends an OTA package to the phone's recovery with adb sideload. In sideload
+:: mode recovery answers success to adb whatever the install did, so adb's exit 0 only proves the
+:: transfer. DCX records the build fingerprint first and compares it once Android is back: that is
+:: the honest verdict. USB only - recovery's adb has no network side.
+:: ===================================================================
+:sideload
+cls
+title Sideload an update
+call :logo
+echo                        %b%[%w% Sideload an update package %b%]%w%
+echo.
+echo  Installs a full OTA update package ^(.zip^) through the phone's recovery, as the makers'
+echo  own pages describe. Stock recovery checks the package's signature and refuses one made for
+echo  another phone or an older build; your data stays. %y%A custom recovery checks nothing%w%: there,
+echo  only send a package made for this exact phone and build, and if the phone asks whether to
+echo  install although the signature check failed, answer No.
+echo  USB only. Keep the cable in until the phone says the install has finished.
+echo.
+set "_sld=!DCX_TMP!\sideload"
+if exist "!_sld!\" rd /s /q "!_sld!" >nul 2>&1
+md "!_sld!" >nul 2>&1
+if not exist "!_sld!\" goto sideload_notmp
+call :_wifi_ser ANDROID_SERIAL && goto sideload_wifi
+
+:sideload_ask
+set "slf=" & set /p slf="Path of the .zip - drag it into this window (Enter = back) >> "
+call :_noin slf || goto dcx_noinput
+if not defined slf goto sideload_end
+set "slf=!slf:"=!"
+if not defined slf goto sideload_ask
+:: A wildcard would make the for below match other files; no file name holds one. Tested by
+:: substitution: a for variable holding the path would lose a ! to delayed expansion. *X=
+:: replaces up to the first X, so **= changes the text only when it holds a star.
+if not "!slf:**=!"=="!slf!" goto sideload_badfile
+if not "!slf:?=!"=="!slf!" goto sideload_badfile
+:: The path is read late everywhere: a %%~f of it would lose a ! to delayed expansion. A folder is
+:: told by its attribute, which starts with d.
+if not exist "!slf!" goto sideload_badfile
+set "_sla="
+for %%F in ("!slf!") do set "_sla=%%~aF"
+if /i "!_sla:~0,1!"=="d" goto sideload_badfile
+set "_slsz="
+for %%F in ("!slf!") do if /i "%%~xF"==".zip" set "_slsz=%%~zF"
+if not defined _slsz goto sideload_badfile
+if "!_slsz!"=="0" goto sideload_badfile
+set "_slmb=!_slsz:~0,-6!"
+if not defined _slmb set "_slmb=0"
+:: Recovery takes at most 2^18 blocks of 64 KiB (16 GiB); before Android 10 it read the size as a
+:: 32-bit int (under 2 GiB). Compared in MB: cmd's if is 32-bit, a byte count can be larger.
+if !_slmb! GTR 17179 goto sideload_toobig
+if !SDK! GTR 0 if !SDK! LSS 29 if !_slmb! GEQ 2147 goto sideload_toobig
+echo.
+echo  File      !slf!
+echo  Size      about !_slmb! MB
+echo  Checksum  working out SHA-256...
+certutil -hashfile "!slf!" SHA256 >"!_sld!\hash.txt" 2>nul
+set "_slh="
+for /f "usebackq delims=" %%h in ("!_sld!\hash.txt") do (
+    set "_slx=%%h"
+    call :_sl_hex
+)
+if defined _slh echo  SHA-256   !_slh!
+if defined _slh echo            Compare it with the checksum on the page you downloaded it from.
+if not defined _slh echo  [%y%WARN%w%] certutil could not hash the file - check it yourself before sending.
+echo.
+:: The build before the update, so the result can be checked once Android is back.
+set "_slbefore="
+adb shell getprop ro.build.fingerprint <nul >"!_sld!\before.txt" 2>nul
+for %%F in ("!_sld!\before.txt") do if %%~zF GTR 1 set "_slbefore=1"
+if defined _slbefore echo  Build now: & type "!_sld!\before.txt"
+if not defined _slbefore echo  The build cannot be read now, so DCX cannot check the result later - read the phone's screen.
+set "_slbat="
+adb shell dumpsys battery <nul >"!_sld!\bat.txt" 2>nul
+for /f "tokens=2 delims=:" %%a in ('findstr /r /c:"^ *level: *[0-9][0-9]*" "%%DCX_TMP%%\sideload\bat.txt" 2^>nul') do set "_slbat=%%a"
+if defined _slbat set "_slbat=!_slbat: =!"
+if defined _slbat for /f "delims=" %%x in ("!_slbat!") do set "_slbat=%%x"
+if defined _slbat for /f "delims=0123456789" %%x in ("!_slbat!") do set "_slbat="
+if defined _slbat if !_slbat! LSS 50 echo  %y%Battery at !_slbat!%%.%w% An install can take many minutes - charge to 50%% or more first.
+echo.
+
+:sideload_mode
+echo  How should the phone get ready?
+echo                 %g%[%w%1%g%]%w% Reboot it into sideload mode now   (Android 10 and newer)
+echo                 %g%[%w%2%g%]%w% Reboot it into recovery - I pick "Apply update from ADB" myself
+echo                 %g%[%w%3%g%]%w% It already waits: recovery shows "Apply update from ADB"
+echo                 %g%[%w%4%g%]%w% Back
+set "slm=" & set /p slm="Choose An Option >> "
+call :_noin slm || goto dcx_noinput
+set "_slopt=!slm!"
+if "!slm!"=="1" goto sideload_reboot
+if "!slm!"=="2" goto sideload_recovery
+if "!slm!"=="3" goto sideload_wait0
+if "!slm!"=="4" goto sideload_end
+goto sideload_mode
+
+:sideload_reboot
+:: Android 6-9 need root for this and answer a refusal with exit 0; init does it from Android 10.
+if !SDK! GTR 0 if !SDK! LSS 29 echo  This phone runs Android 9 or older: it cannot do that without root. Use option 2.
+if !SDK! GTR 0 if !SDK! LSS 29 goto sideload_mode
+adb reboot sideload <nul >nul 2>&1
+if errorlevel 1 goto sideload_rebootfail
+goto sideload_wait0
+
+:sideload_recovery
+adb reboot recovery <nul >nul 2>&1
+if errorlevel 1 goto sideload_rebootfail
+echo  On the phone, in recovery: pick "Apply update from ADB" with the volume keys, press power.
+
+:sideload_wait0
+echo  Waiting for the phone in sideload mode - up to 3 minutes. Q stops waiting.
+set "_slw=0" & set "_slrec="
+
+:sideload_wait
+call :_sl_state
+if "!_slst!"=="sideload" if defined _slser goto sideload_confirm
+if "!_slst!"=="recovery" if not defined _slrec echo  The phone is in recovery: pick "Apply update from ADB" on it.
+if "!_slst!"=="recovery" set "_slrec=1"
+set /a _slw+=3
+if !_slw! GEQ 180 goto sideload_waitlong
+choice /c:QN /n /t 3 /d N >nul
+if errorlevel 2 goto sideload_wait
+goto sideload_end
+
+:sideload_waitlong
+echo.
+echo  [%r%^^!%w%] No phone in sideload mode after 3 minutes.
+if "!_slst!"=="device" if "!_slopt!"=="1" echo      It is back in Android: this phone does not support adb reboot sideload. Use option 2.
+if "!_slst!"=="device" if not "!_slopt!"=="1" echo      It is in Android: recovery's "Apply update from ADB" screen was never reached.
+echo      In recovery, "Apply update from ADB" must be on screen. If Windows lists the phone under
+echo      Other devices with a yellow mark, recovery needs the USB driver too.
+goto sideload_end
+
+:sideload_confirm
+echo.
+echo  [%g%+%w%] The phone is in sideload mode.
+echo  Send !slf! to !_slser! now? The phone checks it, then installs it. This takes several minutes.
+echo  Answer within 5 minutes: recovery stops waiting for the package after that.
+echo    [Y] Send it    [N] Cancel
+:: Ctrl+C makes choice return 0, so not errorlevel 1 goes where N goes.
+choice /c:YN /n >nul
+if errorlevel 2 goto sideload_cancel
+if not errorlevel 1 goto sideload_cancel
+echo.
+adb -s !_slser! sideload "!slf!" 2>"!_sld!\err.txt"
+set "_slrc=!errorlevel!"
+echo.
+type "!_sld!\err.txt" 2>nul
+if not "!_slrc!"=="0" goto sideload_xferfail
+echo  [%b%i%w%] The whole package reached the phone ^(adb exit 0^). That is not yet an install:
+echo      in sideload mode the phone answers success either way. Read its screen now -
+echo      "Install from ADB completed with status 0" means it installed; an error there means not.
+echo      Then pick "Reboot system now" on the phone.
+goto sideload_check
+
+:sideload_xferfail
+:: Only adb's own words tell these apart; each needs a different answer.
+findstr /c:"sideload connection failed" "!_sld!\err.txt" >nul 2>&1 && goto sideload_nosend
+findstr /c:"failed to stat file" /c:"failed to open file" "!_sld!\err.txt" >nul 2>&1 && goto sideload_nofile
+findstr /c:"failed to read command:" "!_sld!\err.txt" >nul 2>&1 && goto sideload_unknown
+echo  [%r%^^!%w%] The transfer stopped ^(adb exit !_slrc!^). If the phone had started installing, the
+echo      result is unknown: read its screen, then pick "Reboot system now" on it.
+goto sideload_check
+
+:sideload_unknown
+echo  [%y%WARN%w%] The phone closed the connection without its final signal. That also happens after a
+echo         good install, always with Android 9 and older recoveries, so the result is unknown.
+echo         Read the phone's screen, then pick "Reboot system now" on it.
+goto sideload_check
+
+:sideload_nosend
+echo  [%r%^^!%w%] Nothing was sent: adb could not reach the phone in sideload mode. Check that recovery
+echo      shows "Apply update from ADB" and that the cable is in, then try option 3.
+goto sideload_end
+
+:sideload_nofile
+echo  [%r%^^!%w%] Nothing was sent: adb could not read the file. Copy it to a short path, such as
+echo      C:\ota.zip, and try again.
+goto sideload_end
+
+:sideload_toobig
+echo  [%r%x%w%] The phone's recovery cannot take a package of !_slmb! MB: the limit is 16 GiB, and
+echo      2 GiB before Android 10. Nothing was sent.
+goto sideload_end
+
+:sideload_check
+if not defined _slbefore goto sideload_end
+echo.
+echo    [W] Wait for Android and check the build    [S] Skip the check
+choice /c:WS /n >nul
+if errorlevel 2 goto sideload_end
+if not errorlevel 1 goto sideload_end
+echo  Waiting for Android - the first boot after an update can take 10 minutes. Q stops waiting.
+set "_slw=0"
+
+:sideload_back
+call :_sl_state
+if "!_slst!"=="device" goto sideload_compare
+set /a _slw+=5
+if !_slw! GEQ 900 goto sideload_backslow
+choice /c:QN /n /t 5 /d N >nul
+if errorlevel 2 goto sideload_back
+goto sideload_end
+
+:sideload_compare
+adb shell getprop ro.build.fingerprint <nul >"!_sld!\after.txt" 2>nul
+for %%F in ("!_sld!\after.txt") do if %%~zF LEQ 1 goto sideload_retry
+echo  Build now:
+type "!_sld!\after.txt"
+fc /b "!_sld!\before.txt" "!_sld!\after.txt" >nul 2>&1
+if errorlevel 2 goto sideload_backslow
+if errorlevel 1 goto sideload_changed
+echo  [%y%WARN%w%] The build is the same as before: the update did not install, or the package held
+echo         the build the phone already had.
+goto sideload_end
+
+:sideload_retry
+:: Listed as a device, but its shell did not answer yet: wait and read again, within the same limit.
+set /a _slw+=5
+if !_slw! GEQ 900 goto sideload_backslow
+choice /c:QN /n /t 5 /d N >nul
+if errorlevel 2 goto sideload_back
+goto sideload_end
+
+:sideload_changed
+echo  [%g%OK%w%] The build changed - the update is installed.
+goto sideload_end
+
+:sideload_backslow
+echo  [%y%WARN%w%] Android did not answer in 15 minutes, so the build could not be checked. Once it
+echo         is up, compare Settings - About phone with the package you sent.
+goto sideload_end
+
+:sideload_cancel
+echo  Nothing was sent. The phone still waits in sideload mode: pick "Reboot system now" on it.
+goto sideload_end
+
+:sideload_rebootfail
+echo  [%r%^^!%w%] The phone did not accept the reboot, or the connection dropped.
+goto sideload_end
+
+:sideload_badfile
+echo  [%r%x%w%] That is not an existing .zip file. Drag the file itself into the window.
+goto sideload_ask
+
+:sideload_wifi
+echo  [%r%^^!%w%] The phone is connected over Wi-Fi ^(!ANDROID_SERIAL!^). Recovery only talks over USB:
+echo      plug in the cable, pick the USB entry under Wireless ADB - Select target, and retry.
+goto sideload_end
+
+:sideload_notmp
+echo  [%r%^^!%w%] Could not create the scratch folder !_sld!
+
+:sideload_end
+if exist "!_sld!\" rd /s /q "!_sld!" >nul 2>&1
+echo.
+echo Press Any Button To Go Back
+pause >nul
+goto shell
+
+:_sl_state
+:: _slst = adb's state for the target (device, sideload, recovery, ...; empty when it is not listed)
+:: and _slser = the serial to sideload to. Recovery can list the phone under another serial, so a
+:: single phone in sideload mode is taken only when the target is not listed at all: a target still
+:: in Android or recovery must never hand the package to another phone. Lines are the phone's text,
+:: read with delayed expansion off and checked before use.
+set "_slst=" & set "_slser=" & set "_sl1=" & set "_sln=0"
+adb devices <nul >"!_sld!\devices.txt" 2>nul
+type nul >"!_sld!\devices.ok"
+for /f "usebackq skip=1 tokens=1,2" %%a in ("!_sld!\devices.txt") do (
+    setlocal DisableDelayedExpansion
+    set "_sla1=%%a"
+    set "_sla2=%%b"
+    call :_sl_take
+    endlocal
+)
+for /f "usebackq tokens=1,2" %%a in ("!_sld!\devices.ok") do (
+    if "%%a"=="!ANDROID_SERIAL!" set "_slst=%%b"
+    if "%%b"=="sideload" (
+        set /a _sln+=1
+        set "_sl1=%%a"
+    )
+)
+if "!_slst!"=="sideload" set "_slser=!ANDROID_SERIAL!"
+if not defined _slst if "!_sln!"=="1" set "_slser=!_sl1!"
+if defined _slser set "_slst=sideload"
+exit /b
+
+:_sl_take
+:: _sla1/_sla2 = one adb devices line (serial, state), delayed expansion off. Kept only when both
+:: hold letters, digits, dots, dashes, underscores and colons.
+setlocal EnableDelayedExpansion
+if not defined _sla1 (endlocal & exit /b)
+if not defined _sla2 (endlocal & exit /b)
+for /f "eol=a delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-" %%c in ("!_sla1!!_sla2!") do (endlocal & exit /b)
+>>"!_sld!\devices.ok" echo(!_sla1! !_sla2!
+endlocal
+exit /b
+
+:_sl_hex
+:: _slx = one line of certutil's answer. Keeps it as _slh when it is 64 hex digits; older Windows
+:: puts a space between bytes, so spaces are dropped first. The other lines are localized text.
+if not defined _slx exit /b
+set "_slx=!_slx: =!"
+if not "!_slx:~63,1!"=="" if "!_slx:~64!"=="" (
+    for /f "eol=0 delims=0123456789abcdefABCDEF" %%c in ("!_slx!") do exit /b
+    set "_slh=!_slx!"
+)
+exit /b
+
+:: ===================================================================
+:: Logcat capture: the crash log the phone keeps, or a recording made while you reproduce a problem.
+:: A recording is adb logcat in a hidden process started by PowerShell, which hands back its PID; Q
+:: stops exactly that process, after checking it is still adb.exe. Nothing goes by window title:
+:: with Windows Terminal as the console, the title belongs to the terminal itself. The PID is also
+:: kept in dcx_logs, so a recording a closed window left running is stopped on the next visit.
+:: ===================================================================
+:logcap
+cls
+title Logcat capture
+call :logo
+echo                          %b%[%w% Logcat capture %b%]%w%
+echo.
+call :_lc_leftover
+echo  Recordings and crash logs are saved in !LOGDIR!
+echo.
+echo                 %g%[%w%1%g%]%w% Crash log - the app crashes the phone still remembers
+echo                 %g%[%w%2%g%]%w% Record one app while you reproduce a problem
+echo                 %g%[%w%3%g%]%w% Record everything while you reproduce a problem
+echo                 %g%[%w%4%g%]%w% Open the dcx_logs folder
+echo                 %g%[%w%5%g%]%w% Back
+set "lcm=" & set /p lcm="Choose An Option >> "
+call :_noin lcm || goto dcx_noinput
+if "!lcm!"=="1" goto logcap_crash
+if "!lcm!"=="2" goto logcap_app
+if "!lcm!"=="3" goto logcap_all
+if "!lcm!"=="4" goto logcap_folder
+if "!lcm!"=="5" goto shell
+goto logcap
+
+:logcap_folder
+if not exist "!LOGDIR!\" md "!LOGDIR!" >nul 2>&1
+start "" explorer "!LOGDIR!"
+goto logcap
+
+:logcap_crash
+:: The crash buffer exists from Android 5.0.
+if !SDK! GTR 0 if !SDK! LSS 21 goto logcap_old
+if not exist "!LOGDIR!\" md "!LOGDIR!" >nul 2>&1
+call :_lib_ts
+set "_lcf=!LOGDIR!\crash_!_lbts!.txt"
+echo.
+echo  Reading the crash log...
+adb logcat -b crash -d -v threadtime <nul >"!_lcf!" 2>nul
+set "_lcrc=!errorlevel!"
+if not "!_lcrc!"=="0" goto logcap_crash_fail
+:: A redirect that failed sets no errorlevel: only the file proves adb ran.
+if not exist "!_lcf!" goto logcap_nofile
+call :_lc_count
+echo.
+if "!_lclines!"=="0" echo  The crash log is empty: nothing crashed since the phone started, or since it was cleared.
+if "!_lclines!"=="0" goto logcap_view
+echo  !_lclines! lines, !_lcfat! app crash^(es^). The apps that crashed:
+findstr /c:"Process: " "!_lcf!" 2>nul
+goto logcap_view
+
+:logcap_crash_fail
+echo  [%r%^^!%w%] The phone did not hand over its crash log ^(adb exit !_lcrc!^) - is it still connected?
+del "!_lcf!" >nul 2>&1
+goto logcap_end
+
+:logcap_nofile
+echo  [%r%^^!%w%] Could not write !_lcf! - is dcx_logs writable?
+goto logcap_end
+
+:logcap_old
+echo  [%r%^^!%w%] This phone runs Android 4.4 or older, which keeps no separate crash log.
+goto logcap_end
+
+:logcap_app
+echo.
+set "lcp=" & set /p lcp="Package name or part of one (blank = back) >> "
+call :_noin lcp || goto dcx_noinput
+if not defined lcp goto logcap
+call :_pkg_pick lcp inst || goto logcap
+set "_PKGCHK=!lcp!"
+call :_pkg_ok || goto logcap_badpkg
+set "_pmpkg=!_PKGCHK!"
+set "_pmuid=" & set "_pminst="
+:: pm list packages -U exists from Android 8; older phones are checked with pm path and get no uid.
+if !SDK! GEQ 26 call :_pm_uid
+if !SDK! LSS 26 adb shell pm path !_PKGCHK! <nul >"!DCX_TMP!\lcpath.txt" 2>nul
+if !SDK! LSS 26 findstr /b /c:"package:" "!DCX_TMP!\lcpath.txt" >nul 2>&1 && set "_pminst=1"
+if not defined _pminst goto logcap_nopkg
+set "_lcpkg=!_PKGCHK!"
+goto logcap_rec
+
+:logcap_badpkg
+echo  [%r%x%w%] Invalid package name. Letters, digits, dots and underscores only.
+goto logcap_end
+
+:logcap_nopkg
+echo  [%r%^^!%w%] !_PKGCHK! is not installed, or the phone did not answer.
+goto logcap_end
+
+:logcap_all
+set "_lcpkg=" & set "_pmuid="
+
+:logcap_rec
+:: One app: Android 12+ filters on the phone (--uid); 7-11 adds the uid column and DCX filters the
+:: saved file afterwards; older Android cannot tell apps apart in its log.
+set "_lcmode=all"
+if defined _lcpkg if defined _pmuid if !SDK! GEQ 31 set "_lcmode=uid"
+if defined _lcpkg if defined _pmuid if !SDK! GEQ 26 if !SDK! LSS 31 set "_lcmode=col"
+echo.
+if defined _lcpkg if "!_lcmode!"=="all" echo  %y%This Android cannot tell apps apart in its log, so everything is recorded.%w%
+:: Start from now, not with what the buffer already holds: -T takes epoch seconds from Android 7.
+:: All digits would be read as a line count, hence the .000.
+set "_lcsince="
+if !SDK! GEQ 24 for /f "delims=" %%t in ('adb shell date +%%s 2^>nul ^<nul') do set "_lcsince=%%t"
+if defined _lcsince for /f "delims=" %%t in ("!_lcsince!") do set "_lcsince=%%t"
+if defined _lcsince call :_lib_num _lcsince || set "_lcsince="
+set "_lcargs=logcat -v threadtime"
+if "!_lcmode!"=="col" set "_lcargs=!_lcargs! -v uid"
+set "_lcargs=!_lcargs! -b main -b system"
+if !SDK! GEQ 21 set "_lcargs=!_lcargs! -b crash"
+if "!_lcmode!"=="uid" set "_lcargs=!_lcargs! --uid=!_pmuid!"
+if defined _lcsince set "_lcargs=!_lcargs! -T !_lcsince!.000"
+if defined ANDROID_SERIAL set "_lcargs=-s !ANDROID_SERIAL! !_lcargs!"
+if not exist "!LOGDIR!\" md "!LOGDIR!" >nul 2>&1
+call :_lib_ts
+set "_lcf=!LOGDIR!\logcat_!_lbts!.txt"
+if defined _lcpkg set "_lcf=!LOGDIR!\logcat_!_lcpkg!_!_lbts!.txt"
+call :_lc_start || goto logcap_startfail
+echo  %m%Recording%w% - reproduce the problem on the phone now.   %g%Q%w% stops the recording.
+echo  The window title shows how long it has run.
+:: Elapsed time comes from the clock: a tick takes longer than its 3 s wait.
+call :_pm_now
+set "_pmstart=!_pmnow!"
+
+:logcap_tick
+choice /c:QN /n /t 3 /d N >nul
+if errorlevel 2 goto logcap_tick_on
+goto logcap_stop
+
+:logcap_tick_on
+call :_lc_alive || goto logcap_lost
+call :_pm_el
+title Recording - !_pmelt! - press Q to stop
+goto logcap_tick
+
+:logcap_lost
+call :_pm_el
+echo  [%y%WARN%w%] The recording stopped by itself after !_pmelt!: the phone disconnected, or
+echo         adb could not reach it. What came before that is saved.
+goto logcap_done
+
+:logcap_stop
+call :_lc_stop
+call :_pm_el
+echo  Stopped after !_pmelt!.
+
+:logcap_done
+title Logcat capture
+del "!LOGDIR!\.recording.pid" >nul 2>&1
+set "_lcpid="
+for %%F in ("!_lcf!") do if %%~zF EQU 0 if exist "!_lcf!.err" type "!_lcf!.err"
+del "!_lcf!.err" >nul 2>&1
+if not "!_lcmode!"=="col" goto logcap_sum
+:: Android 7-11: keep the app's own lines, matched on the uid column right after the time.
+set "_lcall=!_lcf!"
+set "_lcf=!LOGDIR!\logcat_!_lcpkg!_!_lbts!_app.txt"
+:: /b anchors the match: a ^ on a line holding !var! is eaten by delayed expansion. logcat prints
+:: uids 10000-10009 by their 5-letter names, u0_a0 .. u0_a9, so those are matched by name too.
+set "_lcun="
+if !_pmuid! GEQ 10000 if !_pmuid! LEQ 10009 set /a "_lcun=_pmuid-10000"
+if defined _lcun findstr /b /r /c:"[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9]\.[0-9]* *!_pmuid! " /c:"[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9]\.[0-9]* *u0_a!_lcun! " "!_lcall!" >"!_lcf!" 2>nul
+if not defined _lcun findstr /b /r /c:"[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9]\.[0-9]* *!_pmuid! " "!_lcall!" >"!_lcf!" 2>nul
+echo  The whole log is in !_lcall!
+
+:logcap_sum
+call :_lc_count
+echo.
+if defined _lcpkg echo  !_lclines! lines from !_lcpkg!, !_lcfat! crash^(es^) - saved as !_lcf!
+if not defined _lcpkg echo  !_lclines! lines, !_lcfat! app crash^(es^), !_lcanr! ANR^(s^) - saved as !_lcf!
+if "!_lclines!"=="0" echo  Nothing was logged. If the app was idle, keep it busy while recording.
+
+:logcap_view
+echo.
+echo    [N] Open it in Notepad    [P] Page through it    [B] Back
+choice /c:NPB /n >nul
+if errorlevel 3 goto logcap
+if errorlevel 2 goto logcap_page
+if not errorlevel 1 goto logcap
+find /v "" <"!_lcf!" >"!DCX_TMP!\logview.txt" 2>nul
+start "" notepad "!DCX_TMP!\logview.txt"
+goto logcap_view
+
+:logcap_page
+more <"!_lcf!"
+goto logcap_view
+
+:logcap_startfail
+echo  [%r%^^!%w%] The recording did not start: PowerShell could not run adb in the background.
+del "!LOGDIR!\.recording.pid" >nul 2>&1
+
+:logcap_end
+echo.
+echo Press Any Button To Go Back
+pause >nul
+goto logcap
+
+:_lc_count
+:: Counts in the file _lcf: _lclines lines, _lcfat app crashes (FATAL EXCEPTION), _lcanr ANRs. The
+:: child commands name the path variable and read it through a redirect, with no pipe: each side of
+:: a pipe is one more cmd, which would expand a %NAME% pair in the path again.
+set "DCX_LCF=!_lcf!"
+set "_lclines=0" & set "_lcfat=0" & set "_lcanr=0"
+for /f %%c in ('find /c /v "" ^<"%%DCX_LCF%%" 2^>nul') do set "_lclines=%%c"
+for /f %%c in ('find /c "FATAL EXCEPTION" ^<"%%DCX_LCF%%" 2^>nul') do set "_lcfat=%%c"
+for /f %%c in ('find /c "ANR in " ^<"%%DCX_LCF%%" 2^>nul') do set "_lcanr=%%c"
+set "DCX_LCF="
+exit /b
+
+:_lc_start
+:: Starts adb with _lcargs as a hidden process writing to _lcf. _lcpid = its PID, also written to
+:: dcx_logs\.recording.pid. errorlevel 1 if it did not start.
+set "_lcpid="
+set "DCX_LCX=!DCX_ADB!"
+if not defined DCX_LCX set "DCX_LCX=adb.exe"
+set "DCX_LCA=!_lcargs!"
+set "DCX_LCF=!_lcf!"
+set "DCX_LCP=!LOGDIR!\.recording.pid"
+del "!DCX_LCP!" >nul 2>&1
+powershell -NoProfile -Command "try { $p = Start-Process -FilePath $env:DCX_LCX -ArgumentList $env:DCX_LCA -WindowStyle Hidden -PassThru -RedirectStandardOutput $env:DCX_LCF -RedirectStandardError ($env:DCX_LCF + '.err'); [IO.File]::WriteAllText($env:DCX_LCP, [string]$p.Id) } catch { if ($p) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }; exit 1 }" <nul
+:: PowerShell resets the code page. chcp gets its own empty input: it reads a redirected one to the end.
+chcp 65001 >nul <nul
+set "DCX_LCX=" & set "DCX_LCA=" & set "DCX_LCF="
+if not exist "!DCX_LCP!" exit /b 1
+set /p _lcpid=<"!DCX_LCP!"
+call :_lib_num _lcpid || (set "_lcpid=" & exit /b 1)
+exit /b 0
+
+:_lc_alive
+:: errorlevel 0 while the process _lcpid is still running as adb.exe. tasklist exits 0 either way,
+:: so its answer is read instead.
+if not defined _lcpid exit /b 1
+tasklist /fi "PID eq !_lcpid!" /fi "IMAGENAME eq adb.exe" /nh <nul >"!DCX_TMP!\lcalive.txt" 2>nul
+findstr /i /c:"adb.exe" "!DCX_TMP!\lcalive.txt" >nul 2>&1
+exit /b
+
+:_lc_stop
+:: Ends the recording process, only while it is still adb.exe: a PID can be reused once it exits.
+call :_lc_alive || exit /b 0
+taskkill /pid !_lcpid! /f >nul 2>&1
+timeout /t 1 /nobreak >nul
+exit /b 0
+
+:_lc_leftover
+:: A recording a closed DCX window left running is stopped here. One that another DCX window is
+:: making right now would be stopped too - the PID file cannot tell them apart.
+if not exist "!LOGDIR!\.recording.pid" exit /b
+set "_lcpid="
+set /p _lcpid=<"!LOGDIR!\.recording.pid"
+call :_lib_num _lcpid || set "_lcpid="
+set "_lcwas="
+if defined _lcpid call :_lc_alive && set "_lcwas=1"
+if defined _lcwas echo  [%b%i%w%] An earlier recording was still running - it is stopped now.
+if defined _lcwas echo.
+if defined _lcwas call :_lc_stop
+del "!LOGDIR!\.recording.pid" >nul 2>&1
+set "_lcpid="
+exit /b
 
 :exitscript
 @echo off
@@ -1185,7 +2509,7 @@ echo                   %d%Thanks For Using My Script, Goodbye And Have A Good Da
 echo.
 echo.
 timeout /t 3 /nobreak > nul
-adb shell cmd notification post -S bigtext -t '⚙DCX⚙' 'Tag' 'Restart = Remove All Settings Applied, Please Use This Script At Least Once A Month To Keep Your Device Smooth, Bye^^!^^!' <nul > nul 2>&1
+adb shell cmd notification post -S bigtext -t '⚙DCX⚙' 'Tag' 'Most DCX settings stay after a restart - only debug properties reset. Use Restore or Tweaks Undo to go back. Bye' <nul > nul 2>&1
 :: REMOVED: adb kill-server - the server is shared with other tools and their Wi-Fi sessions.
 call :_tmp_cleanup
 exit /b
@@ -1193,6 +2517,7 @@ exit /b
 :_tmp_cleanup
 :: Removes this window's scratch folder, deleting known files by name. A kept compile log stays,
 :: and so does its folder - rd without /s removes only an empty one. X or Ctrl+C skips this.
+call :_cp_restore
 if not defined DCX_TMP exit /b
 if not exist "!DCX_TMP!\" exit /b
 del "!DCX_TMP!\installed_packages.txt" "!DCX_TMP!\pkgs.txt" "!DCX_TMP!\qs_tokens.txt" "!DCX_TMP!\idle_whitelist.txt" "!DCX_TMP!\last_report_path.txt" "!DCX_TMP!\pf_sel.txt" "!DCX_TMP!\pf_preset.txt" "!DCX_TMP!\pf_before.txt" >nul 2>&1
@@ -1202,7 +2527,19 @@ if exist "!DCX_TMP!\drain\" rd /s /q "!DCX_TMP!\drain" >nul 2>&1
 if exist "!DCX_TMP!\killall\" rd /s /q "!DCX_TMP!\killall" >nul 2>&1
 if exist "!DCX_TMP!\perf\" rd /s /q "!DCX_TMP!\perf" >nul 2>&1
 if exist "!DCX_TMP!\appcheck\" rd /s /q "!DCX_TMP!\appcheck" >nul 2>&1
+if exist "!DCX_TMP!\pkgpick\" rd /s /q "!DCX_TMP!\pkgpick" >nul 2>&1
+if exist "!DCX_TMP!\cmdlib\" rd /s /q "!DCX_TMP!\cmdlib" >nul 2>&1
+if exist "!DCX_TMP!\fastboot\" rd /s /q "!DCX_TMP!\fastboot" >nul 2>&1
+if exist "!DCX_TMP!\sideload\" rd /s /q "!DCX_TMP!\sideload" >nul 2>&1
+del "!DCX_TMP!\mdns.txt" "!DCX_TMP!\mdns_ok.txt" "!DCX_TMP!\pair.txt" "!DCX_TMP!\connect.txt" >nul 2>&1
+del "!DCX_TMP!\lcalive.txt" "!DCX_TMP!\logview.txt" "!DCX_TMP!\lcpath.txt" "!DCX_TMP!\lbnow.txt" >nul 2>&1
+del "!DCX_TMP!\bench.txt" "!DCX_TMP!\usb.txt" "!DCX_TMP!\bklist.txt" "!DCX_TMP!\bkpick.txt" "!DCX_TMP!\pkchk.txt" "!DCX_TMP!\exp_list.txt" >nul 2>&1
 rd "!DCX_TMP!" >nul 2>&1
+exit /b
+
+:_cp_restore
+:: Every exit path comes through here: put back the code page the console had before DCX.
+if defined DCX_CPSTART chcp !DCX_CPSTART! >nul <nul
 exit /b
 
 :_noin
@@ -1300,9 +2637,19 @@ echo  On the phone: Developer options -^> Wireless debugging -^>
 echo  %g%Pair device with pairing code%w%. Keep that dialog OPEN - the
 echo  code and port stop working the moment it closes.
 echo.
-set "WIP=" & set /p WIP="Pairing ip:port (blank = cancel) >> "
+echo  Looking for the pairing dialog on this network...
+call :_wa_scan _adb-tls-pairing._tcp 8
+call :_wa_rows
+if "!_wan!"=="0" echo  None found. Type the ip:port the dialog shows - see Help for why it may not show up.
+
+:wadb_pair_ask
+echo.
+set "WIP=" & set /p WIP="Number, or the dialog's ip:port (R = look again, blank = cancel) >> "
 call :_noin WIP || goto dcx_noinput
 if "!WIP!"=="" goto wirelessadb
+if /i "!WIP!"=="R" goto wadb_pair
+set "_wainst="
+call :_wa_pick
 call :_tw_safechk WIP || goto wadb_pair_bad
 echo !WIP!| findstr /r "^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*:[0-9][0-9]*$" >nul || goto wadb_pair_bad
 set "WCODE=" & set /p WCODE="6-digit pairing code (blank = cancel) >> "
@@ -1311,53 +2658,117 @@ if "!WCODE!"=="" goto wirelessadb
 call :_tw_safechk WCODE || goto wadb_pair_bad
 echo !WCODE!| findstr /r "^[0-9][0-9][0-9][0-9][0-9][0-9]$" >nul || goto wadb_pair_bad
 echo.
-adb pair !WIP! !WCODE!
+:: adb exits 1 on any pairing failure since 34.0.5, but its message is a generic protocol fault.
+adb pair !WIP! !WCODE! <nul >"!DCX_TMP!\pair.txt" 2>&1
+set "_warc=!errorlevel!"
+type "!DCX_TMP!\pair.txt"
 echo.
-echo  If it said "Successfully paired": this PC is trusted now, but you
-echo  are NOT connected yet. The connect port is the DIFFERENT one on
-echo  the main Wireless-debugging screen -^> option [2].
+if not "!_warc!"=="0" goto wadb_pair_fail
+findstr /b /c:"Successfully paired" "!DCX_TMP!\pair.txt" >nul 2>&1 || goto wadb_pair_fail
+:: The answer names the phone: Successfully paired to <ip:port> [guid=adb-<serial>-<id>].
+set "_waguid="
+for /f "usebackq tokens=2 delims=[]" %%g in ("!DCX_TMP!\pair.txt") do (
+    set "_wax=%%g"
+    call :_wa_guid
+)
+echo  [%g%+%w%] Paired: this PC is trusted now.
+if not defined _waguid goto wadb_pair_noguid
+:: adb connects a paired phone by itself once it sees the phone's connect entry.
+echo  Waiting a moment for adb to connect to it...
+set "_waw=0"
+
+:wadb_pair_wait
+call :_wa_isconn _waguid
+if defined _waconn goto wadb_pair_conn
+set /a _waw+=1
+if !_waw! GEQ 6 goto wadb_pair_noconn
+timeout /t 1 /nobreak >nul
+goto wadb_pair_wait
+
+:wadb_pair_conn
+echo  [%g%OK%w%] Connected as !_waconn!
+call :_wa_save _waguid _waconn
+goto wadb_pair_end
+
+:wadb_pair_noconn
+echo  Not connected yet. Use option [2]: the phone shows up there by name once
+echo  Wireless debugging's main screen is on.
+call :_wa_save _waguid
+goto wadb_pair_end
+
+:wadb_pair_noguid
+echo  Now use option [2] to connect. The connect port is the DIFFERENT one on
+echo  the main Wireless-debugging screen.
+goto wadb_pair_end
+
+:wadb_pair_fail
+echo  [%r%^^!%w%] Pairing failed. adb does not say why: usually the code was mistyped, the
+echo      dialog closed or timed out, or the ip:port was not the pairing dialog's one.
+
+:wadb_pair_end
 echo.
 echo Press Any Button To Go Back
 pause > nul
 goto wirelessadb
 
 :wadb_pair_bad
-echo [%r%^^!%w%] Expected ip:port like 192.168.1.23:37123 and a 6-digit code.
+echo [%r%^^!%w%] Expected a number from the list, an ip:port like 192.168.1.23:37123, and a 6-digit code.
 timeout /t 2 /nobreak >nul
-goto wadb_pair
+goto wadb_pair_ask
 
 :wadb_connect
 cls
 title Wireless ADB : connect
 call :logo
-echo  Enter the ip:port from the MAIN Wireless-debugging screen
-echo  (Android 11+), or just the phone's IP if you used option [3]
-echo  (port 5555 is assumed then).
+echo  Phones on this network with Wireless debugging on ^(Android 11+^):
+call :_wa_scan _adb-tls-connect._tcp 6
+call :_wa_rows
+if "!_wan!"=="0" echo     none found - see Help for why one may not show up.
 echo.
-set "WIP=" & set /p WIP="ip[:port] (blank = cancel) >> "
+echo  Or type the ip:port from the MAIN Wireless-debugging screen, or just the IP
+echo  if you used option [3] ^(port 5555 is assumed then^).
+
+:wadb_connect_ask
+echo.
+set "WIP=" & set /p WIP="Number, or ip[:port] (R = look again, blank = cancel) >> "
 call :_noin WIP || goto dcx_noinput
 if "!WIP!"=="" goto wirelessadb
+if /i "!WIP!"=="R" goto wadb_connect
+set "_wainst="
+call :_wa_pick
 if "!WIP!"=="!WIP::=!" set "WIP=!WIP!:5555"
 call :_tw_safechk WIP || goto wadb_connect_bad
 echo !WIP!| findstr /r "^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*:[0-9][0-9]*$" >nul || goto wadb_connect_bad
 echo.
-adb connect !WIP!
+:: adb connect exits 0 for every outcome; only its own words say whether it connected.
+adb connect !WIP! <nul >"!DCX_TMP!\connect.txt" 2>&1
+type "!DCX_TMP!\connect.txt"
+set "_waok="
+findstr /b /c:"connected to " /c:"already connected to " "!DCX_TMP!\connect.txt" >nul 2>&1 && set "_waok=1"
 echo.
 echo  Now attached:
 for /f "skip=1 delims=" %%i in ('adb devices ^<nul 2^>nul') do echo     %%i
 echo.
-echo  "failed to authenticate" / "connection refused" usually means this
-echo  PC isn't paired with the phone yet -^> option [1] first, or the
-echo  port went stale (it changes on reboot/re-toggle).
+if not defined _waok goto wadb_connect_fail
+echo  [%g%OK%w%] Connected to !WIP!
+if defined _wainst call :_wa_save _wainst WIP
+goto wadb_connect_end
+
+:wadb_connect_fail
+echo  [%r%^^!%w%] Not connected. "failed to connect" usually means this PC is not paired with
+echo      the phone yet -^> option [1]; a "(10061)" or "(10060)" at the end means nothing
+echo      answered on that port - it changes after a reboot or re-toggle.
+
+:wadb_connect_end
 echo.
 echo Press Any Button To Go Back
 pause > nul
 goto wirelessadb
 
 :wadb_connect_bad
-echo [%r%^^!%w%] Expected an IPv4 address like 192.168.1.23 or 192.168.1.23:41235.
+echo [%r%^^!%w%] Expected a number from the list, or an IPv4 address like 192.168.1.23[:41235].
 timeout /t 2 /nobreak >nul
-goto wadb_connect
+goto wadb_connect_ask
 
 :wadb_tcpip
 cls
@@ -1388,8 +2799,11 @@ if defined WDEVIP (
     choice /c:YN /n >nul
     if errorlevel 2 goto wirelessadb
     if not errorlevel 1 goto wirelessadb
-    adb connect !WDEVIP!:5555
+    adb connect !WDEVIP!:5555 <nul >"!DCX_TMP!\connect.txt" 2>&1
+    type "!DCX_TMP!\connect.txt"
     echo.
+    rem adb connect exits 0 for every outcome; only its own words say whether it connected.
+    findstr /b /c:"connected to " /c:"already connected to " "!DCX_TMP!\connect.txt" >nul 2>&1 || goto wadb_tcpip_fail
     echo  You can unplug the cable now. If the list shows the device
     echo  twice, USB and Wi-Fi are both attached - that's normal.
     for /f "skip=1 delims=" %%i in ('adb devices ^<nul 2^>nul') do echo     %%i
@@ -1402,6 +2816,149 @@ echo.
 echo Press Any Button To Go Back
 pause > nul
 goto wirelessadb
+:wadb_tcpip_fail
+echo  [%r%^^!%w%] Not connected over Wi-Fi - keep the cable in. Check that the phone and the PC are
+echo      on the same network, then try option [2] with !WDEVIP!.
+echo.
+echo Press Any Button To Go Back
+pause > nul
+goto wirelessadb
+
+:_wa_scan
+:: Arg 1 = the mDNS service type (_adb-tls-pairing._tcp or _adb-tls-connect._tcp), arg 2 = tries.
+:: Fills _wai[n] instance (adb-<serial>-<id>, the same name in both lists), _wap[n] ip:port and
+:: _wal[n] the name DCX saved for it, n = 1.._wan. adb answers from its server's cache, which fills
+:: a few seconds after the server starts, so an empty list is read again once a second. Any device
+:: on the network can announce a name, so every line is checked before use, with delayed
+:: expansion off while it is read.
+for /f "delims==" %%v in ('set _wai[ 2^>nul') do set "%%v="
+for /f "delims==" %%v in ('set _wap[ 2^>nul') do set "%%v="
+for /f "delims==" %%v in ('set _wal[ 2^>nul') do set "%%v="
+for /f "delims==" %%v in ('set _waS_ 2^>nul') do set "%%v="
+set "_wan=0" & set "_wat=0"
+
+:_wa_scan_again
+set /a _wat+=1
+adb mdns services <nul >"!DCX_TMP!\mdns.txt" 2>nul
+type nul >"!DCX_TMP!\mdns_ok.txt"
+for /f "usebackq skip=1 tokens=1-3" %%a in ("!DCX_TMP!\mdns.txt") do (
+    setlocal DisableDelayedExpansion
+    set "_wx1=%%a"
+    set "_wx2=%%b"
+    set "_wx3=%%c"
+    call :_wa_take %1
+    endlocal
+)
+for /f "usebackq tokens=1,2" %%a in ("!DCX_TMP!\mdns_ok.txt") do call :_wa_put %%a %%b
+if !_wan! GEQ 1 exit /b
+if !_wat! GEQ %~2 exit /b
+timeout /t 1 /nobreak >nul
+goto _wa_scan_again
+
+:_wa_take
+:: _wx1.._wx3 = one answer line (instance, type, ip:port), delayed expansion off. Arg 1 = wanted type.
+:: Keeps lines of that type with a plain name and a real IPv4 ip:port.
+setlocal EnableDelayedExpansion
+if not "!_wx2!"=="%~1" (endlocal & exit /b)
+if not defined _wx1 (endlocal & exit /b)
+if not defined _wx3 (endlocal & exit /b)
+if not "!_wx1:~64!"=="" (endlocal & exit /b)
+:: eol is one of the allowed characters, or text after a ; would never be checked.
+for /f "eol=a delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" %%c in ("!_wx1!") do (endlocal & exit /b)
+for /f "eol=0 delims=0123456789.:" %%c in ("!_wx3!") do (endlocal & exit /b)
+if "!_wx3:~0,8!"=="0.0.0.0:" (endlocal & exit /b)
+if "!_wx3::=!"=="!_wx3!" (endlocal & exit /b)
+>>"!DCX_TMP!\mdns_ok.txt" echo !_wx1! !_wx3!
+endlocal
+exit /b
+
+:_wa_put
+:: %1 = a checked instance, %2 = its ip:port. adb lists a phone once per network adapter: keep one.
+if defined _waS_%~1 exit /b
+set "_waS_%~1=1"
+set /a _wan+=1
+set "_wai[!_wan!]=%~1"
+set "_wap[!_wan!]=%~2"
+set "_wal[!_wan!]="
+if exist "!PROFDIR!\wifi_phones.txt" for /f "usebackq tokens=1,* delims=~" %%a in ("!PROFDIR!\wifi_phones.txt") do if "%%a"=="%~1" set "_wal[!_wan!]=%%b"
+exit /b
+
+:_wa_rows
+:: Prints the list _wa_scan filled: number, the saved name if any, ip:port, instance.
+for /l %%i in (1,1,!_wan!) do (
+    if defined _wal[%%i] echo     %g%[%w%%%i%g%]%w% !_wal[%%i]!   !_wap[%%i]!   ^(!_wai[%%i]!^)
+    if not defined _wal[%%i] echo     %g%[%w%%%i%g%]%w% !_wap[%%i]!   !_wai[%%i]!
+)
+exit /b
+
+:_wa_pick
+:: WIP = what was typed. A list number becomes that entry's ip:port, and _wainst its instance.
+set "_wan2=!WIP!"
+for /f "eol=0 delims=0123456789" %%c in ("!_wan2!") do exit /b
+if "!_wan2:~0,1!"=="0" exit /b
+if not defined _wap[!_wan2!] exit /b
+for /f "delims=" %%k in ("!_wan2!") do (
+    set "WIP=!_wap[%%k]!"
+    set "_wainst=!_wai[%%k]!"
+)
+exit /b
+
+:_wa_guid
+:: _wax = the text between [ and ] of adb pair's answer, guid=adb-<serial>-<id>. Sets _waguid.
+if not defined _wax exit /b
+if not "!_wax:~0,5!"=="guid=" exit /b
+set "_wax=!_wax:~5!"
+if not defined _wax exit /b
+if not "!_wax:~64!"=="" exit /b
+for /f "eol=a delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" %%c in ("!_wax!") do exit /b
+set "_waguid=!_wax!"
+exit /b
+
+:_wa_isconn
+:: Arg 1 = NAME of a variable holding an instance. _waconn = the serial adb lists it under in
+:: state device (the name form adb uses when it connects by itself), empty when not connected.
+set "_waconn="
+for /f "skip=1 tokens=1,2" %%a in ('adb devices ^<nul 2^>nul') do if "%%b"=="device" if /i "%%a"=="!%~1!._adb-tls-connect._tcp" set "_waconn=%%a"
+exit /b
+
+:_wa_save
+:: Arg 1 = NAME of a variable holding an instance, arg 2 = NAME of one holding a serial to read the
+:: model from (optional). Keeps instance~model in wifi_phones.txt, one line per phone, so the lists
+:: can name a phone that was here before. The model is kept only if it is plain text.
+set "_wsi=!%~1!"
+if not defined _wsi exit /b
+set "_wsm="
+if not "%~2"=="" for /f "delims=" %%m in ('adb -s !%~2! shell getprop ro.product.model 2^>nul ^<nul') do set "_wsm=%%m"
+if defined _wsm for /f "delims=" %%m in ("!_wsm!") do set "_wsm=%%m"
+:: The space goes last in delims: in the middle it ends the option, and for /f fails without a check.
+if defined _wsm for /f "eol=a delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._+- " %%c in ("!_wsm!") do set "_wsm="
+if defined _wsm if not "!_wsm:~40!"=="" set "_wsm=!_wsm:~0,40!"
+if not defined _wsm exit /b
+if not exist "!PROFDIR!\" md "!PROFDIR!" >nul 2>&1
+set "_wsf=!PROFDIR!\wifi_phones.txt"
+if exist "!_wsf!" findstr /v /b /c:"!_wsi!~" "!_wsf!" >"!_wsf!.tmp" 2>nul
+if exist "!_wsf!" move /y "!_wsf!.tmp" "!_wsf!" >nul 2>&1
+>>"!_wsf!" echo !_wsi!~!_wsm!
+exit /b
+
+:_wa_wifin
+:: _wawn = how many Wi-Fi connections adb lists in state device.
+set "_wawn=0"
+for /f "skip=1 tokens=1,2" %%a in ('adb devices ^<nul 2^>nul') do if "%%b"=="device" (
+    set "_wawx=%%a"
+    call :_wifi_ser _wawx && set /a _wawn+=1
+)
+exit /b
+
+:_wifi_ser
+:: Arg 1 = NAME of a variable holding an adb serial. errorlevel 0 when it is a Wi-Fi connection:
+:: ip:port, or the name adb gives a phone it connected by itself, adb-<serial>-<id>._adb-tls-connect._tcp.
+if not defined %~1 exit /b 1
+set "_wfs=!%~1!"
+if not "!_wfs!"=="!_wfs::=!" exit /b 0
+if not "!_wfs!"=="!_wfs:._adb=!" exit /b 0
+exit /b 1
+
 :: _wadb_src - takes one ip route line from _wr and sets WDEVIP to the token after src.
 :: Phone text: read late from a variable, never as call arguments; only digits and dots pass.
 :_wadb_src
@@ -1428,16 +2985,26 @@ goto wirelessadb
 :wadb_usb
 cls
 title Wireless ADB : back to USB
-:: Works only for devices switched with option [3], not Android 11+ wireless debugging.
-adb usb 2>nul
+:: Works only for devices switched with option [3], not Android 11+ wireless debugging. adb usb
+:: exits 0 whenever adbd answered, so the verdict is read from adb devices a few seconds later.
+adb usb <nul >"!DCX_TMP!\usb.txt" 2>&1
 set "_usbrc=!errorlevel!"
+type "!DCX_TMP!\usb.txt" 2>nul
 if not "!_usbrc!"=="0" goto wadb_usb_fail
-echo Done - adbd is back on USB; any Wi-Fi connection to it dropped.
-echo (Android 11+ Wireless debugging: turn the toggle off on the phone.)
+echo Waiting for the connections to settle...
+timeout /t 6 /nobreak >nul
+call :_wa_wifin
+if not "!_wawn!"=="0" goto wadb_usb_still
+echo Done - adbd is back on USB and no Wi-Fi connection is left.
+goto wadb_usb_end
+
+:wadb_usb_still
+echo [%y%WARN%w%] adb still lists !_wawn! Wi-Fi connection^(s^). adb usb does not switch off
+echo        Android 11+ Wireless debugging: turn the toggle off on the phone.
 goto wadb_usb_end
 
 :wadb_usb_fail
-echo [%y%WARN%w%] adb usb returned !_usbrc! - nothing was switched.
+echo [%y%WARN%w%] adb usb returned !_usbrc! - nothing was switched ^(adb's answer is above^).
 echo        This works only for devices put on Wi-Fi with option [3] (adb tcpip).
 echo        For Android 11+ Wireless debugging, turn the toggle off on the phone.
 
@@ -1457,6 +3024,12 @@ echo      code -^> option [1]. One-time per PC; keep the dialog open.
 echo    - The MAIN screen's "IP address and Port" is what option [2]
 echo      wants. That port is random and %y%changes after a reboot or
 echo      re-toggle%w% - grab it fresh each time.
+echo    - Options [1] and [2] list what they find on the network, so you
+echo      can pick a number instead. A phone paired before is named, and
+echo      adb reconnects it by itself when it sees it on the network.
+echo    - Nothing listed? The phone must be awake on the same network, not
+echo      a guest Wi-Fi; a firewall may block the search ^(UDP 5353^); and
+echo      adb only searches adapters that were up when its server started.
 echo.
 echo  %g%Android 10 and older%w% (pairing does not exist there):
 echo    - Plug in USB once, use option [3], unplug. Port is fixed 5555.
@@ -1533,7 +3106,8 @@ set "REPORT=!TEMP!\dcx_report_%TS%.txt"
     adb shell "df -h /data 2>/dev/null" <nul
     echo.
     echo [State]
-    for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul 2^>nul') do echo   Uptime              : %%a %%b %%c
+    call :_uptime
+    if defined _upt echo   Uptime              : !_upt!
     for /f "delims=" %%i in ('adb shell "dumpsys cpuinfo 2>/dev/null | grep 'Load:'"')      do echo   %%i
     call :_ck_bat
     if defined _ckBL echo   Battery level       : !_ckBL! %%
@@ -1707,7 +3281,8 @@ if defined _ckMA if defined _ckMT (
 )
 if defined _ckBL echo   Battery: !_ckBL! %%
 if defined _ckBT echo   Battery temperature: !_ckBT! C
-for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul 2^>nul') do echo   Uptime: %%a %%b %%c
+call :_uptime
+if defined _upt echo   Uptime: !_upt!
 echo.
 echo   Full report still saved at: !REPORT!
 echo.
@@ -1783,34 +3358,21 @@ echo [%y%i%w%] Auto Setup no longer writes SurfaceFlinger phase offsets: Surface
 echo     them only when it starts, and without root that means the next boot - which clears
 echo     them first. Starting the steps that do take effect.
 timeout /t 3 /nobreak > nul
-set count=0
 title Auto Setup
 cls
 call :logo
+:: Each step is counted from its exit code, and nothing clears the screen until the summary.
+call :_act_reset
+echo  Step 1/5: background dexopt
 call :run_bgdexopt
-cls
-call :logo
-set /a count+=1
-echo Done %b%%count%%w%/5
-timeout /t 1 /nobreak > nul
-cls
-call :logo
+call :_act_rc !errorlevel! "1/5 background dexopt"
+echo  Step 2/5: battery state overrides cleared
 adb shell dumpsys battery reset <nul
-cls
-call :logo
-set /a count+=1
-echo Done %b%%count%%w%/5
-timeout /t 1 /nobreak > nul
-cls
-call :logo
+call :_act_rc !errorlevel! "2/5 battery state overrides cleared"
+echo  Step 3/5: storage trim
 adb shell sm fstrim <nul
-cls
-call :logo
-set /a count+=1
-echo Done %b%%count%%w%/5
-timeout /t 1 /nobreak > nul
-cls
-call :logo
+call :_act_rc !errorlevel! "3/5 storage trim requested"
+echo  Step 4/5: background and logging tweaks
 adb shell am kill-all <nul
 adb shell am kill --user 0 all <nul
 adb shell am kill --user 0 current <nul
@@ -1836,23 +3398,16 @@ adb shell dumpsys binder_calls_stats --disable-detailed-tracking <nul > nul 2>&1
 adb shell settings put global binder_calls_stats sampling_interval=500000000,detailed_tracking=disable,enabled=false,upload_data=false <nul
 adb shell dumpsys batterystats disable full-history <nul > nul 2>&1
 adb shell ime tracing stop <nul
-cls
-call :logo
-set /a count+=1
-echo Done %b%%count%%w%/5
-timeout /t 1 /nobreak > nul
-cls
-call :logo
+:: About twenty calls with no single result: the step counts if the phone still answers after them.
+call :_phone_live
+call :_act_rc !errorlevel! "4/5 background and logging tweaks sent, phone still answering"
+echo  Step 5/5: logs cleared
 adb shell logcat -c <nul
-cls
-call :logo
-set /a count+=1
-echo Done %b%%count%%w%/5
-timeout /t 1 /nobreak > nul
-cls
-call :logo
+call :_act_rc !errorlevel! "5/5 logs cleared"
+call :_act_summary
+if "%DCX_VFAIL%"=="0" adb shell cmd notification post -S bigtext -t 'Auto Setup Is Complete⚙️' 'Tag' 'Auto Setup Is A Bunch Of Tweaks That Can Be Use For Daily Or Dont Know Anything About This Script' <nul > nul 2>&1
+echo.
 echo Auto Setup steps finished. Press any key to go back.
-adb shell cmd notification post -S bigtext -t 'Auto Setup Is Complete⚙️' 'Tag' 'Auto Setup Is A Bunch Of Tweaks That Can Be Use For Daily Or Dont Know Anything About This Script' <nul > nul 2>&1
 pause > Nul
 goto menu
 
@@ -1862,7 +3417,8 @@ title Optimize Android
 mode 100,37
 call :logo
 echo          ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul 2^>nul') do echo           [%g%+%w%]Uptime: %%a %%b %%c
+call :_uptime
+if defined _upt echo           [%g%+%w%]Uptime: !_upt!
 set "cpucheck=N/A"
 for /f "tokens=2 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul 2^>nul ^| findstr /C:"Load:"') do set "cpucheck=%%i"
 for /f "delims=" %%a in ("!cpucheck!") do set "cpucheck=%%a"
@@ -2205,8 +3761,10 @@ for /f "delims=" %%i in ('adb shell df -h /data 2^>nul ^<nul ^| findstr /v "File
 echo.
 echo  Running 'sm fstrim'...
 :: stdin from nul as on every adb call: else a stray newline lets the next pause return at once.
+call :_act_reset
 adb shell sm fstrim <nul
-echo  Trigger sent.
+call :_act_rc !errorlevel! "fstrim requested"
+call :_act_summary
 echo.
 echo  Free space on /data AFTER:
 for /f "delims=" %%i in ('adb shell df -h /data 2^>nul ^<nul ^| findstr /v "Filesystem"') do echo    %%i
@@ -2385,6 +3943,8 @@ exit /b
 @echo off
 cls
 title Compile App
+:: cmd package compile needs Android 7; older phones would also report success for anything.
+if !SDK! GTR 0 if !SDK! LSS 24 goto compile_old
 echo.
 echo.
 echo Enter The Mode You Want ^^!
@@ -2406,22 +3966,26 @@ if "%modeok%"=="0" (
     pause > nul
     goto Optimize
 )
-set "package=" & set /p package="Put Your Package Name Here >> "
+set "package=" & set /p package="Package name, or part of one >> "
 call :_noin package || goto dcx_noinput
 if "!package!"=="" (
     echo [%r%^^!%w%] Package name cannot be empty.
     pause > nul
     goto Optimize
 )
+call :_pkg_pick package inst || goto Optimize
 set "_PKGCHK=!package!"
 call :_pkg_ok || (
     echo  [%r%x%w%] Invalid package name. Letters, digits, dots and underscores only.
     timeout /t 2 /nobreak > nul
     goto Optimize
 )
-:: Is it installed? findstr /x stops com.foo matching com.foobar; find /v with an empty string
-:: first turns LF-only adb output into CRLF lines, or /x would see one line and match nothing.
-adb shell pm list packages 2>nul <nul | find /v "" | findstr /x /c:"package:!package!" > nul
+call :_pkg_installed !package!
+if errorlevel 2 (
+    echo [%r%^^!%w%] The phone did not answer the package list - check the connection.
+    pause > nul
+    goto Optimize
+)
 if errorlevel 1 (
     echo [%r%^^!%w%] Package "!package!" is not installed on the device.
     pause > nul
@@ -2435,6 +3999,13 @@ if errorlevel 1 (
 ) else (
     echo [%g%+%w%] Compile finished for !package! ^(mode %mode%^).
 )
+echo Press Any Button To Go Back
+pause > nul
+goto Optimize
+
+:compile_old
+echo.
+echo [%r%^^!%w%] Compiling one app needs Android 7 or newer ^(API 24+^); the phone reports API !SDK!.
 echo Press Any Button To Go Back
 pause > nul
 goto Optimize
@@ -2519,7 +4090,8 @@ cls
 echo                                                                                            Page%g%[%w%1/2%g%]
 call :logo
 echo          ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul 2^>nul') do echo           [%g%+%w%]Uptime: %%a %%b %%c
+call :_uptime
+if defined _upt echo           [%g%+%w%]Uptime: !_upt!
 set "cpucheck=N/A"
 for /f "tokens=2 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul 2^>nul ^| findstr /C:"Load:"') do set "cpucheck=%%i"
 for /f "delims=" %%a in ("!cpucheck!") do set "cpucheck=%%a"
@@ -2612,10 +4184,11 @@ echo  Restrict one package without the full Hibernate App hammer.
 echo  Levels use real ADB commands: set-inactive, standby-bucket,
 echo  bg-restriction-level, and ^(API 34+^) app_hibernation set-state.
 echo.
-set "BPKG=" & set /p BPKG="Package name >> "
+set "BPKG=" & set /p BPKG="Package name, or part of one >> "
 call :_noin BPKG || goto dcx_noinput
 if not defined BPKG goto nextpage
 set "BPKG=!BPKG:"=!"
+call :_pkg_pick BPKG inst || goto appbattery
 :: Check with :_pkg_ok, not an inline pipe to findstr: a pipe re-parses the name and runs its tail.
 set "_PKGCHK=!BPKG!"
 call :_pkg_ok || (
@@ -2623,7 +4196,12 @@ call :_pkg_ok || (
     timeout /t 2 /nobreak >nul
     goto appbattery
 )
-adb shell pm list packages <nul 2>nul | find /v "" | findstr /x /c:"package:!BPKG!" >nul
+call :_pkg_installed !BPKG!
+if errorlevel 2 (
+    echo  %r%The phone did not answer the package list%w% - check the connection.
+    timeout /t 2 /nobreak >nul
+    goto appbattery
+)
 if errorlevel 1 (
     echo  %r%Package not installed:%w% !BPKG!
     timeout /t 2 /nobreak >nul
@@ -2647,7 +4225,7 @@ if %SDK% GEQ 34 (echo    hibernation     : !_hib!) else (echo    hibernation    
 echo.
 echo    %g%[%w%1%g%]%w% Light   - inactive on, standby rare
 echo    %g%[%w%2%g%]%w% Medium  - restricted bucket + bg-restriction
-echo    %g%[%w%3%g%]%w% Heavy   - hibernation state ^(API 34+^) + medium
+echo    %g%[%w%3%g%]%w% Heavy   - hibernation state ^(API 34+^) + medium + battery exemption off
 echo    %g%[%w%4%g%]%w% Unrestrict - active / unrestricted / hibernation off
 echo    %g%[%w%5%g%]%w% Back
 set "ab=" & set /p ab="Choose An Option >> "
@@ -2661,26 +4239,29 @@ if "!ab!"=="5" goto nextpage
 goto appbattery_menu
 
 :appbattery_light
-adb shell am set-inactive !BPKG! true <nul
-adb shell am set-standby-bucket !BPKG! rare <nul
 echo.
-echo  Applied Light restrict.
+call :_act_reset
+adb shell am set-inactive !BPKG! true <nul
+call :_act_rc !errorlevel! "inactive flag set"
+adb shell am set-standby-bucket !BPKG! rare <nul
+call :_act_rc !errorlevel! "standby bucket = rare"
+call :_act_summary
+if "%DCX_VFAIL%"=="0" echo  Applied Light restrict.
 goto appbattery_done
 
 :appbattery_med
-adb shell am set-inactive !BPKG! true <nul
-adb shell am set-standby-bucket !BPKG! restricted <nul
-:: restricted_bucket is the level; restricted is only a bucket name. A refused level is reported.
-adb shell cmd activity set-bg-restriction-level --user 0 !BPKG! restricted_bucket <nul
-set "_bgrc=!errorlevel!"
 echo.
-if not "!_bgrc!"=="0" goto appbattery_med_warn
-echo  Applied Medium restrict.
-goto appbattery_done
-
-:appbattery_med_warn
-echo  [%y%WARN%w%] The device refused the restriction level ^(exit !_bgrc!^).
-echo         The standby bucket was still set, so the app is restricted, just less so.
+call :_act_reset
+adb shell am set-inactive !BPKG! true <nul
+call :_act_rc !errorlevel! "inactive flag set"
+adb shell am set-standby-bucket !BPKG! restricted <nul
+call :_act_rc !errorlevel! "standby bucket = restricted"
+:: restricted_bucket is the level; restricted is only a bucket name. The level exists from Android 14.
+if %SDK% GEQ 34 adb shell cmd activity set-bg-restriction-level --user 0 !BPKG! restricted_bucket <nul
+if %SDK% GEQ 34 call :_act_rc !errorlevel! "background restriction level = restricted_bucket"
+if %SDK% LSS 34 echo [%b%i%w%] background restriction level: needs Android 14 - skipped.
+call :_act_summary
+if "%DCX_VFAIL%"=="0" echo  Applied Medium restrict.
 goto appbattery_done
 
 :appbattery_heavy
@@ -2688,12 +4269,18 @@ if %SDK% LSS 34 (
     echo  %y%API %SDK% - heavy hibernation needs 34+. Applying Medium instead.%w%
     goto appbattery_med
 )
+:: The battery-optimisation exemption goes too: capture it before any change, as App check does.
+call :_tw_undo_bgm !BPKG!
+if errorlevel 2 goto appbattery_noundo
+if errorlevel 1 (set "_bpu=") else set "_bpu=1"
 adb shell am set-inactive !BPKG! true <nul
 adb shell am set-standby-bucket !BPKG! restricted <nul
 adb shell cmd activity set-bg-restriction-level --user 0 !BPKG! hibernation <nul
 adb shell cmd app_hibernation set-state !BPKG! true <nul
 adb shell cmd deviceidle whitelist -!BPKG! <nul >nul 2>&1
 echo.
+if defined _bpu echo [%b%i%w%] Battery-optimisation exemption removed - Tweaks ^> Undo can put it back.
+if not defined _bpu echo [%y%WARN%w%] Battery-optimisation exemption removed - not recorded for Undo.
 set "_hib="
 for /f "delims=" %%i in ('adb shell cmd app_hibernation get-state !BPKG! 2^>nul ^<nul') do set "_hib=%%i"
 if /i "!_hib!"=="true" (echo [%g%+%w%] hibernation state = true) else (echo [%y%WARN%w%] hibernation readout = "!_hib!")
@@ -2707,13 +4294,19 @@ adb shell am set-inactive !BPKG! false <nul
 call :_act_rc !errorlevel! "inactive flag cleared"
 adb shell am set-standby-bucket !BPKG! active <nul
 call :_act_rc !errorlevel! "standby bucket = active"
-adb shell cmd activity set-bg-restriction-level --user 0 !BPKG! unrestricted <nul
-call :_act_rc !errorlevel! "background restriction level = unrestricted"
+if %SDK% GEQ 34 adb shell cmd activity set-bg-restriction-level --user 0 !BPKG! unrestricted <nul
+if %SDK% GEQ 34 call :_act_rc !errorlevel! "background restriction level = unrestricted"
+if %SDK% LSS 34 echo [%b%i%w%] background restriction level: needs Android 14 - skipped.
 if %SDK% GEQ 34 adb shell cmd app_hibernation set-state !BPKG! false <nul
 if %SDK% GEQ 34 call :_act_rc !errorlevel! "hibernation state = false"
 call :_act_summary
 if "%DCX_VFAIL%"=="0" echo  Restrictions cleared ^(reboot recommended if the app still misbehaves^).
 goto appbattery_done
+
+:appbattery_noundo
+echo.
+echo [%r%^^!%w%] DCX could not record !BPKG!'s current state for Undo, so nothing was changed.
+echo        Check the phone is connected and answering, then try again.
 
 :appbattery_done
 echo.
@@ -2736,11 +4329,12 @@ call :logo
 echo.
 echo  Why are one app's notifications late? This screen shows what Android is doing to it,
 echo  then sets the battery mode Settings offers: Restricted, Optimized or Unrestricted.
-echo  Tip: App Manager - List installed packages shows the names.
+echo  Tip: type part of a name, such as chrome, to pick the app from a list.
 echo.
-set "ackp=" & set /p ackp="Package name (blank = back) >> "
+set "ackp=" & set /p ackp="Package name or part of one (blank = back) >> "
 call :_noin ackp || goto dcx_noinput
 if not defined ackp goto appcheck_back
+call :_pkg_pick ackp inst || goto appcheck_pkg
 set "ACK_PKG=!ackp!"
 goto appcheck
 
@@ -2857,6 +4451,10 @@ echo.
 echo [%r%^^!%w%] The current mode could not be read, so nothing was changed.
 goto appcheck_done
 
+:appcheck_set_noundo
+echo [%r%^^!%w%] DCX could not record the current mode for Undo, so nothing was changed.
+goto appcheck_done
+
 :appcheck_set_builtin
 echo.
 echo [%b%i%w%] !ACK_PKG! is on the phone's built-in allowlist. Android exempts it from these
@@ -2894,6 +4492,7 @@ if "!_ac_want!"=="R" set "_ac_m=ignore"
 echo.
 call :_act_reset
 call :_tw_undo_bgm !ACK_PKG!
+if errorlevel 2 goto appcheck_set_noundo
 adb shell cmd appops set !ACK_PKG! RUN_ANY_IN_BACKGROUND !_ac_m! <nul >nul 2>&1
 adb shell cmd appops set !ACK_PKG! RUN_IN_BACKGROUND !_ac_m! <nul >nul 2>&1
 call :_act_rc !errorlevel! "legacy RUN_IN_BACKGROUND = !_ac_m!"
@@ -2936,6 +4535,7 @@ call :_act_reset
 if not defined _ac_op goto appcheck_clear_hib
 if "!_ac_op!"=="allow" goto appcheck_clear_hib
 call :_tw_undo_bgm !ACK_PKG!
+if errorlevel 2 goto appcheck_set_noundo
 adb shell cmd appops set !ACK_PKG! RUN_ANY_IN_BACKGROUND allow <nul >nul 2>&1
 adb shell cmd appops set !ACK_PKG! RUN_IN_BACKGROUND allow <nul >nul 2>&1
 call :_act_rc !errorlevel! "legacy RUN_IN_BACKGROUND = allow"
@@ -3194,31 +4794,32 @@ exit /b 1
 
 :_ac_undo_op
 :: %1 package, %2 app-op: one restore line for its package-level mode.
+:: errorlevel 1 when the phone did not answer: only a DCX_SKIP comment was written.
 adb shell cmd appops get %~1 %~2 <nul >"!_acd!\ua.txt" 2>nul
 call :_ac_opmode ua %~2 _ac_ub _ac_ubu
 if defined _ac_ub goto _ac_undo_op_emit
 >>"!EXP_UNDO!" echo :: DCX_SKIP appops %~1 %~2 - the device did not answer
-exit /b
+exit /b 1
 
 :_ac_undo_op_emit
 set "_BKCMD=cmd appops set %~1 %~2 !_ac_ub!"
-call :_bk_emit EXP_UNDO
-exit /b
+call :_bk_emit EXP_UNDO || exit /b 1
+exit /b 0
 
 :_ac_undo_wl
-:: %1 package: its user Doze allowlist entry, as whitelist + or -.
+:: %1 package: its user Doze allowlist entry, as whitelist + or -. errorlevel 1 as above.
 adb shell cmd deviceidle whitelist =%~1 <nul >"!_acd!\uw.txt" 2>nul
 set "_ac_ub="
 findstr /b /c:"true" "!_acd!\uw.txt" >nul 2>&1 && set "_ac_ub=+"
 findstr /b /c:"false" "!_acd!\uw.txt" >nul 2>&1 && set "_ac_ub=-"
 if defined _ac_ub goto _ac_undo_wl_emit
 >>"!EXP_UNDO!" echo :: DCX_SKIP deviceidle whitelist %~1 - the device did not answer
-exit /b
+exit /b 1
 
 :_ac_undo_wl_emit
 set "_BKCMD=cmd deviceidle whitelist !_ac_ub!%~1"
-call :_bk_emit EXP_UNDO
-exit /b
+call :_bk_emit EXP_UNDO || exit /b 1
+exit /b 0
 :: ===================================================================
 :: Finish Activities, always_finish_activities: over adb it reads back set but on many builds may
 :: not fully take effect, so the screen says so. Reversible; 0 = off, the default.
@@ -4215,9 +5816,10 @@ goto nexthibernateappphase
 cls
 title Revert Your Package To Stock
 call :logo
-set "pkgv2=" & set /p pkgv2="Put Your Package Name Here >> "
+set "pkgv2=" & set /p pkgv2="Package name, or part of one >> "
 call :_noin pkgv2 || goto dcx_noinput
 if "!pkgv2!"=="" goto nexthibernateappphase
+call :_pkg_pick pkgv2 inst || goto nexthibernateappphase
 set "_PKGCHK=!pkgv2!"
 call :_pkg_ok || (
     echo  [%r%x%w%] Invalid package name. Letters, digits, dots and underscores only.
@@ -4227,13 +5829,17 @@ call :_pkg_ok || (
 echo.
 echo [#] Set !pkgv2! To Stock . . . .
 echo.
-adb shell cmd appops reset !pkgv2! <nul
-adb shell cmd activity set-bg-restriction-level --user 0 !pkgv2! unrestricted <nul
+:: Only the app-ops Hibernate sets go back to default: appops reset would also drop the
+:: special access the user granted in Settings.
+for %%b in (FOREGROUND_SERVICE_SPECIAL_USE INSTANT_APP_START_FOREGROUND RUN_ANY_IN_BACKGROUND RUN_IN_BACKGROUND START_FOREGROUND WAKE_LOCK) do adb shell cmd appops set !pkgv2! %%b default <nul > nul 2>&1
+:: adaptive_bucket is Android's own default level; Hibernate's restart-backoff change goes back too.
+adb shell cmd activity set-bg-restriction-level --user 0 !pkgv2! adaptive_bucket <nul
+adb shell cmd activity service-restart-backoff enable !pkgv2! <nul
 adb shell cmd activity set-inactive !pkgv2! false <nul
 adb shell cmd activity set-standby-bucket !pkgv2! active <nul
 adb shell cmd app_hibernation set-state !pkgv2! false <nul
 adb shell cmd dropbox remove-low-priority !pkgv2! <nul
-adb shell cmd tare set-vip 0 !pkgv2! true <nul
+adb shell cmd tare set-vip 0 !pkgv2! default <nul
 echo.
 set "_hib="
 for /f "delims=" %%i in ('adb shell cmd app_hibernation get-state !pkgv2! 2^>nul ^<nul') do set "_hib=%%i"
@@ -4242,9 +5848,10 @@ if /i "!_hib!"=="false" (
 ) else if /i "!_hib!"=="true" (
     echo [%y%WARN%w%] !pkgv2! still reports hibernated - reboot may be required.
 ) else (
-    echo [#] !pkgv2! marked stock; hibernation readout was "!_hib!"
+    echo [%y%WARN%w%] Could not read hibernation state ^(got "!_hib!"^) - the reverts were sent, nothing is confirmed.
 )
 echo [#] Reboot recommended to finish the process.
+echo [#] A battery-optimisation exemption Hibernate removed comes back with Tweaks ^> Undo.
 echo.
 echo Press Any Button To Go Back
 pause > nul
@@ -4254,13 +5861,14 @@ goto nextpage
 cls
 title Set Your Package Here
 call :logo
-set "pkgv2=" & set /p pkgv2="Put Your Package Name Here >> "
+set "pkgv2=" & set /p pkgv2="Package name, or part of one >> "
 call :_noin pkgv2 || goto dcx_noinput
 if "!pkgv2!"=="" (
     echo invalid package. . . .
     timeout /t 2 /nobreak > nul
     goto nexthibernateappphase
 )
+call :_pkg_pick pkgv2 inst || goto nexthibernateappphase
 set "_PKGCHK=!pkgv2!"
 call :_pkg_ok || (
     echo  [%r%x%w%] Invalid package name. Letters, digits, dots and underscores only.
@@ -4268,8 +5876,23 @@ call :_pkg_ok || (
     goto nexthibernateappphase
 )
 echo.
+echo  Clear the app's shortcuts too? This removes the ones pinned to the home screen,
+echo  and they cannot be put back.
+echo    [Y] Clear them    [N] Keep them
+:: Ctrl+C makes choice return 0: keep them, as N does.
+set "_hibsc="
+choice /c:YN /n >nul
+if errorlevel 2 goto _hib_go
+if errorlevel 1 set "_hibsc=1"
+
+:_hib_go
+echo.
 echo [#] Set !pkgv2! To Hibernate . . . .
 echo.
+:: The background app-ops and the battery-optimisation exemption go to the undo file first;
+:: when they could not be recorded, nothing is changed.
+call :_tw_undo_bgm !pkgv2!
+if errorlevel 2 goto _hib_noundo
 for %%b in (
     FOREGROUND_SERVICE_SPECIAL_USE
     INSTANT_APP_START_FOREGROUND
@@ -4293,7 +5916,7 @@ adb shell cmd deviceidle whitelist -!pkgv2! <nul
 adb shell cmd dropbox add-low-priority !pkgv2! <nul
 adb shell cmd package art clear-app-profiles !pkgv2! <nul
 adb shell cmd package log-visibility --disable !pkgv2! <nul
-adb shell cmd shortcut clear-shortcuts !pkgv2! <nul
+if defined _hibsc adb shell cmd shortcut clear-shortcuts !pkgv2! <nul
 adb shell cmd tare set-vip 0 !pkgv2! false <nul
 adb shell cmd usagestats clear-last-used-timestamps !pkgv2! <nul
 adb shell am force-stop !pkgv2! <nul
@@ -4311,6 +5934,14 @@ if /i "!_hib!"=="true" (
 ) else (
     echo [%y%WARN%w%] Could not read hibernation state ^(got "!_hib!"^) - applied best-effort.
 )
+echo.
+echo Press Any Button To Go Back
+pause > nul
+goto nextpage
+
+:_hib_noundo
+echo [%r%^^!%w%] DCX could not record !pkgv2!'s current state for Undo, so nothing was changed.
+echo        Check the phone is connected and answering, then try again.
 echo.
 echo Press Any Button To Go Back
 pause > nul
@@ -4365,7 +5996,7 @@ title Removing system apps from Doze whitelist...
 :: folder so two DCX windows cannot collide; usebackq because the path is quoted.
 set "_wlfile=!DCX_TMP!\idle_whitelist.txt"
 adb shell "dumpsys deviceidle sys-whitelist | grep -E '^[[:blank:]]*[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z0-9_]+)+(,[0-9]+)?[[:blank:]]*$' | sed 's/[[:blank:]]//g; s/,.*//'" > "!_wlfile!" <nul
-set "_rm=0" & set "_prot=0" & set "_wlskip=0"
+set "_rm=0" & set "_prot=0" & set "_wlskip=0" & set "_wlfail=0"
 :: Each line passes :_dz_name with delayed expansion off and is used only if it is a plain package
 :: name. The protected-word test runs in this shell: never pipe phone text to findstr, the pipe
 :: re-parses it. Read the file directly, not via type in a child cmd that re-expands the path.
@@ -4380,8 +6011,13 @@ for /f "usebackq delims=" %%A in ("!_wlfile!") do (
         set /a _wlskip+=1
     ) else if not defined _wlprot (
         adb shell cmd deviceidle sys-whitelist -!_wlp! <nul
-        echo Removed: !_wlp!
-        set /a _rm+=1
+        if errorlevel 1 (
+            echo [%r%x%w%] Not removed: !_wlp!
+            set /a _wlfail+=1
+        ) else (
+            echo Removed: !_wlp!
+            set /a _rm+=1
+        )
     ) else (
         echo [%r%#%w%] !_wlp! Is Protected
         set /a _prot+=1
@@ -4390,6 +6026,8 @@ for /f "usebackq delims=" %%A in ("!_wlfile!") do (
 del "!_wlfile!" > nul 2>&1
 echo.
 if not "!_wlskip!"=="0" echo [%y%WARN%w%] Left alone !_wlskip! line^(s^) that were not plain package names.
+if not "!_wlfail!"=="0" echo [%y%WARN%w%] The phone refused !_wlfail! removal^(s^), or stopped answering.
+if !SDK! GTR 0 if !SDK! LSS 24 echo [%b%i%w%] Android 6 and older report no result, so Removed means sent.
 if "!_rm!"=="0" (
     echo [%y%WARN%w%] Removed 0 packages ^(list empty, all protected, or filter matched nothing^).
 ) else (
@@ -4418,8 +6056,22 @@ cls
 call :logo
 echo.
 echo.
-echo                           [%y%=%w%]All System Apps Is Revert Back To Deviceidle
 adb shell cmd deviceidle sys-whitelist reset <nul
+if errorlevel 1 (echo [%y%WARN%w%] The phone refused the reset or did not answer.) else (echo                           [%y%=%w%]All System Apps Is Revert Back To Deviceidle)
+echo Press Any Button To Go Back
+pause > nul
+goto nextpage
+
+:_lvis_note
+:: errorlevel 1 below Android 11, where cmd package log-visibility does not exist.
+if !SDK! GTR 0 if !SDK! LSS 30 exit /b 1
+echo  This switches app-visibility debug logging for each of your apps. Android leaves it off,
+echo  so Off is the stock state and On turns the extra logging on.
+echo.
+exit /b 0
+
+:_lvis_old
+echo  [%r%^^!%w%] This needs Android 11 or newer ^(API 30+^); the phone reports API !SDK!.
 echo Press Any Button To Go Back
 pause > nul
 goto nextpage
@@ -4534,9 +6186,10 @@ goto logappsuser
 cls
 title Log For User Apps : Off
 call :logo
+call :_lvis_note || goto _lvis_old
 :: In-device loop as in :lstused: one adb call, stderr to /dev/null without an ampersand.
-for /f "delims=" %%a in ('adb shell "pm list packages | while read p; do p=${p#package:}; cmd package log-visibility --disable $p >/dev/null 2>/dev/null; echo $p; done" ^<nul') do (
-echo Log disabled : %%a
+for /f "delims=" %%a in ('adb shell "pm list packages -3 | while read p; do p=${p#package:}; cmd package log-visibility --disable $p >/dev/null 2>/dev/null; echo $p; done" ^<nul') do (
+echo Debug logging off ^(sent^) : %%a
 )
 echo.
 echo.
@@ -4548,9 +6201,10 @@ goto nextpage
 cls
 title Log For User Apps : On
 call :logo
+call :_lvis_note || goto _lvis_old
 :: In-device loop as in :lstused: one adb call, stderr to /dev/null without an ampersand.
-for /f "delims=" %%a in ('adb shell "pm list packages | while read p; do p=${p#package:}; cmd package log-visibility --enable $p >/dev/null 2>/dev/null; echo $p; done" ^<nul') do (
-echo Log enabled : %%a
+for /f "delims=" %%a in ('adb shell "pm list packages -3 | while read p; do p=${p#package:}; cmd package log-visibility --enable $p >/dev/null 2>/dev/null; echo $p; done" ^<nul') do (
+echo Debug logging on ^(sent^) : %%a
 )
 echo.
 echo.
@@ -5144,9 +6798,8 @@ adb shell device_config put adservices cobalt_logging_enabled true <nul
 adb shell device_config put adservices adservice_error_logging_enabled true <nul
 adb shell device_config put odad westworld_logging true <nul
 adb shell device_config put adservices measurement_enable_source_debug_report true <nul
-adb shell cmd display ab-logging-enable <nul > nul 2>&1
-adb shell cmd display dwb-logging-enable <nul > nul 2>&1
-adb shell cmd display dmd-logging-enable <nul > nul 2>&1
+:: Not the *-logging-enable display commands: those loggers are off on a stock phone, so Off's
+:: disable already matches stock and enabling them here would add logging, not revert it.
 adb shell device_config put on_device_personalization odp_enable_client_error_logging true <nul
 adb shell device_config put adservices measurement_enable_app_package_name_logging true <nul
 adb shell device_config put on_device_personalization fcp_enable_client_error_logging true <nul
@@ -5210,11 +6863,10 @@ call :_act_reset
 call :_settings_verify global low_power 1
 call :_act_summary
 :: Android will not run battery saver while powered - USB always is - though low_power reads 1.
-:: A serial containing a colon is a Wi-Fi connection; anything else is the USB cable.
+:: ip:port or an mDNS name is a Wi-Fi connection; anything else is the USB cable.
 echo.
-:: Guard first: on an undefined variable the colon substitution below is not a substitution at all.
 if not defined ANDROID_SERIAL goto _onsv_wifi
-if not "!ANDROID_SERIAL!"=="!ANDROID_SERIAL::=!" goto _onsv_wifi
+call :_wifi_ser ANDROID_SERIAL && goto _onsv_wifi
 echo  %y%Note:%w% the phone is on USB, so it is charging - Android will not actually
 echo  turn battery saver on until you unplug it. The setting is stored and takes
 echo  effect then.
@@ -5564,6 +7216,13 @@ goto extremepower
 @echo off
 cls
 title Extreme Power Saver : Off
+:: Each key is captured for the session undo before it is changed or deleted: the three lists are
+:: whole values a user or ROM may have set, and the flags may be server-pushed.
+call :_tw_undo_dcfg activity_manager bg_current_drain_auto_restrict_abusive_apps_enabled
+call :_tw_undo_dcfg activity_manager bg_auto_restrict_abusive_apps
+call :_tw_undo_add global battery_tip_constants
+call :_tw_undo_add global battery_saver_constants
+call :_tw_undo_add global activity_manager_constants
 adb shell device_config delete activity_manager bg_current_drain_auto_restrict_abusive_apps_enabled <nul
 adb shell device_config delete activity_manager bg_auto_restrict_abusive_apps <nul
 adb shell cmd power set-adaptive-power-saver-enabled false <nul
@@ -5571,8 +7230,6 @@ adb shell cmd power set-mode 0 <nul
 adb shell settings put global battery_tip_constants app_restriction_enabled=true <nul
 adb shell settings delete global battery_saver_constants <nul > nul 2>&1
 :: Do not delete protect_battery: DCX never sets it, and on Samsung it is the user's charge limit.
-:: activity_manager_constants is one whole list, so capture it for undo before clearing.
-call :_tw_undo_add global activity_manager_constants
 adb shell settings delete global activity_manager_constants <nul > nul 2>&1
 :: Clear the low-RAM mode :onsvpp forces; the debug.rs.* props are left to the reboot.
 adb shell setprop debug.force_low_ram false <nul > nul 2>&1
@@ -5593,9 +7250,14 @@ title Extreme Power Saver : On
 call :_dcfg_warn
 :: Clears fake-battery state. dumpsys rather than cmd: older builds may lack cmd battery.
 adb shell dumpsys battery reset <nul
+:: Captured before any write, as Off does.
+call :_tw_undo_dcfg activity_manager bg_current_drain_auto_restrict_abusive_apps_enabled
+call :_tw_undo_dcfg activity_manager bg_auto_restrict_abusive_apps
+call :_tw_undo_add global activity_manager_constants
+call :_tw_undo_add global battery_saver_constants
+call :_tw_undo_add global battery_tip_constants
 adb shell device_config put activity_manager bg_current_drain_auto_restrict_abusive_apps_enabled true <nul
 adb shell device_config put activity_manager bg_auto_restrict_abusive_apps 1 <nul
-call :_tw_undo_add global activity_manager_constants
 adb shell settings put global activity_manager_constants power_check_interval=990000,power_check_max_cpu_1=2,power_check_max_cpu_2=2,power_check_max_cpu_3=2,power_check_max_cpu_4=2 <nul
 adb shell settings put global battery_saver_constants advertise_is_enabled=false,enable_datasaver=false,enable_night_mode=true,disable_launch_boost=true,disable_vibration=true,disable_animation=true,disable_soundtrigger=true,defer_full_backup=true,defer_keyvalue_backup=true,enable_firewall=false,location_mode=2,enable_brightness_adjustment=false,adjust_brightness_factor=0.5,force_all_apps_standby=true,force_background_check=true,disable_optional_sensors=true,disable_aod=true,enable_quick_doze=true <nul
 adb shell settings put global battery_tip_constants reduced_battery_enabled=true,battery_saver_tip_enabled=true,high_usage_period_ms=120000,app_restriction_enabled=true,battery_tip_enabled=false,summary_enabled=false,high_usage_enabled=true,high_usage_app_count=1,high_usage_battery_draining=15,reduced_battery_percent=5,low_battery_enabled=true,low_battery_hour=1 <nul
@@ -5713,7 +7375,8 @@ title Gaming Mode
 cls
 call :logo
 echo          ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-for /f "tokens=3,4,5,6,7 delims= " %%a in ('adb shell uptime ^<nul 2^>nul') do echo           [%g%+%w%]Uptime: %%a %%b %%c
+call :_uptime
+if defined _upt echo           [%g%+%w%]Uptime: !_upt!
 set "cpucheck=N/A"
 for /f "tokens=2 delims=:" %%i in ('adb shell dumpsys cpuinfo ^<nul 2^>nul ^| findstr /C:"Load:"') do set "cpucheck=%%i"
 for /f "delims=" %%a in ("!cpucheck!") do set "cpucheck=%%a"
@@ -5868,12 +7531,14 @@ if "!CH!"=="" goto dispscaler
 set "CDPI=" & set /p "CDPI=Density dpi (blank = cancel) >> "
 call :_noin CDPI || goto dcx_noinput
 if "!CDPI!"=="" goto dispscaler
+:: Whole numbers, checked without a pipe: the pipe's child cmd drops a caret, and 1080^ then
+:: passed and broke the bound checks below.
 call :_tw_safechk CW || goto dispscaler_custom_bad
-echo !CW!| findstr /r "^[1-9][0-9]*$" >nul || goto dispscaler_custom_bad
+call :_lib_num CW || goto dispscaler_custom_bad
 call :_tw_safechk CH || goto dispscaler_custom_bad
-echo !CH!| findstr /r "^[1-9][0-9]*$" >nul || goto dispscaler_custom_bad
+call :_lib_num CH || goto dispscaler_custom_bad
 call :_tw_safechk CDPI || goto dispscaler_custom_bad
-echo !CDPI!| findstr /r "^[1-9][0-9]*$" >nul || goto dispscaler_custom_bad
+call :_lib_num CDPI || goto dispscaler_custom_bad
 :: sane bounds so a typo can't leave the UI unusable
 if %CW% LSS 320 goto dispscaler_custom_bad
 if %CH% LSS 320 goto dispscaler_custom_bad
@@ -6050,7 +7715,7 @@ set /p "CDPI=Density dpi (blank = cancel) >> "
 call :_noin CDPI || goto dcx_noinput
 if "!CDPI!"=="" goto dispscaler_dpi
 call :_tw_safechk CDPI || goto dispscaler_dpi_custom_bad
-echo !CDPI!| findstr /r "^[1-9][0-9]*$" >nul || goto dispscaler_dpi_custom_bad
+call :_lib_num CDPI || goto dispscaler_dpi_custom_bad
 if %CDPI% LSS 80 goto dispscaler_dpi_custom_bad
 if %CDPI% GTR 900 goto dispscaler_dpi_custom_bad
 set "ND=%CDPI%"
@@ -6296,7 +7961,8 @@ if "!nb!"=="4" goto netboost_revert
 if "!nb!"=="5" goto Gaming
 goto netboost
 :: -----------------------------------------------------------------
-:: Preferred network mode - preferred_network_mode: 9 LTE pref, 12 LTE only, 20 5G pref.
+:: Preferred network mode - preferred_network_mode, RILConstants: 9 LTE/GSM/WCDMA, 11 LTE only,
+:: 26 NR/LTE/GSM/WCDMA (5G preferred).
 :: mode1 is on purpose: the key for subId 1, usually the first SIM. Restore deletes both.
 :: -----------------------------------------------------------------
 :netboost_prefmode
@@ -6307,13 +7973,15 @@ echo  Current preferred_network_mode:
 for /f "delims=" %%i in ('adb shell settings get global preferred_network_mode 2^>nul ^<nul') do echo    %%i
 echo.
 echo                                     %g%[%w%1%g%]%w% LTE preferred (9)  -^> fall back 3G/2G
-echo                                     %g%[%w%2%g%]%w% LTE only (12)
-echo                                     %g%[%w%3%g%]%w% 5G preferred (20)  -^> fall back LTE/3G
+echo                                     %g%[%w%2%g%]%w% LTE only (11)
+echo                                     %g%[%w%3%g%]%w% 5G preferred (26)  -^> fall back LTE/3G
 echo                                     %g%[%w%4%g%]%w% Restore default (delete)
 echo                                     %g%[%w%5%g%]%w% Back
 set "pm=" & set /p pm="Choose An Option >> "
 call :_noin pm || goto dcx_noinput
 if "!pm!"=="1" (
+    call :_tw_undo_add global preferred_network_mode
+    call :_tw_undo_add global preferred_network_mode1
     adb shell settings put global preferred_network_mode 9 <nul
     adb shell settings put global preferred_network_mode1 9 <nul
     call :_act_reset
@@ -6323,25 +7991,31 @@ if "!pm!"=="1" (
     goto netboost_prefmode
 )
 if "!pm!"=="2" (
-    adb shell settings put global preferred_network_mode 12 <nul
-    adb shell settings put global preferred_network_mode1 12 <nul
+    call :_tw_undo_add global preferred_network_mode
+    call :_tw_undo_add global preferred_network_mode1
+    adb shell settings put global preferred_network_mode 11 <nul
+    adb shell settings put global preferred_network_mode1 11 <nul
     call :_act_reset
-    call :_settings_verify global preferred_network_mode 12
+    call :_settings_verify global preferred_network_mode 11
     call :_act_summary
     echo WARNING: voice calls only work if VoLTE is active.
     pause > nul
     goto netboost_prefmode
 )
 if "!pm!"=="3" (
-    adb shell settings put global preferred_network_mode 20 <nul
-    adb shell settings put global preferred_network_mode1 20 <nul
+    call :_tw_undo_add global preferred_network_mode
+    call :_tw_undo_add global preferred_network_mode1
+    adb shell settings put global preferred_network_mode 26 <nul
+    adb shell settings put global preferred_network_mode1 26 <nul
     call :_act_reset
-    call :_settings_verify global preferred_network_mode 20
+    call :_settings_verify global preferred_network_mode 26
     call :_act_summary
     pause > nul
     goto netboost_prefmode
 )
 if not "!pm!"=="4" goto _skpm4
+    call :_tw_undo_add global preferred_network_mode
+    call :_tw_undo_add global preferred_network_mode1
     adb shell settings delete global preferred_network_mode <nul
     adb shell settings delete global preferred_network_mode1 <nul
     call :_act_reset
@@ -6393,8 +8067,9 @@ goto :eof
 :: Free user text bound for adb: charset check first, then only delayed expansion.
 :: Pipe-free on purpose: a pipe re-parses the text and would run what follows a metacharacter.
 if not defined _HCHK exit /b 1
-set "_HCHK=!_HCHK:"=!"
-if not defined _HCHK exit /b 1
+:: A quote is refused, not stripped: the caller goes on to use its own copy of the name.
+set "_hq=!_HCHK:"=!"
+if not "!_hq!"=="!_HCHK!" exit /b 1
 set "_h_bad="
 :: eol=a: with the default eol, a token starting with ; is skipped and name;x would pass.
 :: A leading a is stripped as a delimiter before the eol test sees it.
@@ -6461,6 +8136,9 @@ call :_host_ok || (
 :_pdns_apply
 echo.
 echo Setting Private DNS to !_pdhost! . . .
+:: The specifier may be the user's own server, so both keys go to the undo file first.
+call :_tw_undo_add global private_dns_mode
+call :_tw_undo_add global private_dns_specifier
 adb shell settings put global private_dns_mode hostname <nul
 adb shell settings put global private_dns_specifier !_pdhost! <nul
 call :_act_reset
@@ -6584,11 +8262,13 @@ adb shell cmd appops set com.google.android.gms INSTANT_APP_START_FOREGROUND ign
 adb shell am set-inactive --user 0 com.google.android.gms true <nul
 adb shell am set-standby-bucket --user 0 com.google.android.gms never <nul
 echo.
-adb shell pm list packages -d <nul 2>nul | find /v "" | findstr /x /c:"package:com.google.android.gms" >nul
-if not errorlevel 1 (
-    echo [%g%+%w%] com.google.android.gms is disabled-user.
-) else (
+call :_pkg_installed com.google.android.gms -d
+if errorlevel 2 (
+    echo [%y%WARN%w%] The phone did not answer, so the GMS state could not be checked.
+) else if errorlevel 1 (
     echo [%y%WARN%w%] GMS not listed as disabled - OEM may have blocked the disable.
+) else (
+    echo [%g%+%w%] com.google.android.gms is disabled-user.
 )
 echo Press Any Button To Go Back
 pause > nul
@@ -6607,11 +8287,14 @@ adb shell am set-inactive --user 0 com.google.android.gms false <nul
 adb shell am set-standby-bucket --user 0 com.google.android.gms active <nul
 title GMS : On
 echo.
-adb shell pm list packages -d <nul 2>nul | find /v "" | findstr /x /c:"package:com.google.android.gms" >nul
-if errorlevel 1 (
-    echo [%g%+%w%] com.google.android.gms is enabled.
+:: A positive match: an empty list from a phone that stopped answering must not read as enabled.
+call :_pkg_installed com.google.android.gms -e
+if errorlevel 2 (
+    echo [%y%WARN%w%] The phone did not answer, so the GMS state could not be checked.
+) else if errorlevel 1 (
+    echo [%y%WARN%w%] GMS is not listed as enabled - the enable may not have landed.
 ) else (
-    echo [%y%WARN%w%] GMS still listed as disabled - enable may not have landed.
+    echo [%g%+%w%] com.google.android.gms is enabled.
 )
 echo Press Any Button To Go Back
 pause > nul
@@ -6670,7 +8353,9 @@ goto gms
 
 :_gms_safe_one
 :: %1 = disable-user ^| enable    %2 = package
-adb shell pm list packages 2>nul <nul | find /v "" | findstr /x /c:"package:%~2" >nul
+:: A phone that did not answer the list is a failure, not "not installed".
+call :_pkg_installed %~2
+if errorlevel 2 goto _gms_safe_noans
 if errorlevel 1 (
     echo  skip  %~2 ^(not installed^)
     exit /b 0
@@ -6688,11 +8373,26 @@ if errorlevel 1 (
 echo  [%g%OK%w%] %~1 %~2
 set /a DCX_VOK+=1
 exit /b 0
+
+:_pkg_installed
+:: %1 package, %2 optional pm list filter (-d, -e). errorlevel 0 listed, 1 not listed, 2 the phone
+:: did not answer. The list ends with a marker: a pipe hides adb's failure, and an empty list is
+:: not "not installed". find /v turns LF-only output into CRLF lines, which findstr /x needs.
+adb shell "pm list packages %~2 && echo _DCXEND" <nul 2>nul | find /v "" >"!DCX_TMP!\pkchk.txt"
+findstr /c:"_DCXEND" "!DCX_TMP!\pkchk.txt" >nul 2>&1 || exit /b 2
+findstr /x /c:"package:%~1" "!DCX_TMP!\pkchk.txt" >nul 2>&1 || exit /b 1
+exit /b 0
+
+:_gms_safe_noans
+echo  [%r%FAIL%w%] %~1 %~2 - the phone did not answer the package list
+set /a DCX_VFAIL+=1
+exit /b 1
 :: thermal
 :thermal
 @echo off
 cls
 title Thermal override (temporary)
+if !SDK! GEQ 1 if !SDK! LSS 29 goto thermal_old
 echo.
 echo.
 echo  Temporary thermalservice override-status ^(usually clears on reboot^).
@@ -6742,6 +8442,13 @@ call :_act_summary
 if "%DCX_VFAIL%"=="0" echo  Status is now pinned at !kb! until you clear it ^(option 7^) or reboot.
 echo Press Any Button To Go Back.
 pause > nul
+goto Gaming
+
+:thermal_old
+echo.
+echo  [%r%^^!%w%] The thermal override needs Android 10 or newer ^(API 29+^); the phone reports API !SDK!.
+echo Press Any Button To Go Back
+pause >nul
 goto Gaming
 
 :thermal_clear
@@ -6845,6 +8552,7 @@ call :_pm_fg
 echo  Keep the phone's screen on with the game open: DCX checks the frame statistics next.
 if defined _pmfg echo  Foreground app: %g%!_pmfg!%w% - Enter measures it, or type a package ^(0 = back^).
 if not defined _pmfg echo  No foreground app found. Type the game's package name ^(Enter = back^).
+echo  Part of a name works too, such as pubg: DCX lists the apps that match.
 
 :perfmon_pick_ask
 set "pmp=" & set /p pmp="Package >> "
@@ -6852,6 +8560,7 @@ call :_noin pmp || goto dcx_noinput
 if "!pmp!"=="0" goto perfmon
 if not defined pmp if defined _pmfg set "pmp=!_pmfg!"
 if not defined pmp goto perfmon
+call :_pkg_pick pmp inst || goto perfmon_pick_ask
 set "_PKGCHK=!pmp!"
 call :_pkg_ok || goto perfmon_pick_bad
 set "_pmpkg=!_PKGCHK!"
@@ -6932,6 +8641,7 @@ echo  Hottest sensor of each kind in C. cool = CPU level / GPU level / devices t
 echo  * = the status is pinned by an override, not the phone's real one.
 echo.
 echo   time   status     CPU    GPU    skin   batt   cool c/g/on         headroom
+set "_pmlost=" & set "_pmhold="
 
 :perfmon_tick
 call :_pm_read
@@ -6950,6 +8660,7 @@ goto perfmon_tick
 :perfmon_lost
 echo.
 echo  [%r%^^!%w%] The phone stopped answering - stopping the run.
+set "_pmlost=1" & set "_pmhold=1"
 
 :perfmon_stop
 call :_pm_el
@@ -6957,8 +8668,12 @@ set "_pmdurt=!_pmelt!"
 echo.
 echo  Stopping - reading the frame statistics...
 adb shell dumpsys SurfaceFlinger --timestats -dump <nul >"!_pmd!\ts.txt" 2>nul
-call :_act_rc !errorlevel! "frame statistics read"
-if not defined _pmtsw call :_pm_off
+call :_act_rc !errorlevel! "frame statistics read" || set "_pmhold=1"
+if not defined _pmtsw call :_pm_off || set "_pmhold=1"
+:: The report starts with cls: hold so a failure printed here is read first.
+if defined _pmhold echo.
+if defined _pmhold echo  Press any key for the report . . .
+if defined _pmhold pause >nul
 echo  Working out the numbers...
 call :_pm_ts_parse
 call :_pm_ts_best
@@ -7029,6 +8744,7 @@ goto perfmon_report_end
 
 :perfmon_noframes
 echo  [%y%WARN%w%] SurfaceFlinger recorded no frames for !_pmpkg! ^(!_pmlays! layers listed^).
+if defined _pmlost echo    - The phone stopped answering, so the run's statistics could not be read.
 echo    - Was the game on screen, and in play, during the run?
 if "!SDK!"=="29" echo    - Android 10 records only packages starting with com. or co.
 echo    - The phone's own statistics upload can reset the counters mid-run: try again.
@@ -7659,6 +9375,10 @@ call :_gm_notgame
 echo        Nothing was changed.
 goto gm_set_quit
 
+:gm_set_nochange
+echo        Nothing was changed.
+goto gm_set_quit
+
 :gm_set_noans
 echo  [%r%^^!%w%] The phone did not say whether !_GM_PKG! is a game - check the connection.
 
@@ -7713,6 +9433,7 @@ echo [%b%i%w%] The game_overlay entry was written; Reset removes it.
 goto gm_set_end
 
 :gm_set12
+call :_gm_ask12 || goto gm_set_nochange
 adb shell cmd game downscale !_gm_scl! !_GM_PKG! <nul >"!DCX_TMP!\gm_out.txt" 2>&1
 call :_act_rc !errorlevel! "cmd game downscale !_gm_scl! - Android 12 closes the app itself"
 if errorlevel 1 goto gm_set_fail
@@ -7854,6 +9575,7 @@ call :_gm_dcclean
 goto gm_reset_end
 
 :gm_reset12
+call :_gm_ask12 || goto gm_set_nochange
 adb shell cmd game downscale disable !_GM_PKG! <nul >"!DCX_TMP!\gm_out.txt" 2>&1
 call :_act_rc !errorlevel! "downscaling off - Android 12 closes the app itself"
 if errorlevel 1 call :_gm_msg
@@ -7872,9 +9594,10 @@ goto gamemode
 :_gm_askpkg
 :: _GM_PKG = a checked, installed package name; errorlevel 1 = none.
 set "_GM_PKG="
-set "gmp=" & set /p gmp="Game package name (blank = back) >> "
+set "gmp=" & set /p gmp="Game package name or part of one (blank = back) >> "
 call :_noin gmp || goto dcx_noinput
 if not defined gmp exit /b 1
+call :_pkg_pick gmp inst || exit /b 1
 set "_PKGCHK=!gmp!"
 call :_pkg_ok
 if errorlevel 1 goto _gm_askpkg_bad
@@ -8016,6 +9739,16 @@ echo [%r%^^!%w%] Android does not list !_GM_PKG! as a game ^(no appCategory "gam
 echo        so Game Mode is ignored for it.
 exit /b
 
+:_gm_ask12
+:: Android 12 applies a render scale by closing the app at once: ask first, as 13+ asks before it
+:: closes the game. errorlevel 1 = no; Ctrl+C makes choice return 0, also no.
+echo  Android 12 applies this by closing !_GM_PKG! at once if it is running.
+echo    [Y] Apply and close it ^(unsaved game progress is lost^)    [N] Cancel
+choice /c:YN /n >nul
+if errorlevel 2 exit /b 1
+if not errorlevel 1 exit /b 1
+exit /b 0
+
 :_gm_restart
 echo.
 echo  A render-scale change applies the next time !_GM_PKG! starts.
@@ -8136,8 +9869,9 @@ title Performance props (debug/OEM)
 echo.
 echo.
 echo  Writes a large dump of debug/OEM props. Most are volatile and
-echo  device-dependent - not a guaranteed FPS mode. Lasting bits are
-echo  mainly low_power off + thermal reset; Samsung-only keys no-op elsewhere.
+echo  device-dependent - not a guaranteed FPS mode. What lasts: battery saver
+echo  off, the thermal status pinned at NONE until Off, activity_manager_constants
+echo  and storage/SurfaceFlinger flags; Samsung-only keys no-op elsewhere.
 echo.
 echo [%r%1%w%] Toggle
 echo [%r%2%w%] Back
@@ -8168,7 +9902,21 @@ goto toggleperf
 @echo off
 cls
 title Performance Mode : Off
-:: Off deletes the overrides so the platform defaults return.
+call :_dcfg_warn
+:: Off deletes the overrides so the platform defaults return. Each key goes to the session undo
+:: file first, as On does: a value set before DCX is not lost.
+call :_tw_undo_dcfg storage_native_boot target_dirty_ratio
+call :_tw_undo_dcfg storage_native_boot target_dirty_background_ratio
+call :_tw_undo_dcfg runtime_native_boot iorap_readahead_enable
+call :_tw_undo_dcfg surface_flinger_native_boot max_frame_buffer_acquired_buffers
+call :_tw_undo_dcfg surface_flinger_native_boot adpf_cpu_hint
+call :_tw_undo_add global activity_manager_constants
+call :_tw_undo_add global low_power
+call :_tw_undo_add system multicore_packet_scheduler
+call :_tw_undo_add global sem_enhanced_cpu_responsiveness
+if "%SDK%"=="" call :_tw_undo_add global device_idle_constants
+if not "%SDK%"=="" if %SDK% GEQ 31 call :_tw_undo_dcfg device_idle inactive_to
+if not "%SDK%"=="" if %SDK% LSS 31 call :_tw_undo_add global device_idle_constants
 adb shell device_config delete storage_native_boot target_dirty_ratio <nul > nul 2>&1
 adb shell device_config delete storage_native_boot target_dirty_background_ratio <nul > nul 2>&1
 adb shell logcat -G 256kb <nul
@@ -8194,7 +9942,16 @@ if "%SDK%"=="" (
 ) else (
     adb shell settings delete global device_idle_constants <nul > nul 2>&1
 )
+:: Read the device_config deletes back: Android 14+ without root can accept one and keep the value.
 echo.
+call :_act_reset
+call :_dcfg_verify storage_native_boot target_dirty_ratio null
+call :_dcfg_verify storage_native_boot target_dirty_background_ratio null
+call :_dcfg_verify runtime_native_boot iorap_readahead_enable null
+call :_dcfg_verify surface_flinger_native_boot max_frame_buffer_acquired_buffers null
+call :_dcfg_verify surface_flinger_native_boot adpf_cpu_hint null
+if not "%SDK%"=="" if %SDK% GEQ 31 call :_dcfg_verify device_idle inactive_to null
+call :_act_summary
 echo.
 echo [%r%^^!%w%] Please Restart Device To Finish The Process
 echo.
@@ -8209,22 +9966,28 @@ goto Gaming
 cls
 title Performance Mode : On
 call :_dcfg_warn
+:: Every persistent key On writes is captured first, so On then Off undoes to the values from before
+:: On, not to On's own. The first capture of a key wins.
+call :_tw_undo_dcfg storage_native_boot target_dirty_ratio
+call :_tw_undo_dcfg storage_native_boot target_dirty_background_ratio
+call :_tw_undo_dcfg runtime_native_boot iorap_readahead_enable
+call :_tw_undo_dcfg surface_flinger_native_boot max_frame_buffer_acquired_buffers
+call :_tw_undo_dcfg surface_flinger_native_boot adpf_cpu_hint
+call :_tw_undo_add global activity_manager_constants
+call :_tw_undo_add global low_power
+call :_tw_undo_add system multicore_packet_scheduler
+call :_tw_undo_add global sem_enhanced_cpu_responsiveness
 echo.
 echo.
-echo [%r%^^!%w%] All Powersaving Is Disabled
-echo [%r%^^!%w%] If You Want To Enable Power Saver Again, You Need To Disable Performance Mode
-echo [%r%^^!%w%] And Enable Power Saver Mode In Battery Mode
+echo [%r%^^!%w%] Turning power saving off: battery saver, the adaptive saver, and the thermal
+echo     status pinned at NONE until Off. To use battery saver again, turn Performance Mode
+echo     off first, then use Power Saver in Battery Mode.
 ::disable powersaver
 adb shell cmd power set-mode 0 <nul > nul 2>&1
 adb shell cmd thermalservice override-status 0 <nul
 adb shell settings put global low_power 0 <nul
-if "%SDK%"=="" (
-    adb shell settings put global device_idle_constants inactive_to=300000 <nul > nul 2>&1
-) else if %SDK% GEQ 31 (
-    adb shell device_config put device_idle inactive_to 300000 <nul > nul 2>&1
-) else (
-    adb shell settings put global device_idle_constants inactive_to=300000 <nul > nul 2>&1
-)
+:: REMOVED: inactive_to=300000. It is the delay before Doze, 30 min by default, so 5 min made the
+:: phone doze sooner - the opposite of this mode. Off still deletes it, for an older DCX's write.
 adb shell cmd power set-adaptive-power-saver-enabled false <nul
 adb shell setprop debug.power_management_mode pref_max <nul
 adb shell cmd shortcut reset-all-throttling <nul > nul 2>&1
@@ -8287,7 +10050,6 @@ adb shell setprop debug.rs.precision rs_fp_full <nul
 adb shell setprop debug.hwui.high_performance_mode true <nul
 adb shell settings put system multicore_packet_scheduler 1 <nul
 adb shell settings put global sem_enhanced_cpu_responsiveness 1 <nul
-call :_tw_undo_add global activity_manager_constants
 adb shell settings put global activity_manager_constants max_cached_processes=12,power_check_interval=80000,power_check_max_cpu_1=85,power_check_max_cpu_2=85,power_check_max_cpu_3=60,power_check_max_cpu_4=15 <nul
 :: REMOVED: debug.cpurend.vsync false and debug.egl.swapinterval 0 - vsync off means tearing.
 adb shell setprop debug.sf.hw 1 <nul
@@ -8339,6 +10101,8 @@ echo storage_native_boot/target_dirty_ratio : 35
 echo storage_native_boot/target_dirty_background_ratio : 5
 adb shell device_config put storage_native_boot target_dirty_ratio 35 <nul
 adb shell device_config put storage_native_boot target_dirty_background_ratio 5 <nul
+:: About a hundred unchecked writes: at least say so when the phone is gone by the end.
+call :_phone_live || echo [%y%WARN%w%] The phone did not answer at the end - some writes above may not have landed.
 echo Press Any Button To Go Back
 pause > nul
 goto Gaming
@@ -8377,18 +10141,24 @@ title Restrict Background
 call :logo
 echo  Sets Android's own Restricted mode, as Settings does: RUN_ANY_IN_BACKGROUND ignore and off
 echo  the Doze allowlist. "Allow background" lifts it; the session undo file restores the old mode.
-echo  Tip: use "List installed packages" first if you don't know the name.
+echo  Tip: type part of a name, such as chrome, to pick the app from a list.
 echo.
-set "pkg=" & set /p pkg="Package name (blank = cancel) >> "
+set "pkg=" & set /p pkg="Package name or part of one (blank = cancel) >> "
 call :_noin pkg || goto dcx_noinput
 if "!pkg!"=="" goto appmgr
+call :_pkg_pick pkg inst || goto appmgr_restrict
 set "_PKGCHK=!pkg!"
 call :_pkg_ok || (
     echo  [%r%x%w%] Invalid package name. Letters, digits, dots and underscores only.
     timeout /t 2 /nobreak > nul
     goto appmgr
 )
-adb shell pm list packages < nul 2>nul | find /v "" | findstr /x /c:"package:!pkg!" >nul
+call :_pkg_installed !pkg!
+if errorlevel 2 (
+    echo [%r%^^!%w%] The phone did not answer the package list - check the connection.
+    pause >nul
+    goto appmgr_restrict
+)
 if errorlevel 1 (
     echo [%r%^^!%w%] "!pkg!" is not installed.
     pause >nul
@@ -8404,16 +10174,22 @@ title Allow Background
 call :logo
 echo  Allows background again: both app-ops back to allow. The Doze allowlist stays as it is.
 echo.
-set "pkg=" & set /p pkg="Package name (blank = cancel) >> "
+set "pkg=" & set /p pkg="Package name or part of one (blank = cancel) >> "
 call :_noin pkg || goto dcx_noinput
 if "!pkg!"=="" goto appmgr
+call :_pkg_pick pkg inst || goto appmgr_allow
 set "_PKGCHK=!pkg!"
 call :_pkg_ok || (
     echo  [%r%x%w%] Invalid package name. Letters, digits, dots and underscores only.
     timeout /t 2 /nobreak > nul
     goto appmgr
 )
-adb shell pm list packages < nul 2>nul | find /v "" | findstr /x /c:"package:!pkg!" >nul
+call :_pkg_installed !pkg!
+if errorlevel 2 (
+    echo [%r%^^!%w%] The phone did not answer the package list - check the connection.
+    pause >nul
+    goto appmgr_allow
+)
 if errorlevel 1 (
     echo [%r%^^!%w%] "!pkg!" is not installed.
     pause >nul
@@ -8436,9 +10212,10 @@ echo  %y%Only remove apps you recognise.%w% Never remove system UI, phone,
 echo  or anything you can't identify. On Transsion (Tecno/Infinix) phones
 echo  never remove com.hoffnung - it looks like bloat but bootloops.
 echo.
-set "pkg=" & set /p pkg="Package name (blank = cancel) >> "
+set "pkg=" & set /p pkg="Package name or part of one (blank = cancel) >> "
 call :_noin pkg || goto dcx_noinput
 if "!pkg!"=="" goto appmgr
+call :_pkg_pick pkg inst || goto appmgr_debloat_input
 set "_PKGCHK=!pkg!"
 call :_pkg_ok || (
     echo  [%r%x%w%] Invalid package name. Letters, digits, dots and underscores only.
@@ -8452,7 +10229,12 @@ if "%BLOCKED%"=="1" (
     pause >nul
     goto appmgr_debloat_input
 )
-adb shell pm list packages < nul 2>nul | find /v "" | findstr /x /c:"package:!pkg!" >nul
+call :_pkg_installed !pkg!
+if errorlevel 2 (
+    echo [%r%^^!%w%] The phone did not answer the package list - check the connection.
+    pause >nul
+    goto appmgr_debloat_input
+)
 if errorlevel 1 (
     echo [%r%^^!%w%] "!pkg!" is not installed.
     pause >nul
@@ -8480,19 +10262,23 @@ call :logo
 echo  Reinstalls an app removed with Debloat (pm install-existing).
 echo  Works as long as it was removed with -k and not fully wiped.
 echo.
-set "pkg=" & set /p pkg="Package name to restore (blank = cancel) >> "
+set "pkg=" & set /p pkg="Package name or part of one (blank = cancel) >> "
 call :_noin pkg || goto dcx_noinput
 if "!pkg!"=="" goto appmgr
+call :_pkg_pick pkg removed || goto appmgr_restore_input
 set "_PKGCHK=!pkg!"
 call :_pkg_ok || (
     echo  [%r%x%w%] Invalid package name. Letters, digits, dots and underscores only.
     timeout /t 2 /nobreak > nul
     goto appmgr
 )
-adb shell cmd package install-existing !pkg! <nul
+:: --user 0 like Debloat: newer Android otherwise restores for the current user.
+adb shell cmd package install-existing --user 0 !pkg! <nul
 echo.
-adb shell pm list packages 2>nul <nul | find /v "" | findstr /x /c:"package:!pkg!" >nul
-if errorlevel 1 (
+call :_pkg_installed !pkg!
+if errorlevel 2 (
+    echo [%y%WARN%w%] The phone did not answer, so the restore could not be checked.
+) else if errorlevel 1 (
     echo [%r%^^!%w%] Restore did not land - "!pkg!" is not installed for this user.
     echo      It may never have been a system/preloaded package, or the APK is gone.
 ) else (
@@ -8550,8 +10336,6 @@ if defined BRAND for /f "delims=" %%a in ("!BRAND!") do set "BRAND=%%a"
 if defined MANU for /f "delims=" %%a in ("!MANU!") do set "MANU=%%a"
 :: Per-window folder: a shared file let another DCX window swap in its phone's package list.
 set "PKGDUMP=!DCX_TMP!\pkgs.txt"
-:: find /v turns LF-only output into CRLF so the whole-line /x match later works.
-adb shell pm list packages < nul 2>nul | find /v "" > "!PKGDUMP!"
 echo  Detected brand: !BRAND!   manufacturer: !MANU!
 echo.
 echo  These groups only remove well-documented, safe-to-remove apps that
@@ -8603,13 +10387,21 @@ goto _remove_present_set
 :: -------------------------------------------------------------------
 :: Shared remover: shows which BLOATSET packages are in PKGDUMP, removes them after one yes.
 :: -------------------------------------------------------------------
+:_remove_noans
+echo  [%r%^^!%w%] The phone did not answer the package list, so nothing was checked or removed.
+pause >nul
+goto appmgr_suggest
+
 :_remove_present_set
 cls
 title Debloat : review
 call :logo
 echo  %BLOATDESC%
 echo.
-if not exist "!PKGDUMP!" adb shell pm list packages < nul 2>nul | find /v "" > "!PKGDUMP!"
+:: A fresh list, ended by a marker: without it the phone did not answer, which is not "none".
+:: find /v turns LF-only output into CRLF so the whole-line /x match below works.
+adb shell "pm list packages && echo _DCXEND" < nul 2>nul | find /v "" > "!PKGDUMP!"
+findstr /c:"_DCXEND" "!PKGDUMP!" >nul 2>&1 || goto _remove_noans
 echo  Installed packages from this group (these will be removed):
 echo.
 set "_found="
@@ -8762,10 +10554,18 @@ call :_noin ok || goto dcx_noinput
 if /i not "!ok!"=="y" goto tw_undo_hub
 echo.
 :: UNDOFILE is expanded by the child cmd, not pasted into this line.
+call :_retarget UNDOFILE
 cmd /c ""%%UNDOFILE%%" /nopause"
+set "_urc=%errorlevel%"
+set "DCX_RETARGET="
 echo.
 echo  ----------------------------------------
-echo  Undo finished ^(exit code %errorlevel%^).
+echo  Undo finished ^(exit code %_urc%^).
+:: Android 14+ without root can accept a device_config write and keep nothing, as Restore notes.
+set "_udcfg="
+if "%_urc%"=="0" if !SDK! GEQ 34 findstr /c:"DCX_CMD=device_config " "!UNDOFILE!" >nul 2>&1 && set "_udcfg=1"
+if defined _udcfg echo  %y%Note:%w% Android 14+ without root can accept a device_config value without keeping it -
+if defined _udcfg echo  the count above is what the phone accepted, not what it kept.
 echo  Press any key to continue . . .
 pause >nul
 goto tw_undo_hub
@@ -8814,8 +10614,8 @@ echo    %g%[%w%4%g%]%w% Back
 set "dc=" & set /p dc="Choose An Option >> "
 call :_noin dc || goto dcx_noinput
 if not defined dc goto tw_dcfgsync
-if "!dc!"=="1" (call :_tw_undo_dcfgsync & adb shell device_config set_sync_disabled_for_tests none <nul >nul 2>&1 & call :_dcfgsync_verify none & goto tw_dcfgsync)
-if "!dc!"=="2" (call :_tw_undo_dcfgsync & adb shell device_config set_sync_disabled_for_tests until_reboot <nul >nul 2>&1 & call :_dcfgsync_verify until_reboot & goto tw_dcfgsync)
+if "!dc!"=="1" (call :_tw_undo_dcfgsync & adb shell device_config set_sync_disabled_for_tests none <nul >nul 2>&1 & call :_dcfgsync_verify none & echo  Press any key . . . & pause >nul & goto tw_dcfgsync)
+if "!dc!"=="2" (call :_tw_undo_dcfgsync & adb shell device_config set_sync_disabled_for_tests until_reboot <nul >nul 2>&1 & call :_dcfgsync_verify until_reboot & echo  Press any key . . . & pause >nul & goto tw_dcfgsync)
 if "!dc!"=="3" (
     echo.
     echo  %y%Warning:%w% persistent stays frozen across reboot until you pick [1].
@@ -8827,6 +10627,8 @@ if "!dc!"=="3" (
     call :_tw_undo_dcfgsync
     adb shell device_config set_sync_disabled_for_tests persistent <nul >nul 2>&1
     call :_dcfgsync_verify persistent
+    echo  Press any key . . .
+    pause >nul
     goto tw_dcfgsync
 )
 if "!dc!"=="4" goto tweaks
@@ -8951,9 +10753,13 @@ if %SDK% LSS 34 (
     timeout /t 2 /nobreak >nul
     goto tw_safevol
 )
+call :_act_reset
 adb shell cmd audio set-sound-dose-value 0.0 <nul
-echo  Accumulated sound dose reset to 0. Applies live.
-timeout /t 2 /nobreak >nul
+call :_act_rc !errorlevel! "accumulated sound dose reset to 0"
+call :_act_summary
+if "%DCX_VFAIL%"=="0" echo  Applies live.
+echo Press Any Button To Go Back
+pause >nul
 goto tw_safevol
 
 :tw_safevol_csdoff
@@ -9007,11 +10813,17 @@ echo(!EXP_FLT!| findstr /r /x /c:"[a-zA-Z0-9_.-][a-zA-Z0-9_.-]*" >nul || goto tw
 
 :tw_exp_list_go
 echo  ---- %EXP_NS% ----
+:: To a file with an end marker first: piped straight to more, a phone that stopped answering
+:: printed the same empty table as no match.
+adb shell "settings list %EXP_NS% && echo _DCXEND" <nul >"!DCX_TMP!\exp_list.txt" 2>nul
+findstr /b /c:"_DCXEND" "!DCX_TMP!\exp_list.txt" >nul 2>&1 || (echo  [%r%^^!%w%] The phone did not answer, so nothing could be listed. & goto tw_exp_list_end)
 if defined EXP_FLT (
-    adb shell settings list %EXP_NS% <nul 2>nul | findstr /i /c:"%EXP_FLT%" | more
+    findstr /v /b /c:"_DCXEND" "!DCX_TMP!\exp_list.txt" | findstr /i /c:"%EXP_FLT%" | more
 ) else (
-    adb shell settings list %EXP_NS% <nul 2>nul | more
+    findstr /v /b /c:"_DCXEND" "!DCX_TMP!\exp_list.txt" | more
 )
+
+:tw_exp_list_end
 echo  ---- end of %EXP_NS% ----
 echo  Press any key . . .
 pause >nul
@@ -9024,7 +10836,8 @@ call :_tw_askkey
 if not defined EXP_KEY goto tw_explorer
 set "EXP_OLD="
 for /f "delims=" %%v in ('adb shell settings get %EXP_NS% %EXP_KEY% 2^>nul ^<nul') do set "EXP_OLD=%%v"
-if "!EXP_OLD!"=="" set "EXP_OLD=null"
+:: No output means the phone did not answer: an unset key reads "null".
+if not defined EXP_OLD goto tw_exp_noans
 :: Device values may hold cmd metacharacters: strip quotes, then echo inside quotes.
 set "EXP_OLD=!EXP_OLD:"=!"
 echo.
@@ -9040,7 +10853,7 @@ call :_tw_askkey
 if not defined EXP_KEY goto tw_explorer
 set "EXP_OLD="
 for /f "delims=" %%v in ('adb shell settings get %EXP_NS% %EXP_KEY% 2^>nul ^<nul') do set "EXP_OLD=%%v"
-if "!EXP_OLD!"=="" set "EXP_OLD=null"
+if not defined EXP_OLD goto tw_exp_noans
 set "EXP_OLD=!EXP_OLD:"=!"
 echo  Current value: "!EXP_OLD!"
 set "EXP_VAL=" & set /p EXP_VAL="New value (blank = cancel) >> "
@@ -9059,9 +10872,15 @@ call :_tw_undo_add %EXP_NS% %EXP_KEY%
 adb shell settings put %EXP_NS% %EXP_KEY% !EXP_VAL! <nul
 set "EXP_NEW="
 for /f "delims=" %%v in ('adb shell settings get %EXP_NS% %EXP_KEY% 2^>nul ^<nul') do set "EXP_NEW=%%v"
-if "!EXP_NEW!"=="" set "EXP_NEW=null"
+if not defined EXP_NEW goto tw_exp_put_noback
 set "EXP_NEW=!EXP_NEW:"=!"
 echo  Read-back: %EXP_NS% %EXP_KEY% = "!EXP_NEW!"
+goto tw_exp_put_end
+
+:tw_exp_put_noback
+echo  [%y%WARN%w%] Read-back: the phone did not answer, so the new value could not be checked.
+
+:tw_exp_put_end
 echo  Undo script: !EXP_UNDO!
 echo  Press any key . . .
 pause >nul
@@ -9074,7 +10893,7 @@ call :_tw_askkey
 if not defined EXP_KEY goto tw_explorer
 set "EXP_OLD="
 for /f "delims=" %%v in ('adb shell settings get %EXP_NS% %EXP_KEY% 2^>nul ^<nul') do set "EXP_OLD=%%v"
-if "!EXP_OLD!"=="" set "EXP_OLD=null"
+if not defined EXP_OLD goto tw_exp_noans
 set "EXP_OLD=!EXP_OLD:"=!"
 echo  Current value: "!EXP_OLD!"
 echo.
@@ -9085,6 +10904,13 @@ if /i not "!ok!"=="y" goto tw_explorer
 call :_tw_undo_add %EXP_NS% %EXP_KEY%
 for /f "delims=" %%i in ('adb shell settings delete %EXP_NS% %EXP_KEY% 2^>nul ^<nul') do echo  %%i
 echo  Undo script: !EXP_UNDO!
+echo  Press any key . . .
+pause >nul
+goto tw_explorer
+
+:tw_exp_noans
+echo.
+echo [%r%^^!%w%] The phone did not answer, so %EXP_NS% %EXP_KEY% could not be read. Nothing was changed.
 echo  Press any key . . .
 pause >nul
 goto tw_explorer
@@ -9119,9 +10945,11 @@ exit /b
 
 :_tw_safechk
 :: Arg 1 = NAME of a variable, callers strip double quotes first. errorlevel 1 if the value holds
-:: an ampersand, pipe, angle bracket or quote. Each test sits inside a quoted comparison so the
-:: char never reaches command position; a caret self-escapes and needs no test.
+:: an ampersand, pipe, angle bracket, caret or quote. Each test sits inside a quoted comparison so
+:: the char never reaches command position. The caret is refused because a value read with percent
+:: expansion that ends in one continues the line, and a pipe's child cmd drops it unseen.
 if not defined %~1 exit /b 1
+if not "!%~1:^=_!"=="!%~1!" exit /b 1
 if not "!%~1:&=_!"=="!%~1!" exit /b 1
 if not "!%~1:|=_!"=="!%~1!" exit /b 1
 if not "!%~1:<=_!"=="!%~1!" exit /b 1
@@ -9146,12 +10974,13 @@ exit /b 0
 
 :_tw_wb_get
 :: Args: ns, key, variable to fill, flag variable. For editors that write back the list they read.
-:: Prints the value and fills arg 3 with it, null if unset or unread. A quote or bang in it leaves
-:: arg 3 empty and sets arg 4. Read with delayed expansion OFF and no eol, or bangs become PC vars.
+:: Prints the value and fills arg 3 with it, null if unset. A quote or bang in it leaves arg 3
+:: empty and sets arg 4; no answer from the phone leaves both empty, errorlevel 1.
+:: Read with delayed expansion OFF and no eol, or bangs become PC vars.
 setlocal DisableDelayedExpansion
 set "_wbv="
 for /f delims^=^ eol^= %%v in ('adb shell settings get %~1 %~2 2^>nul ^<nul') do for /f delims^=^ eol^= %%w in ("%%v") do set "_wbv=%%w"
-if not defined _wbv set "_wbv=null"
+if not defined _wbv goto _tw_wb_unread
 setlocal EnableDelayedExpansion
 echo  %~2 (%~1) = "!_wbv!"
 set "_wbq=!_wbv:"=!"
@@ -9166,12 +10995,18 @@ exit /b 0
 endlocal & endlocal & set "%~3=" & set "%~4=1"
 exit /b 0
 
+:_tw_wb_unread
+echo  %~2 (%~1) - the phone did not answer, so the list was not read.
+endlocal & set "%~3=" & set "%~4="
+exit /b 1
+
 :_tw_undo_ensure
 :: Lazily creates the session undo .bat: :dcx_do and :dcx_report up top, then a growing :dcx_main.
 :: Restore lines go in before the trailing goto :dcx_report, so the file always runs.
 :: If the file was deleted, a new one is started with a warning.
-if defined EXP_UNDO if exist "!EXP_UNDO!" exit /b 0
 set "_tw_ue_hold="
+:: One file per phone: the file is tagged for the phone it started on, and only restores there.
+if defined EXP_UNDO if exist "!EXP_UNDO!" call :_tw_undo_samephone && exit /b 0
 if defined EXP_UNDO set "_tw_ue_hold=1"
 if defined EXP_UNDO echo  [%y%WARN%w%] The session undo file is gone - starting a new one.
 if defined EXP_UNDO echo         Changes made before now are no longer undoable from it.
@@ -9187,6 +11022,7 @@ set "TS=%TS:,=-%"
 set "TS=%TS: =_%"
 set "EXP_UNDO=!BACKUPDIR!\dcx_explorer_undo_%TS%.bat"
 call :_bk_write_adb_boot EXP_UNDO
+set "_TW_UNDO_SER=!_bk_ser!"
 if defined _bk_untagged set "_tw_ue_hold=1"
 (
     echo :: DCX Settings-Explorer / Tweaks undo - restores values before writes.
@@ -9248,6 +11084,21 @@ if defined _tw_ue_hold echo         Press any key to continue . . .
 if defined _tw_ue_hold pause >nul
 exit /b 0
 
+:_tw_undo_samephone
+:: errorlevel 0 when the phone in use is the one the session undo file was started for, or that
+:: cannot be told. Otherwise it says so and drops EXP_UNDO, so the caller starts a new file.
+if not defined _TW_UNDO_SER exit /b 0
+set "_tus="
+for /f "delims=" %%s in ('adb get-serialno 2^>nul') do set "_tus=%%s"
+if not defined _tus exit /b 0
+if /i "!_tus!"=="unknown" exit /b 0
+if /i "!_tus!"=="!_TW_UNDO_SER!" exit /b 0
+echo  [%b%i%w%] Another phone or connection is in use now ^(!_tus!^): changes from here go into a
+echo        new session undo file. The earlier one stays in dcx_backups for the other phone.
+set "_tw_ue_hold=1"
+set "EXP_UNDO="
+exit /b 1
+
 :_tw_undo_add
 :: Capture settings namespace/key into the session undo script before a write.
 :: Only the FIRST capture per key counts, so undo restores the original, not the previous value.
@@ -9257,7 +11108,19 @@ if defined _TWSEEN_%~1_%~2 exit /b 0
 call :_tw_undo_prep || goto _tw_undo_broken
 set "_TWSEEN_%~1_%~2=1"
 >>"!EXP_UNDO!" echo :: DCX_KEY settings %~1 %~2
-call :_bk_settings %~1 %~2 EXP_UNDO
+:: An unanswered read leaves only a DCX_SKIP comment: unmark the key so the next write tries again.
+call :_bk_settings %~1 %~2 EXP_UNDO || set "_TWSEEN_%~1_%~2="
+call :_tw_undo_finish
+exit /b
+
+:_tw_undo_dcfg
+:: device_config twin of :_tw_undo_add: namespace, key. First capture wins, as above.
+call :_tw_undo_ensure
+if defined _TWSEEN_dc_%~1_%~2 exit /b 0
+call :_tw_undo_prep || goto _tw_undo_broken
+set "_TWSEEN_dc_%~1_%~2=1"
+>>"!EXP_UNDO!" echo :: DCX_KEY device_config %~1 %~2
+call :_bk_devcfg %~1 %~2 EXP_UNDO || set "_TWSEEN_dc_%~1_%~2="
 call :_tw_undo_finish
 exit /b
 
@@ -9268,22 +11131,32 @@ if defined _TWSEEN_dcfgsync exit /b 0
 call :_tw_undo_prep || goto _tw_undo_broken
 set "_TWSEEN_dcfgsync=1"
 >>"!EXP_UNDO!" echo :: DCX_KEY dcfgsync
-call :_bk_dcfgsync EXP_UNDO
+:: Unread: unmark, so the next change tries again.
+call :_bk_dcfgsync EXP_UNDO || set "_TWSEEN_dcfgsync="
 call :_tw_undo_finish
 exit /b
 
 :_tw_undo_bgm
-:: %1 = package: both background app-ops and its user Doze allowlist entry. First capture wins.
+:: %1 = package: both background app-ops and its user Doze allowlist entry. First capture wins,
+:: per item: an item the phone did not answer stays unmarked, so the next change tries it again.
+:: errorlevel 0 recorded (now or earlier), 1 the undo file could not be updated (warned),
+:: 2 not recorded - the phone did not answer, or no scratch folder. Callers then change nothing.
 call :_tw_undo_ensure
-if defined _TWSEEN_bgm_%~1 exit /b 0
+if defined _TWSEEN_bgm_%~1_any if defined _TWSEEN_bgm_%~1_run if defined _TWSEEN_bgm_%~1_wl exit /b 0
+:: The answer files go where App check keeps its own; outside App check that folder is gone.
+set "_acd=!DCX_TMP!\appcheck"
+if not exist "!_acd!\" md "!_acd!" >nul 2>&1
+if not exist "!_acd!\" (echo [%r%^^!%w%] Could not create the scratch folder !_acd!. & exit /b 2)
 call :_tw_undo_prep || goto _tw_undo_broken
-set "_TWSEEN_bgm_%~1=1"
 >>"!EXP_UNDO!" echo :: DCX_KEY appops+deviceidle %~1
-call :_ac_undo_op %~1 RUN_ANY_IN_BACKGROUND
-call :_ac_undo_op %~1 RUN_IN_BACKGROUND
-call :_ac_undo_wl %~1
+if not defined _TWSEEN_bgm_%~1_any call :_ac_undo_op %~1 RUN_ANY_IN_BACKGROUND && set "_TWSEEN_bgm_%~1_any=1"
+if not defined _TWSEEN_bgm_%~1_run call :_ac_undo_op %~1 RUN_IN_BACKGROUND && set "_TWSEEN_bgm_%~1_run=1"
+if not defined _TWSEEN_bgm_%~1_wl call :_ac_undo_wl %~1 && set "_TWSEEN_bgm_%~1_wl=1"
 call :_tw_undo_finish
-exit /b
+if not defined _TWSEEN_bgm_%~1_any exit /b 2
+if not defined _TWSEEN_bgm_%~1_run exit /b 2
+if not defined _TWSEEN_bgm_%~1_wl exit /b 2
+exit /b 0
 
 :_tw_undo_broken
 :: Reached when :_tw_undo_prep failed. An append now would land after goto :dcx_report and never
@@ -9291,6 +11164,9 @@ exit /b
 echo  [%y%WARN%w%] Could not update the undo script - this change will NOT be recorded.
 echo         Check !BACKUPDIR! is writable ^(antivirus / Controlled
 echo         Folder Access are the usual cause^).
+:: Hold: most callers redraw their screen with cls straight after the write.
+echo         Press any key to continue . . .
+pause >nul
 exit /b 1
 
 :_tw_undo_prep
@@ -9349,8 +11225,25 @@ echo  Dumping...
 for %%n in (system secure global) do (
     adb shell settings list %%n <nul 2>nul | find /v "" | sort > "!SNAPDIR!\%%n_%TS%.txt"
 )
+:: The pipe's status is sort's, so an empty file is how a dump from a phone that is gone shows.
+:: Such a file is removed: Diff would read it as every key deleted.
+set "_snbad=0"
+for %%n in (system secure global) do for %%f in ("!SNAPDIR!\%%n_%TS%.txt") do (
+    set "_snz="
+    if exist "%%~f" set "_snz=%%~zf"
+    if not defined _snz set /a _snbad+=1
+    if "!_snz!"=="0" (set /a _snbad+=1 & del "%%~f" >nul 2>&1)
+)
+if not "!_snbad!"=="0" echo  [%y%WARN%w%] !_snbad! of 3 tables came back empty - the phone did not answer. Those files were removed.
+if "!_snbad!"=="3" goto _tw_snap_none
 echo  Done:
 dir /b "!SNAPDIR!\*_%TS%.txt"
+echo  Press any key . . .
+pause >nul
+goto tw_snapshot
+
+:_tw_snap_none
+echo  Nothing was saved. Check the connection and take the snapshot again.
 echo  Press any key . . .
 pause >nul
 goto tw_snapshot
@@ -9495,6 +11388,7 @@ goto tw_ib_addgo
 
 :tw_ib_addgo
 if defined IBODD goto tw_ib_odd
+if not defined IBCUR goto tw_ib_unread
 call :_tw_undo_add secure icon_blacklist
 :: Rebuild without the tokens being added, so re-hiding cannot duplicate; IBTOK may hold several.
 set "IBNEW="
@@ -9517,6 +11411,7 @@ title Icon Blacklist : restore
 call :logo
 echo.
 if defined IBODD goto tw_ib_odd
+if not defined IBCUR goto tw_ib_unread
 if "!IBCUR!"=="null" goto tw_ib_empty
 :: Clear any stale IBT_n from an earlier, longer list before renumbering.
 for /f "delims==" %%v in ('set IBT_ 2^>nul') do set "%%v="
@@ -9559,6 +11454,13 @@ goto tw_icons
 echo [%r%^^!%w%] Not allowed - lowercase letters, digits, _ and commas only.
 timeout /t 2 /nobreak >nul
 goto tw_ib_add
+
+:tw_ib_unread
+echo.
+echo [%r%^^!%w%] The list was not read when this screen opened, so nothing was changed. The
+echo        screen reads it again now.
+timeout /t 4 /nobreak >nul
+goto tw_icons
 
 :tw_ib_odd
 echo.
@@ -9969,13 +11871,41 @@ if defined PROFNAME (
 ) else (
     set "PROFF=!PROFDIR!\profile_%TS%.txt"
 )
+if defined PROFNAME if exist "!PROFF!" goto _tw_prof_exists
+
+:_tw_prof_write
 > "!PROFF!" echo # DCX profile saved %date% %time% mode=!PROFMODE!
 >>"!PROFF!" echo # format: namespace^|key^|value   (value DELETE removes the key)
 call :_tw_prof_add_tweaks PROFF
 if /i "!PROFMODE!"=="stack" call :_tw_prof_add_stack PROFF
 echo.
+:: A failed redirect sets no errorlevel, and a phone that is gone leaves only comment lines.
+if not exist "!PROFF!" goto _tw_prof_nowrite
+findstr /v /b /c:"#" "!PROFF!" >nul 2>&1 || goto _tw_prof_nodata
 echo  Saved: !PROFF!
 echo  Edit it in Notepad to trim it down to just the keys you care about.
+echo  Press any key . . .
+pause >nul
+goto tw_profile
+
+:_tw_prof_exists
+echo  !PROFNAME!.txt exists already - perhaps trimmed by hand.
+echo    [Y] Replace it    [N] Save under a new timestamped name instead
+:: Ctrl+C makes choice return 0: keep the file, as N does.
+choice /c:YN /n >nul
+if errorlevel 2 (set "PROFF=!PROFDIR!\profile_%TS%.txt" & goto _tw_prof_write)
+if not errorlevel 1 (set "PROFF=!PROFDIR!\profile_%TS%.txt" & goto _tw_prof_write)
+goto _tw_prof_write
+
+:_tw_prof_nowrite
+echo  [%r%^^!%w%] Could not write !PROFF! - check the folder is writable. Nothing was saved.
+echo  Press any key . . .
+pause >nul
+goto tw_profile
+
+:_tw_prof_nodata
+del "!PROFF!" >nul 2>&1
+echo  [%y%WARN%w%] The phone gave no values - nothing was saved. Check the connection and try again.
 echo  Press any key . . .
 pause >nul
 goto tw_profile
@@ -10000,6 +11930,13 @@ call :_tw_prof_add global charging_sounds_enabled "%~1"
 call :_tw_prof_add global sys_storage_threshold_percentage "%~1"
 call :_tw_prof_add global low_power_trigger_level "%~1"
 call :_tw_prof_add global enable_freeform_support "%~1"
+call :_tw_prof_add secure ui_night_mode "%~1"
+call :_tw_prof_add secure camera_double_twist_to_flip_enabled "%~1"
+call :_tw_prof_add secure camera_gesture_disabled "%~1"
+call :_tw_prof_add global charging_vibration_enabled "%~1"
+call :_tw_prof_add global sys_storage_threshold_max_bytes "%~1"
+call :_tw_prof_add global force_resizable_activities "%~1"
+call :_tw_prof_add global default_install_location "%~1"
 exit /b
 
 :_tw_prof_add_stack
@@ -10029,6 +11966,7 @@ call :_tw_prof_add secure multi_press_timeout "%~1"
 call :_tw_prof_add global tcp_default_init_rwnd "%~1"
 call :_tw_prof_add global private_dns_mode "%~1"
 call :_tw_prof_add global preferred_network_mode "%~1"
+call :_tw_prof_add global preferred_network_mode1 "%~1"
 exit /b
 
 :_tw_prof_add
@@ -10658,6 +12596,56 @@ echo  Press any key . . .
 pause >nul
 goto tw_rearm
 
+:_uptime
+:: _upt = time since the phone booted, from /proc/uptime as days, hours and minutes; empty when
+:: the phone did not answer. uptime's own text changes shape below a day, so it is not parsed.
+set "_upt=" & set "_ups="
+for /f "tokens=1 delims=. " %%s in ('adb shell cat /proc/uptime ^<nul 2^>nul') do if not defined _ups set "_ups=%%s"
+if not defined _ups exit /b
+for /f "eol=0 delims=0123456789" %%c in ("!_ups!") do exit /b
+if not "!_ups:~9!"=="" exit /b
+set /a "_upd=_ups/86400, _uph=(_ups%%86400)/3600, _upm=(_ups%%3600)/60"
+set "_upmm=0!_upm!"
+set "_upt=!_upm! min"
+if !_uph! GTR 0 set "_upt=!_uph!:!_upmm:~-2!"
+if !_upd! EQU 1 set "_upt=1 day, !_upt!"
+if !_upd! GTR 1 set "_upt=!_upd! days, !_upt!"
+exit /b
+
+:_phone_sn
+:: _psn = the phone's own serial (ro.serialno), the same over USB and Wi-Fi; empty and errorlevel 1
+:: when it is missing, unknown, longer than 64 or holds anything but letters, digits, . _ -.
+set "_psn="
+setlocal DisableDelayedExpansion
+set "_psr="
+for /f delims^=^ eol^= %%s in ('adb shell getprop ro.serialno 2^>nul ^<nul') do for /f delims^=^ eol^= %%t in ("%%s") do set "_psr=%%t"
+setlocal EnableDelayedExpansion
+if not defined _psr exit /b 1
+if /i "!_psr!"=="unknown" exit /b 1
+if not "!_psr:~64!"=="" exit /b 1
+set "_psb="
+for /f "eol=a delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" %%c in ("!_psr!") do set "_psb=1"
+if defined _psb exit /b 1
+for /f "eol=! delims=" %%x in ("!_psr!") do endlocal & endlocal & set "_psn=%%x"
+exit /b 0
+
+:_retarget
+:: Arg 1 = NAME of the variable holding a backup or undo file. When the file's DCX_DEVICE (an adb
+:: connection name) is not the connection in use but its DCX_PHONE matches this phone's own
+:: serial, DCX_RETARGET = the connection in use, which the file then restores to. Else empty.
+set "DCX_RETARGET="
+set "_rtw=" & set "_rtp=" & set "_rth="
+for /f "tokens=3" %%s in ('findstr /b /c:":: DCX_DEVICE " "%%%~1%%" 2^>nul') do set "_rtw=%%s"
+for /f "tokens=3" %%s in ('findstr /b /c:":: DCX_PHONE " "%%%~1%%" 2^>nul') do set "_rtp=%%s"
+if not defined _rtw exit /b 0
+if not defined _rtp exit /b 0
+for /f "delims=" %%s in ('adb get-serialno 2^>nul') do set "_rth=%%s"
+if not defined _rth exit /b 0
+if /i "!_rth!"=="!_rtw!" exit /b 0
+call :_phone_sn || exit /b 0
+if /i "!_psn!"=="!_rtp!" set "DCX_RETARGET=!_rth!"
+exit /b 0
+
 :_ra_key
 :: RAF / RAB = this phone's armed profile and boot marker, named after ro.serialno. errorlevel 1 = no usable serial.
 set "RAF=" & set "RAB="
@@ -10834,15 +12822,40 @@ goto tw_qs_addgo
 
 :tw_qs_addgo
 if defined QSODD goto tw_qs_odd
+if not defined QSCUR goto tw_qs_unread
 call :_tw_undo_add secure sysui_qs_tiles
 :: Rebuild, not append: drop the spec first so adding an existing tile moves it.
 :: OEM lists hold custom tokens with parens a plain for breaks on, so :_tw_qs_enum splits them.
 set "QSNEW="
 if "!QSCUR!"=="null" goto _tw_qs_addnull
 call :_tw_qs_enum
+:: No tokens from a set list means the split failed: adding now would leave one tile, so refuse.
+if "!QSN!"=="0" goto _tw_qs_nosplit
 call :_tw_qs_rebuild_skip
 :: explicit: :_tw_qs_addnull sits between here and :_tw_qs_addput, so this must not fall through
 goto _tw_qs_addput
+
+:_tw_qs_nosplit
+echo.
+echo  %y%The tile list could not be split%w% ^(PowerShell did not run, or the temp folder is
+echo  not writable^), so nothing was written - adding now would leave a single tile.
+echo  Press any key . . .
+pause >nul
+goto tw_qs
+
+:tw_qs_del_nosplit
+echo  %y%The tile list could not be split%w% ^(PowerShell did not run, or the temp folder is
+echo  not writable^), so there is nothing to pick from and nothing was changed.
+echo  Press any key . . .
+pause >nul
+goto tw_qs
+
+:tw_qs_unread
+echo.
+echo [%r%^^!%w%] The list was not read when this screen opened, so nothing was changed. The
+echo        screen reads it again now.
+timeout /t 4 /nobreak >nul
+goto tw_qs
 
 :_tw_qs_addnull
 :: Unset sysui_qs_tiles means an unreadable default list; adding would leave one tile, so refuse.
@@ -10869,9 +12882,11 @@ title Quick Settings Tiles : remove
 call :logo
 echo.
 if defined QSODD goto tw_qs_odd
+if not defined QSCUR goto tw_qs_unread
 if "!QSCUR!"=="null" goto tw_qs_empty
 call :_tw_qs_enum
-if "!QSN!"=="0" goto tw_qs_empty
+:: No tokens from a set list means the split failed, not an empty panel.
+if "!QSN!"=="0" goto tw_qs_del_nosplit
 echo  Current tiles, in display order:
 for /l %%i in (1,1,!QSN!) do echo     %g%[%w%%%i%g%]%w% !QST_%%i!
 echo     %g%[%w%0%g%]%w% Back
@@ -10910,8 +12925,9 @@ exit /b
 :: delimiter, so the loop body runs only for a char outside the list. It sets a constant: a copy
 :: of the char with delayed expansion on would drop an exclamation mark and pass the name.
 if not defined _PKGCHK exit /b 1
-set "_PKGCHK=!_PKGCHK:"=!"
-if not defined _PKGCHK exit /b 1
+:: A quote is refused, not stripped: the caller goes on to use its own copy of the name.
+set "_pkq=!_PKGCHK:"=!"
+if not "!_pkq!"=="!_PKGCHK!" exit /b 1
 set "_pk_bad="
 for /f "eol=a delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._" %%c in ("!_PKGCHK!") do set "_pk_bad=1"
 if defined _pk_bad exit /b 1
@@ -10920,6 +12936,100 @@ set "_pk_bad="
 for /f "eol=a delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" %%c in ("!_PKGCHK:~0,1!") do set "_pk_bad=1"
 if defined _pk_bad exit /b 1
 exit /b 0
+
+:_pkg_pick
+:: Arg 1 = NAME of the variable holding what was typed; arg 2 = inst (apps on the phone for this
+:: user) or removed (apps removed for this user, which Restore can bring back). An exact name, and
+:: text that cannot be part of a name, are left for the caller's own check. Part of a name lists
+:: the matching apps by number, and the chosen one replaces the text in the variable.
+:: errorlevel 1 = nothing chosen: no match, Enter at the list, or the phone did not answer.
+set "_pp_v=%~1"
+set "_pp_sc=%~2"
+set "_pp_t=!%~1!"
+if not defined _pp_t exit /b 0
+set "_pp_q=!_pp_t:"=!"
+if not "!_pp_q!"=="!_pp_t!" exit /b 0
+set "_pp_bad="
+for /f "eol=a delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._" %%c in ("!_pp_t!") do set "_pp_bad=1"
+if defined _pp_bad exit /b 0
+set "_ppd=!DCX_TMP!\pkgpick"
+if exist "!_ppd!\" rd /s /q "!_ppd!" >nul 2>&1
+md "!_ppd!" >nul 2>&1
+if not exist "!_ppd!\" exit /b 0
+echo  Looking for "!_pp_t!" on the phone...
+:: --user 0 always: from Android 13 a bare list merges every user, a work profile included.
+adb shell "pm list packages --user 0 && echo _DCXEND" <nul >"!_ppd!\inst.txt" 2>nul
+findstr /c:"_DCXEND" "!_ppd!\inst.txt" >nul 2>&1 || goto _pkg_pick_noans
+call :_pp_list inst
+set "_pp_src=inst.ok"
+if /i not "!_pp_sc!"=="removed" goto _pkg_pick_exact
+:: -u adds the packages removed for this user with their data kept; the difference is what
+:: install-existing can bring back. The .ok files hold checked names only, so plain reads are safe.
+adb shell "pm list packages -u --user 0 && echo _DCXEND" <nul >"!_ppd!\all.txt" 2>nul
+findstr /c:"_DCXEND" "!_ppd!\all.txt" >nul 2>&1 || goto _pkg_pick_noans
+call :_pp_list all
+for /f "delims==" %%v in ('set _ppI_ 2^>nul') do set "%%v="
+for /f "usebackq delims=" %%n in ("!_ppd!\inst.ok") do set "_ppI_%%n=1"
+:: echo( so that a package named on or off is written, not taken as the echo switch.
+type nul >"!_ppd!\removed.ok"
+for /f "usebackq delims=" %%n in ("!_ppd!\all.ok") do if not defined _ppI_%%n >>"!_ppd!\removed.ok" echo(%%n
+for /f "delims==" %%v in ('set _ppI_ 2^>nul') do set "%%v="
+set "_pp_src=removed.ok"
+
+:_pkg_pick_exact
+findstr /x /c:"!_pp_t!" "!_ppd!\!_pp_src!" >nul 2>&1 && exit /b 0
+for /f "delims==" %%v in ('set _pp_m[ 2^>nul') do set "%%v="
+set "_pp_n=0"
+"%SystemRoot%\System32\sort.exe" "!_ppd!\!_pp_src!" /o "!_ppd!\sorted.ok" >nul 2>&1
+if not exist "!_ppd!\sorted.ok" copy /y "!_ppd!\!_pp_src!" "!_ppd!\sorted.ok" >nul 2>&1
+:: Substitution ignores case, so a changed copy means the name holds the typed text.
+for /f "usebackq delims=" %%n in ("!_ppd!\sorted.ok") do (
+    set "_pp_x=%%n"
+    if not "!_pp_x:%_pp_t%=!"=="!_pp_x!" (
+        set /a _pp_n+=1
+        set "_pp_m[!_pp_n!]=%%n"
+    )
+)
+if "!_pp_n!"=="0" goto _pkg_pick_none
+echo.
+if /i "!_pp_sc!"=="removed" (echo  Removed apps with "!_pp_t!" in the name:) else (echo  Apps with "!_pp_t!" in the name:)
+for /l %%i in (1,1,25) do if defined _pp_m[%%i] echo     %g%[%w%%%i%g%]%w% !_pp_m[%%i]!
+if !_pp_n! GTR 25 echo     ... !_pp_n! apps match and the first 25 are shown. Type more of the name.
+echo.
+
+:_pkg_pick_ask
+set "_pp_c=" & set /p _pp_c="App number (Enter = back) >> "
+call :_noin _pp_c || goto dcx_noinput
+if not defined _pp_c exit /b 1
+set "_pp_bad="
+for /f "eol=0 delims=0123456789" %%c in ("!_pp_c!") do set "_pp_bad=1"
+if defined _pp_bad goto _pkg_pick_ask
+if "!_pp_c:~0,1!"=="0" goto _pkg_pick_ask
+if not defined _pp_m[!_pp_c!] goto _pkg_pick_ask
+for /f "delims=" %%k in ("!_pp_c!") do set "!_pp_v!=!_pp_m[%%k]!"
+for /f "delims==" %%v in ('set _pp_m[ 2^>nul') do set "%%v="
+exit /b 0
+
+:_pkg_pick_none
+if /i "!_pp_sc!"=="removed" (echo  [%r%x%w%] No app removed for this user has "!_pp_t!" in its name.) else (echo  [%r%x%w%] No app on the phone has "!_pp_t!" in its name.)
+pause >nul
+exit /b 1
+
+:_pkg_pick_noans
+echo  [%r%^^!%w%] The phone did not answer - check the connection ^(adb devices^).
+pause >nul
+exit /b 1
+
+:_pp_list
+:: Arg 1 = inst or all: the package:<name> lines of that pm answer whose name is valid - a letter,
+:: then letters, digits, dots and underscores - go to <arg>.ok as plain names. One findstr checks
+:: every line, so phone text never reaches a variable unchecked; a per-line call took 25 ms a line,
+:: half a minute on a phone with 1200 apps. find first re-terminates adb's LF-only lines for /x.
+find /v "" <"!_ppd!\%~1.txt" >"!_ppd!\%~1.crlf" 2>nul
+findstr /r /x /c:"package:[abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ][abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.]*" "!_ppd!\%~1.crlf" >"!_ppd!\%~1.flt" 2>nul
+type nul >"!_ppd!\%~1.ok"
+for /f "usebackq tokens=1,* delims=:" %%a in ("!_ppd!\%~1.flt") do >>"!_ppd!\%~1.ok" echo(%%b
+exit /b
 
 :_tw_qs_enum
 :: Split QSCUR into QST_1..QST_n and QSN on commas outside parens, for OEM custom tokens.
@@ -11237,8 +13347,24 @@ if "!fw!"=="2" (call :_tw_undo_add global enable_freeform_support & adb shell se
 if "!fw!"=="3" (call :_tw_undo_add global force_resizable_activities & adb shell settings put global force_resizable_activities 1 <nul & goto tw_free)
 if "!fw!"=="4" (call :_tw_undo_add global force_resizable_activities & adb shell settings put global force_resizable_activities 0 <nul & goto tw_free)
 if "!fw!"=="5" goto tw_free_reset
-if "!fw!"=="6" (adb reboot <nul & goto tw_free)
+if "!fw!"=="6" goto tw_free_reboot
 if "!fw!"=="7" goto tw_more
+goto tw_free
+
+:tw_free_reboot
+echo.
+echo  %y%This reboots the connected phone now.%w% Anything unsaved on it is lost.
+echo    [Y] Reboot the phone    [N] Cancel
+:: Ctrl+C makes choice return 0, so not errorlevel 1 goes where N goes.
+choice /c:YN /n >nul
+if errorlevel 2 goto tw_free
+if not errorlevel 1 goto tw_free
+adb reboot <nul
+timeout /t 1 /nobreak > nul
+:: Disconnect only this phone, and only on Wi-Fi, as the main Reboot does.
+if not defined ANDROID_SERIAL goto tw_free
+if "!ANDROID_SERIAL!"=="!ANDROID_SERIAL::=!" goto tw_free
+adb disconnect !ANDROID_SERIAL!
 goto tw_free
 
 :tw_free_reset
@@ -11296,11 +13422,13 @@ set "WATCH_NS=!EXP_NS!"
 set "WATCH_KEY=!EXP_KEY!"
 set "WATCH_PREV="
 for /f "delims=" %%i in ('adb shell settings get !WATCH_NS! !WATCH_KEY! 2^>nul ^<nul') do set "WATCH_PREV=%%i"
-if "!WATCH_PREV!"=="" set "WATCH_PREV=null"
-set "WATCH_PREV=!WATCH_PREV:"=!"
+:: Android prints null for an unset key, so an empty read means no answer: no baseline yet.
+set "WATCH_QUIET="
+if defined WATCH_PREV set "WATCH_PREV=!WATCH_PREV:"=!"
 echo.
 echo  Watching %g%!WATCH_NS!/!WATCH_KEY!%w%
-echo  Baseline: "!WATCH_PREV!"
+if defined WATCH_PREV echo  Baseline: "!WATCH_PREV!"
+if not defined WATCH_PREV echo  The phone did not answer yet - the baseline is its first answer.
 echo  Flip the toggle on the device now...
 echo.
 
@@ -11315,8 +13443,9 @@ goto settools
 :_tw_watch_poll
 set "WATCH_NOW="
 for /f "delims=" %%i in ('adb shell settings get !WATCH_NS! !WATCH_KEY! 2^>nul ^<nul') do set "WATCH_NOW=%%i"
-if "!WATCH_NOW!"=="" set "WATCH_NOW=null"
+if not defined WATCH_NOW goto _tw_watch_noans
 set "WATCH_NOW=!WATCH_NOW:"=!"
+if not defined WATCH_PREV (set "WATCH_PREV=!WATCH_NOW!" & echo  Baseline: "!WATCH_NOW!" & goto _tw_watch_loop)
 if "!WATCH_NOW!"=="!WATCH_PREV!" goto _tw_watch_loop
 echo.
 echo  [%g%+%w%] Value changed:
@@ -11328,6 +13457,11 @@ echo  Tip: save it into a Profile, or write it via Settings explorer.
 echo.
 pause >nul
 goto settools
+
+:_tw_watch_noans
+if not defined WATCH_QUIET echo  [%y%WARN%w%] The phone did not answer - still watching. A missing answer is not a change.
+set "WATCH_QUIET=1"
+goto _tw_watch_loop
 
 :settools
 cls
@@ -11437,12 +13571,13 @@ exit /b
 :: expected = literal value, or DELETE (null/unset), or * (any set value).
 :: ===================================================================
 :_act_reset
-set "DCX_VOK=0" & set "DCX_VFAIL=0"
+set "DCX_VOK=0" & set "DCX_VFAIL=0" & set "DCX_VUNK=0"
 exit /b
 
 :_act_summary
 if not defined DCX_VOK set "DCX_VOK=0"
 if not defined DCX_VFAIL set "DCX_VFAIL=0"
+if not defined DCX_VUNK set "DCX_VUNK=0"
 echo.
 :: Nothing verified is not success: a dropped phone skips every check, so say so.
 if not "%DCX_VFAIL%"=="0" goto _act_summary_warn
@@ -11451,7 +13586,15 @@ echo [%g%OK%w%] %DCX_VOK% check^(s^) passed.
 exit /b
 
 :_act_summary_warn
+if not "%DCX_VUNK%"=="0" goto _act_summary_unk
 echo [%y%WARN%w%] %DCX_VOK% passed, %DCX_VFAIL% failed - see above.
+exit /b
+
+:_act_summary_unk
+:: An unconfirmed step is counted in DCX_VFAIL too, so callers never print their success line.
+set /a _as_bad=DCX_VFAIL-DCX_VUNK
+echo [%y%WARN%w%] %DCX_VOK% passed, !_as_bad! failed, %DCX_VUNK% not confirmed: Android 6 and older
+echo        report no result, so read the phone's answers above.
 exit /b
 
 :_act_summary_none
@@ -11465,12 +13608,7 @@ exit /b
 set "_sv_got="
 for /f "delims=" %%i in ('adb shell settings get %~1 %~2 2^>nul ^<nul') do set "_sv_got=%%i"
 if "!_sv_got!"=="" set "_sv_got=null"
-if /i "%~3"=="DELETE" (
-    if /i "!_sv_got!"=="null" (echo [%g%+%w%] %~2 deleted. & set /a DCX_VOK+=1 & exit /b 0)
-    echo [%r%^^!%w%] %~2 still reports "!_sv_got!" - delete may not have landed.
-    set /a DCX_VFAIL+=1
-    exit /b 1
-)
+if /i "%~3"=="DELETE" goto _settings_verify_del
 if /i "%~3"=="*" (
     if /i not "!_sv_got!"=="null" (echo [%g%+%w%] %~2 = "!_sv_got!" & set /a DCX_VOK+=1 & exit /b 0)
     echo [%r%^^!%w%] %~2 did not stick ^(device reports null^).
@@ -11480,6 +13618,31 @@ if /i "%~3"=="*" (
 if "!_sv_got!"=="%~3" (echo [%g%+%w%] %~2 = "!_sv_got!" & set /a DCX_VOK+=1 & exit /b 0)
 echo [%r%^^!%w%] wanted %~2=%~3, device reports "!_sv_got!".
 set /a DCX_VFAIL+=1
+exit /b 1
+
+:_settings_verify_del
+:: An empty answer reads as null, and so does a phone that is gone: ask it something first.
+if /i not "!_sv_got!"=="null" goto _settings_verify_left
+call :_phone_live || goto _settings_verify_gone
+echo [%g%+%w%] %~2 deleted.
+set /a DCX_VOK+=1
+exit /b 0
+
+:_settings_verify_left
+echo [%r%^^!%w%] %~2 still reports "!_sv_got!" - delete may not have landed.
+set /a DCX_VFAIL+=1
+exit /b 1
+
+:_settings_verify_gone
+echo [%r%^^!%w%] %~2 - the phone did not answer, so the delete could not be checked.
+set /a DCX_VFAIL+=1
+exit /b 1
+
+:_phone_live
+:: errorlevel 0 when adb shell echo comes back from the phone.
+set "_pl_ok="
+for /f "delims=" %%i in ('adb shell echo _DCXRD 2^>nul ^<nul') do if "%%i"=="_DCXRD" set "_pl_ok=1"
+if defined _pl_ok exit /b 0
 exit /b 1
 
 :_put_chk
@@ -11520,10 +13683,18 @@ exit /b 1
 
 :_act_rc
 :: %1 = !errorlevel! of the adb call just made, %2 = what it did. adb passes the phone's
-:: exit code back, and a dropped connection is an exit code of its own.
+:: exit code back, and a dropped connection is an exit code of its own. Android 6 and older
+:: always report 0, so there a 0 is counted as not confirmed.
 if not "%~1"=="0" goto _act_rc_fail
+if !SDK! GTR 0 if !SDK! LSS 24 goto _act_rc_blind
 echo [%g%+%w%] %~2
 set /a DCX_VOK+=1
+exit /b 0
+
+:_act_rc_blind
+echo [%y%?%w%] %~2 - not confirmed: this Android reports no result.
+set /a DCX_VFAIL+=1
+set /a DCX_VUNK+=1
 exit /b 0
 
 :_act_rc_fail
@@ -11585,8 +13756,15 @@ exit /b
 set "_dv_got="
 for /f "delims=" %%i in ('adb shell device_config get %~1 %~2 2^>nul ^<nul') do set "_dv_got=%%i"
 if "!_dv_got!"=="" set "_dv_got=null"
+:: An expected null needs proof that the phone answered at all, as a delete does above.
+if "!_dv_got!"=="null" if /i "%~3"=="null" call :_phone_live || goto _dcfg_verify_gone
 if "!_dv_got!"=="%~3" (echo [%g%+%w%] %~1/%~2 = "!_dv_got!" & set /a DCX_VOK+=1 & exit /b 0)
 echo [%r%^^!%w%] wanted %~1/%~2=%~3, device reports "!_dv_got!".
+set /a DCX_VFAIL+=1
+exit /b 1
+
+:_dcfg_verify_gone
+echo [%r%^^!%w%] %~1/%~2 - the phone did not answer, so the value could not be checked.
 set /a DCX_VFAIL+=1
 exit /b 1
 :: ===================================================================
@@ -11621,18 +13799,29 @@ echo   (this can take a while and processes every app - please wait)
 :: DCX_TMP is this window's own folder, so another DCX window never shares the log.
 set "_dx_log=!DCX_TMP!\bgdex.txt"
 adb shell pm art dexopt-packages -r bg-dexopt <nul > "!_dx_log!" 2>&1
+set "_dx_rc=!errorlevel!"
 :: If the command itself is unavailable, fall back to the legacy job.
 findstr /I /C:"Unknown command" /C:"Usage:" "!_dx_log!" > nul && goto _bgdex_fallback
+:: API 34+ passes the phone's exit code back; any other code (a dropped cable is one) is a failure.
+if not "!_dx_rc!"=="0" goto _bgdex_failed
 :: ART Service prints a line per package: show counts and only the failure lines.
 set "_dx_perf=0"
 set "_dx_fail=0"
-:: The log path reaches the for /f child cmd by name: by value, a metachar in the path breaks it.
-for /f %%n in ('findstr /I /C:"PERFORMED" "%%_dx_log%%" 2^>nul ^| find /c /v ""') do set "_dx_perf=%%n"
-for /f %%n in ('findstr /I /C:"FAILED" "%%_dx_log%%" 2^>nul ^| find /c /v ""') do set "_dx_fail=%%n"
+:: ART prints [package], then one status line per dex file, then one Final Status for the run:
+:: a package counts once if any of its files was PERFORMED (or FAILED).
+set "_dxp=" & set "_dxf="
+for /f "usebackq delims=" %%L in ("!_dx_log!") do (
+    set "_dl=%%L"
+    if "!_dl:~0,1!"=="[" (set "_dxp=" & set "_dxf=")
+    if /i not "!_dl:~0,13!"=="Final Status:" (
+        if not "!_dl:PERFORMED=!"=="!_dl!" if not defined _dxp (set "_dxp=1" & set /a _dx_perf+=1)
+        if not "!_dl:FAILED=!"=="!_dl!" if not defined _dxf (set "_dxf=1" & set /a _dx_fail+=1)
+    )
+)
 echo.
 echo   Background dexopt finished.
-echo     Packages optimised : %_dx_perf%
-echo     Failures           : %_dx_fail%
+echo     Packages optimised      : %_dx_perf%
+echo     Packages with a failure : %_dx_fail%
 :: Show at most 15 failures and say how many were withheld.
 :: Keep comments outside the block below: a :: line inside a paren block makes cmd error out.
 if not "%_dx_fail%"=="0" (
@@ -11658,13 +13847,103 @@ if not "%_dx_fail%"=="0" (
 )
 exit /b
 
+:_bgdex_failed
+:: errorlevel 1, so Auto Setup can count the step as failed.
+echo.
+echo   [%r%^^!%w%] Background dexopt did not finish ^(exit !_dx_rc!^). First lines of its answer:
+set "_dx_shown=0"
+for /f "usebackq delims=" %%L in ("!_dx_log!") do (
+    set /a _dx_shown+=1
+    if !_dx_shown! LEQ 5 echo     %%L
+)
+echo   The full log is at:
+echo     !_dx_log!
+exit /b 1
+
 :_bgdex_fallback
 echo   pm art unavailable on this build - using pm bg-dexopt-job...
 adb shell pm bg-dexopt-job <nul
+set "_dx_rc=!errorlevel!"
 del "!_dx_log!" > nul 2>&1
-exit /b
+exit /b !_dx_rc!
 
 :_bgdex_legacy
 adb shell pm bg-dexopt-job <nul
 exit /b
+:: ===================================================================
+:: Command library entries, read by :_lib_load. Never run as code: each is a :: line. Fields:
+:: id~category~risk~min API~command~note~undo. Categories 1 device, 2 apps, 3 battery, 4 display,
+:: 5 network, 6 diagnostics, 7 settings, 8 installing apps. Risk r reads, c changes (undo given), d
+:: deletes. No double quote, caret or exclamation mark (lost while loading, or stripped before adb),
+:: no tilde (the field separator) and no pipe: grep and friends are missing on older phones.
+:: ===================================================================
+::LIB~d01~1~r~16~getprop~Every system property, sorted by name (long)~
+::LIB~d02~1~r~16~getprop ro.product.model~Model name the phone reports~
+::LIB~d03~1~r~16~getprop ro.build.version.release~Android version number~
+::LIB~d04~1~r~16~getprop ro.build.version.sdk~API level - the number each Needs line compares with~
+::LIB~d05~1~r~23~getprop ro.build.version.security_patch~Security patch date (YYYY-MM-DD)~
+::LIB~d06~1~r~16~getprop ro.build.fingerprint~Build fingerprint - names the exact firmware~
+::LIB~d07~1~r~23~uname -a~Kernel version, build date and CPU architecture~
+::LIB~a01~2~r~16~pm list packages -3~Apps you installed (not part of the system image)~
+::LIB~a02~2~r~16~pm path {PKG}~Where one app's install files (APK) are on the phone~
+::LIB~a03~2~r~16~dumpsys package {PKG}~Everything Android knows about one app (long)~
+::LIB~a04~2~d~16~pm clear {PKG}~Delete all of one app's data, as if just installed~
+::LIB~a05~2~c~33~pm clear --cache-only {PKG}~Delete one app's cache and keep its data~Nothing to undo - the app rebuilds its cache
+::LIB~a06~2~c~21~pm trim-caches 999G~Delete every app's cache to free space~Nothing to undo - apps rebuild their caches
+::LIB~a07~2~c~16~am force-stop {PKG}~Force-stop one app (no alarms or pushes until opened)~Open the app once
+::LIB~a08~2~c~16~am kill {PKG}~Kill one app's background processes (gentler)~Nothing to undo - the app starts again when needed
+::LIB~a09~2~c~24~cmd package compile --reset {PKG}~Drop one app's compiled code (slower first start)~Roughly: cmd package compile -m speed-profile -f {PKG}
+::LIB~a10~2~c~28~cmd appops set {PKG} RUN_ANY_IN_BACKGROUND ignore~Restrict one app's background work (Restricted mode)~cmd appops set {PKG} RUN_ANY_IN_BACKGROUND allow
+::LIB~a11~2~r~34~cmd role get-role-holders android.app.role.HOME~Which app is the home screen (launcher)~
+::LIB~b01~3~r~16~dumpsys battery~Battery level, temperature (in 0.1 C), voltage and charger~
+::LIB~b02~3~r~33~cmd battery get level~Battery percentage as a bare number~
+::LIB~b03~3~r~21~dumpsys batterystats --charged~Battery use per app since the last full charge (long)~
+::LIB~b04~3~r~34~dumpsys batterystats --usage~Estimated power use per app in mAh~
+::LIB~b05~3~d~21~dumpsys batterystats --reset~Erase the battery history and per-app statistics~
+::LIB~b06~3~r~19~dumpsys power~What keeps the phone awake right now, and the screen state~
+::LIB~b07~3~r~29~dumpsys thermalservice~Temperatures, and whether heat is slowing the phone down~
+::LIB~b08~3~c~16~svc power stayon true~Keep the screen on while charging~svc power stayon false, if it was off before
+::LIB~b09~3~c~21~settings put global low_power 1~Battery saver on - not while charging, and USB charges~settings put global low_power 0
+::LIB~w01~4~r~18~wm size~Screen resolution and any override~
+::LIB~w02~4~r~18~wm density~Screen density (DPI) and any override~
+::LIB~w03~4~c~18~wm density {NUM}~Set the screen density in DPI (at least 72; wm density shows yours)~wm density reset, back to the panel's own density
+::LIB~w04~4~c~18~wm density reset~Remove a screen density override~wm density N, N being the Override density shown before (none: nothing to undo)
+::LIB~w05~4~r~17~dumpsys display~Display modes, refresh rates and brightness (long)~
+::LIB~w06~4~r~19~dumpsys window displays~Windows on each display and which app has focus (long)~
+::LIB~w07~4~r~16~dumpsys activity top~The app on screen now and its view tree (long)~
+::LIB~w08~4~c~16~screencap -p /sdcard/dcx_screen.png~Screenshot saved on the phone as /sdcard/dcx_screen.png~rm /sdcard/dcx_screen.png
+::LIB~w09~4~c~21~input keyevent KEYCODE_WAKEUP~Turn the screen on (does not unlock it)~input keyevent KEYCODE_SLEEP
+::LIB~n01~5~r~30~cmd wifi status~Wi-Fi on or off, and the network it is connected to~
+::LIB~n02~5~r~16~dumpsys wifi~Full Wi-Fi dump (long, lists saved network names)~
+::LIB~n03~5~r~21~dumpsys connectivity~Networks, addresses and DNS servers (long)~
+::LIB~n04~5~r~29~ip addr~Network interfaces and their IP addresses~
+::LIB~n05~5~c~16~svc wifi disable~Turn Wi-Fi off (cuts a Wi-Fi adb connection)~svc wifi enable, over USB or on the phone
+::LIB~n06~5~c~16~svc data disable~Turn mobile data off~svc data enable
+::LIB~n07~5~r~28~cmd connectivity airplane-mode~Is airplane mode on or off~
+::LIB~n08~5~c~28~cmd connectivity airplane-mode enable~Airplane mode on (cuts every radio, Wi-Fi adb too)~cmd connectivity airplane-mode disable, over USB or on the phone
+::LIB~g01~6~r~19~logcat -t {NUM}~The last N lines of the phone's log~
+::LIB~g02~6~r~21~logcat -b crash -d~Recent app crashes from the crash log~
+::LIB~g03~6~d~16~logcat -c~Clear the phone's main, system and crash logs~
+::LIB~g04~6~r~16~dumpsys meminfo~Memory use per app and in total (long)~
+::LIB~g05~6~r~16~dumpsys meminfo {PKG}~Memory use of one running app~
+::LIB~g06~6~r~16~dumpsys cpuinfo~CPU load and use per process~
+::LIB~g07~6~r~26~top -b -n 1~One snapshot of running processes and their CPU use~
+::LIB~g08~6~r~26~ps -A~Every running process~
+::LIB~g09~6~r~24~df -h /data~Free and used space for apps and files~
+::LIB~g10~6~r~19~uptime~Time since the last restart, and load~
+::LIB~g11~6~r~16~service list~Every system service Android has registered~
+::LIB~g12~6~r~24~dumpsys jobscheduler {PKG}~Scheduled background jobs of one app~
+::LIB~s01~7~r~23~settings list global~Every global setting with its value (long)~
+::LIB~s02~7~r~29~device_config list~Every hidden feature switch (DeviceConfig) and its value (long)~
+::LIB~s03~7~c~17~settings put system screen_off_timeout {NUM}~Screen timeout in milliseconds (60000 = 1 minute)~the same command with the number shown as Its value now
+::LIB~s04~7~c~17~settings put system show_touches 1~Show a dot where the screen is touched~settings put system show_touches 0
+::LIB~s05~7~c~30~cmd notification set_dnd priority~Do Not Disturb on, priority only~cmd notification set_dnd off
+::LIB~s06~7~c~24~cmd statusbar expand-notifications~Pull down the notification shade~cmd statusbar collapse
+::LIB~i01~8~r~16~pm list packages -3 -i~Your apps and what installed each (null = adb install)~
+::LIB~i02~8~r~26~cmd appops query-op REQUEST_INSTALL_PACKAGES allow~Apps you allowed to install other apps (blank = none)~
+::LIB~i03~8~r~26~cmd appops get {PKG} REQUEST_INSTALL_PACKAGES~Whether one app may install apps (No operations = never set)~
+::LIB~i04~8~c~26~cmd appops set {PKG} REQUEST_INSTALL_PACKAGES allow~Allow Install unknown apps for one app (if it can install)~cmd appops set {PKG} REQUEST_INSTALL_PACKAGES default
+::LIB~i05~8~c~26~am start -a android.settings.MANAGE_UNKNOWN_APP_SOURCES -d package:{PKG}~Open the Install unknown apps page for one app~Press Back on the phone
+::LIB~i06~8~r~17~settings get global verifier_verify_adb_installs~Are adb installs scanned by Play Protect (1 or null = yes)~
+::LIB~i07~8~c~17~settings put global verifier_verify_adb_installs 0~Skip the Play Protect scan of adb installs (lowers protection)~settings put global verifier_verify_adb_installs 1
 
