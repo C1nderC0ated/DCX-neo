@@ -45,6 +45,10 @@ set t=%ESC%[40m
 set gold=%ESC%[93m
 :: Use the adb folder next to DCX.bat: an admin or shortcut start begins in another directory.
 if exist "!DCX_DIR!adb\" cd /d "!DCX_DIR!adb"
+:: Windows' own tools first: a PATH with a Git or MSYS bin folder ahead of System32 hands DCX GNU
+:: find, sort and timeout, and GNU find reads the line count find /c /v "" as a search of the C:
+:: drive and walks it. This process only; the adb folder goes in front of it next.
+set "PATH=!SystemRoot!\System32;!PATH!"
 :: Put the adb folder on PATH: NoDefaultCurrentDirectoryInExePath=1 stops the current-dir search.
 :: CD and PATH are read late so an exclamation mark in them survives. A folder holding a ; goes
 :: on quoted, since ; separates PATH entries and cmd reads a quoted entry as one.
@@ -1246,7 +1250,8 @@ echo                 %g%[%w%2%g%]%w% Command library        (ready-made commands
 echo                 %g%[%w%3%g%]%w% Logcat capture         (crash log, or record one app)
 echo                 %g%[%w%4%g%]%w% Bootloader info        (fastboot, read-only, USB only)
 echo                 %g%[%w%5%g%]%w% Sideload an update     (an official OTA package, through recovery)
-echo                 %g%[%w%6%g%]%w% Back
+echo                 %g%[%w%6%g%]%w% Show broken apps       (crashing, wrong processor type, too old, leftovers)
+echo                 %g%[%w%7%g%]%w% Back
 set "shm=" & set /p shm="Choose An Option >> "
 call :_noin shm || goto dcx_noinput
 if "!shm!"=="1" goto shell_live
@@ -1254,7 +1259,8 @@ if "!shm!"=="2" goto cmdlib
 if "!shm!"=="3" goto logcap
 if "!shm!"=="4" goto fbinfo
 if "!shm!"=="5" goto sideload
-if "!shm!"=="6" goto menu
+if "!shm!"=="6" goto brokenapps
+if "!shm!"=="7" goto menu
 goto shell
 
 :shell_live
@@ -1271,6 +1277,194 @@ goto shell
 echo  [%r%^^!%w%] No phone answers - check the cable or Wi-Fi ^(adb devices^).
 pause >nul
 goto shell
+:: ===================================================================
+:: Show broken apps: apps that cannot work as installed. Read-only until one is picked for removal.
+:: The phone's answers are parsed by one PowerShell pass; the batch only reads names it validated.
+:: ===================================================================
+:brokenapps
+cls
+title Broken apps
+call :logo
+echo                          %b%[%w% Broken apps %b%]%w%
+echo.
+echo  Looks for apps that cannot work as installed: ones Android saw crash, stop responding or
+echo  fail to start ^(Android 11+ keeps that history; older phones only the crash log since the
+echo  last start^), ones built for another processor type than this phone, ones built for an
+echo  Android too old for it, and data left behind by apps that are gone. Nothing is changed
+echo  until you pick one to remove. System apps are shown, never offered for removal.
+echo.
+set "_bad=!DCX_TMP!\broken"
+if exist "!_bad!\" rd /s /q "!_bad!" >nul 2>&1
+md "!_bad!" >nul 2>&1
+if not exist "!_bad!\" goto brokenapps_notmp
+set "_baabi=" & set "_bamin=" & set "_basrc=none"
+for /f "delims=" %%i in ('adb shell getprop ro.product.cpu.abilist 2^>nul ^<nul') do set "_baabi=%%i"
+for /f "delims=" %%i in ('adb shell getprop ro.build.version.min_supported_target_sdk 2^>nul ^<nul') do set "_bamin=%%i"
+:: Phone text stays out of cmd's parser: a quote or a character outside the list drops the value.
+set "_babad="
+if defined _baabi for /f "eol=a delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.,-" %%c in ("!_baabi!") do set "_babad=1"
+if defined _babad set "_baabi="
+set "_babad="
+if defined _bamin for /f "eol=0 delims=0123456789" %%c in ("!_bamin!") do set "_babad=1"
+if defined _babad set "_bamin="
+echo  Reading the app list ^(this takes a moment on a phone with many apps^)...
+:: Each list ends with a marker: without it the phone did not answer, which is not "nothing found".
+adb shell "dumpsys package packages && echo _DCXEND" <nul >"!_bad!\pk.txt" 2>nul
+findstr /c:"_DCXEND" "!_bad!\pk.txt" >nul 2>&1 || goto brokenapps_noans
+if !SDK! GEQ 30 (
+    adb shell "dumpsys activity exit-info && echo _DCXEND" <nul >"!_bad!\ex.txt" 2>nul
+    findstr /c:"_DCXEND" "!_bad!\ex.txt" >nul 2>&1 && set "_basrc=exit-info"
+    if not "!_basrc!"=="exit-info" del "!_bad!\ex.txt" >nul 2>&1
+) else (
+    adb logcat -b crash -d -v threadtime <nul >"!_bad!\cr.txt" 2>nul
+    if exist "!_bad!\cr.txt" set "_basrc=logcat"
+)
+:: The package picker's list helper: validated names, one per line, in <arg>.ok.
+set "_ppd=!_bad!"
+adb shell "pm list packages -3 --user 0 && echo _DCXEND" <nul >"!_bad!\inst.txt" 2>nul
+findstr /c:"_DCXEND" "!_bad!\inst.txt" >nul 2>&1 || goto brokenapps_noans
+adb shell "pm list packages -u -3 --user 0 && echo _DCXEND" <nul >"!_bad!\all.txt" 2>nul
+findstr /c:"_DCXEND" "!_bad!\all.txt" >nul 2>&1 || goto brokenapps_noans
+call :_pp_list inst
+call :_pp_list all
+set "DCX_BA_DIR=!_bad!" & set "DCX_BA_ABI=!_baabi!" & set "DCX_BA_MIN=!_bamin!" & set "DCX_BA_SDK=!SDK!" & set "DCX_BA_SRC=!_basrc!"
+powershell -NoProfile -Command "$ErrorActionPreference='Stop'; $d=$env:DCX_BA_DIR; $abi=@(($env:DCX_BA_ABI -split ',') | Where-Object { $_ -match '^[A-Za-z0-9_.-]+$' }); $min=0; [void][int]::TryParse($env:DCX_BA_MIN,[ref]$min); $sdk=0; [void][int]::TryParse($env:DCX_BA_SDK,[ref]$sdk); $pk=@{}; $cur=$null; $in=$false; foreach($l in [IO.File]::ReadLines($d+'\pk.txt')){ if($l -eq 'Packages:'){ $in=$true; continue }; if($in -and $l.Length -gt 0 -and $l[0] -ne ' '){ $in=$false }; if(-not $in){ continue }; if($l -match '^  Package \[([A-Za-z][A-Za-z0-9_.]*)\] \('){ $cur=@{abi='';abi2='';tgt=-1;sys=$false;inst='';gone=$false}; $pk[$Matches[1]]=$cur; continue }; if($null -eq $cur){ continue }; if($l -match '^    primaryCpuAbi=(\S+)'){ $cur.abi=$Matches[1] } elseif($l -match '^    secondaryCpuAbi=(\S+)'){ $cur.abi2=$Matches[1] } elseif($l -match '^    versionCode=\S+.* targetSdk=(\d+)'){ $cur.tgt=[int]$Matches[1] } elseif($l -match '^    pkgFlags=\[(.*)\]'){ $cur.sys=((' '+$Matches[1]+' ') -like '* SYSTEM *') } elseif($l -match '^    pkg=null'){ $cur.gone=$true } elseif($l -match '^    User 0: .* installed=(true|false)'){ $cur.inst=$Matches[1] } }; $cr=@{}; function Hit($p,$k,$ts,$keep){ if(-not $cr[$p]){ $cr[$p]=@{c=0;n=0;a=0;s=0;last=''} }; $e=$cr[$p]; $e[$k]=$e[$k]+1; if($keep){ if(-not $e.last){ $e.last=$ts } } else { $e.last=$ts } }; if(Test-Path -LiteralPath ($d+'\ex.txt')){ $cp=$null; $ts=''; foreach($l in [IO.File]::ReadLines($d+'\ex.txt')){ if($l -match '^\s*package: ([A-Za-z][A-Za-z0-9_.]*)\s*$'){ $cp=$Matches[1]; continue }; if($null -eq $cp){ continue }; if($l -match 'timestamp=(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)'){ $ts=$Matches[1] }; if($l -match ' reason=(\d+) '){ $rc=[int]$Matches[1]; if($rc -eq 4){ Hit $cp 'c' $ts $true } elseif($rc -eq 5){ Hit $cp 'n' $ts $true } elseif($rc -eq 6){ Hit $cp 'a' $ts $true } elseif($rc -eq 7){ Hit $cp 's' $ts $true } } } } elseif(Test-Path -LiteralPath ($d+'\cr.txt')){ foreach($l in [IO.File]::ReadLines($d+'\cr.txt')){ $ts=''; if($l -match '^(\d\d-\d\d \d\d:\d\d:\d\d)'){ $ts=$Matches[1] }; if($l -match ' E AndroidRuntime: Process: ([A-Za-z][A-Za-z0-9_.]*)(:\S*)?, PID: '){ Hit $Matches[1] 'c' $ts $false } elseif($l -match ' F DEBUG +: pid: \d+, tid: \d+, name: .*>>> ([A-Za-z][A-Za-z0-9_.]*)(:\S*)? <<<'){ Hit $Matches[1] 'n' $ts $false } } }; $inst=@{}; foreach($n in [IO.File]::ReadLines($d+'\inst.ok')){ $inst[$n]=1 }; $left=New-Object System.Collections.Generic.List[string]; foreach($n in [IO.File]::ReadLines($d+'\all.ok')){ if(-not $inst[$n]){ $left.Add($n) } }; $out=New-Object System.Collections.Generic.List[string]; $nb=0; $ns=0; $has64=($abi -match '64').Count -gt 0; foreach($n in ($pk.Keys | Sort-Object)){ $p=$pk[$n]; $why=New-Object System.Collections.Generic.List[string]; $x=$cr[$n]; if($x){ $t=@(); if($x.c){ $t+=('crashed '+$x.c+' time(s)') }; if($x.n){ $t+=('crashed in native code '+$x.n+' time(s)') }; if($x.a){ $t+=('stopped responding '+$x.a+' time(s)') }; if($x.s){ $t+=('failed to start '+$x.s+' time(s)') }; $w=($t -join ', '); if($x.last){ $w+=' (last: '+$x.last+')' }; $why.Add($w) }; if($p.sys){ if($why.Count){ $out.Add('s|'+$n+'|'+($why -join '; ')); $ns++ }; continue }; if($p.inst -eq 'false' -or $p.gone){ if(-not $inst[$n] -and -not $left.Contains($n)){ $left.Add($n) }; continue }; if($p.abi -and $p.abi -ne 'null' -and $abi.Count -and ($abi -notcontains $p.abi)){ $why.Add('built for another processor type ('+$p.abi+'; this phone runs '+($abi -join ' ')+'), so Android cannot start it') } elseif($sdk -ge 34 -and $has64 -and $p.abi -and $p.abi -ne 'null' -and $p.abi -notmatch '64' -and ($p.abi2 -eq '' -or $p.abi2 -eq 'null')){ $why.Add('32-bit only ('+$p.abi+'): Android 14+ warns at each start that it is not compatible') }; if($min -gt 0 -and $p.tgt -ge 0 -and $p.tgt -lt $min){ $why.Add('built for an old Android (targetSdk '+$p.tgt+'; this phone warns below '+$min+' at each start)') }; if($why.Count){ $out.Add('3|'+$n+'|'+($why -join '; ')); $nb++ } }; foreach($n in ($left | Sort-Object)){ $out.Add('l|'+$n+'|data left behind by an app that is no longer installed') }; [IO.File]::WriteAllLines($d+'\list.txt',$out,[Text.Encoding]::ASCII); [IO.File]::WriteAllText($d+'\sum.txt',('apps='+$pk.Count+' broken='+$nb+' system='+$ns+' left='+$left.Count+' src='+$env:DCX_BA_SRC),[Text.Encoding]::ASCII)"
+:: PowerShell resets the console code page on exit: restore it here.
+chcp 65001 >nul
+set "DCX_BA_DIR=" & set "DCX_BA_ABI=" & set "DCX_BA_MIN=" & set "DCX_BA_SDK=" & set "DCX_BA_SRC="
+if not exist "!_bad!\sum.txt" goto brokenapps_nowork
+
+:brokenapps_show
+cls
+title Broken apps
+call :logo
+echo                          %b%[%w% Broken apps %b%]%w%
+echo.
+set "_basum="
+set /p _basum=<"!_bad!\sum.txt"
+echo  !_basum!
+if "!_basrc!"=="exit-info" echo  Crash history: what Android recorded for each app ^(it keeps the last 16 exits per app^).
+if "!_basrc!"=="logcat" echo  Crash history: the crash log since the phone last started ^(Android 10 and older keep no more^).
+if "!_basrc!"=="none" echo  Crash history: the phone did not hand it over, so crashes are not judged this time.
+if not defined _baabi echo  Processor type: the phone did not say which it runs, so that is not judged this time.
+if not defined _bamin echo  Old apps: the phone has no minimum target Android property, so that is not judged this time.
+echo.
+for /f "delims==" %%v in ('set _ba_ 2^>nul') do set "%%v="
+set "_ban=0" & set "_bas=0"
+for /f "usebackq tokens=1,2,* delims=|" %%a in ("!_bad!\list.txt") do (
+    if "%%a"=="s" (
+        set /a _bas+=1
+        set "_ba_s[!_bas!]=%%b" & set "_ba_sw[!_bas!]=%%c"
+    ) else (
+        set /a _ban+=1
+        set "_ba_k[!_ban!]=%%a" & set "_ba_p[!_ban!]=%%b" & set "_ba_w[!_ban!]=%%c"
+    )
+)
+if "!_ban!"=="0" if "!_bas!"=="0" (
+    echo  [%g%OK%w%] Nothing found: no app crashed, every installed app fits this phone, and no data was left behind.
+    echo.
+    echo Press Any Button To Go Back
+    pause >nul
+    goto shell
+)
+if not "!_ban!"=="0" (
+    echo  Apps you can remove ^(a number below removes the app with its data; reinstall from its store^):
+    for /l %%i in (1,1,!_ban!) do (
+        echo     %g%[%w%%%i%g%]%w% !_ba_p[%%i]!
+        echo        !_ba_w[%%i]!
+    )
+    echo.
+)
+if not "!_bas!"=="0" (
+    echo  System apps with a crash history ^(not offered for removal - update them or clear their storage^):
+    for /l %%i in (1,1,!_bas!) do (
+        echo      - !_ba_s[%%i]!
+        echo        !_ba_sw[%%i]!
+    )
+    echo.
+)
+
+:brokenapps_ask
+set "_bac=" & set /p _bac="Number to remove (Enter = back, S = save this list to dcx_logs) >> "
+call :_noin _bac || goto dcx_noinput
+if not defined _bac goto shell
+if /i "!_bac!"=="S" goto brokenapps_save
+set "_babad="
+for /f "eol=0 delims=0123456789" %%c in ("!_bac!") do set "_babad=1"
+if defined _babad goto brokenapps_ask
+if "!_bac:~0,1!"=="0" goto brokenapps_ask
+if not defined _ba_p[!_bac!] goto brokenapps_ask
+for /f "delims=" %%k in ("!_bac!") do ( set "_bapkg=!_ba_p[%%k]!" & set "_bakind=!_ba_k[%%k]!" )
+echo.
+if "!_bakind!"=="l" (
+    echo  About to remove the leftover data of !_bapkg! ^(the app itself is already gone^).
+) else (
+    echo  About to remove !_bapkg! with its data. Reinstall it from its store if you want it back.
+)
+echo    [Y] Remove    [N] Cancel
+:: Ctrl+C makes choice return 0; treat it as No.
+choice /c:YN /n >nul
+if errorlevel 2 goto brokenapps_show
+if not errorlevel 1 goto brokenapps_show
+echo.
+call :_act_reset
+call :_ba_uninst !_bapkg! !_bakind!
+call :_act_summary
+echo.
+echo  The list is read again from the phone.
+pause >nul
+goto brokenapps
+
+:brokenapps_save
+if not exist "!LOGDIR!\" md "!LOGDIR!" >nul 2>&1
+call :_lib_ts
+set "_basave=!LOGDIR!\broken_apps_!_lbts!.txt"
+copy /y "!_bad!\list.txt" "!_basave!" >nul 2>&1
+if exist "!_basave!" echo  [%g%+%w%] Saved to !_basave!
+if not exist "!_basave!" echo  [%r%^^!%w%] Could not save to !LOGDIR! - is the folder writable?
+goto brokenapps_ask
+
+:brokenapps_noans
+echo  [%r%^^!%w%] The phone did not answer, so nothing was judged - check the connection ^(adb devices^).
+pause >nul
+goto shell
+
+:brokenapps_notmp
+echo  [%r%^^!%w%] Could not make !_bad! - is TEMP writable?
+pause >nul
+goto shell
+
+:brokenapps_nowork
+echo  [%r%^^!%w%] The answers could not be read ^(the PowerShell step wrote nothing^), so nothing was judged.
+pause >nul
+goto shell
+
+:_ba_uninst
+:: %1 = a package name the worker validated, %2 = 3 (installed third-party app) or l (leftover data).
+:: Only pm's own "Success" line counts, and the phone is asked again afterwards. A third-party app
+:: removed for user 0 is gone from the phone - install-existing cannot bring it back - so -k is not
+:: used: its data would only be the next leftover. Counts into DCX_VOK / DCX_VFAIL.
+set "_pmok=" & set "_pmmsg="
+if "%~2"=="l" (
+    for /f "delims=" %%r in ('adb shell pm uninstall %~1 ^<nul 2^>^&1') do ( if "%%r"=="Success" set "_pmok=1"
+        set "_pmmsg=%%r" )
+) else (
+    for /f "delims=" %%r in ('adb shell pm uninstall --user 0 %~1 ^<nul 2^>^&1') do ( if "%%r"=="Success" set "_pmok=1"
+        set "_pmmsg=%%r" )
+)
+if not defined _pmok (
+    if not defined _pmmsg set "_pmmsg=no answer from the phone"
+    echo [%r%^^!%w%] %~1 not removed: !_pmmsg!
+    set /a DCX_VFAIL+=1
+    exit /b 1
+)
+:: Read back: the leftover must be gone from the -u list, the app from the plain list.
+if "%~2"=="l" ( call :_pkg_installed %~1 "-u --user 0" ) else ( call :_pkg_installed %~1 "--user 0" )
+if errorlevel 2 ( echo [%y%WARN%w%] %~1: pm said Success, but the phone did not answer the check afterwards. & set /a DCX_VFAIL+=1 & set /a DCX_VUNK+=1 & exit /b 1 )
+if errorlevel 1 ( echo [%g%+%w%] %~1 removed. & set /a DCX_VOK+=1 & exit /b 0 )
+echo [%r%^^!%w%] %~1: pm said Success, but it is still listed.
+set /a DCX_VFAIL+=1
+exit /b 1
 :: ===================================================================
 :: Command library: ready-made adb shell commands, each with a note. Read-only ones run at once; a
 :: change asks first and shows its undo, a delete asks in red. Entries are the ::LIB~ lines at the
@@ -2531,6 +2725,7 @@ if exist "!DCX_TMP!\pkgpick\" rd /s /q "!DCX_TMP!\pkgpick" >nul 2>&1
 if exist "!DCX_TMP!\cmdlib\" rd /s /q "!DCX_TMP!\cmdlib" >nul 2>&1
 if exist "!DCX_TMP!\fastboot\" rd /s /q "!DCX_TMP!\fastboot" >nul 2>&1
 if exist "!DCX_TMP!\sideload\" rd /s /q "!DCX_TMP!\sideload" >nul 2>&1
+if exist "!DCX_TMP!\broken\" rd /s /q "!DCX_TMP!\broken" >nul 2>&1
 del "!DCX_TMP!\mdns.txt" "!DCX_TMP!\mdns_ok.txt" "!DCX_TMP!\pair.txt" "!DCX_TMP!\connect.txt" >nul 2>&1
 del "!DCX_TMP!\lcalive.txt" "!DCX_TMP!\logview.txt" "!DCX_TMP!\lcpath.txt" "!DCX_TMP!\lbnow.txt" >nul 2>&1
 del "!DCX_TMP!\bench.txt" "!DCX_TMP!\usb.txt" "!DCX_TMP!\bklist.txt" "!DCX_TMP!\bkpick.txt" "!DCX_TMP!\pkchk.txt" "!DCX_TMP!\exp_list.txt" >nul 2>&1
